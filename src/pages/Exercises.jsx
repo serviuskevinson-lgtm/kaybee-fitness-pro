@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
 import { Dumbbell, Search, AlertCircle, PlayCircle } from 'lucide-react';
+// Mise à jour des clés Vercel
 
 // --- TES VRAIES CLÉS (Celles que tu viens d'envoyer) ---
 const firebaseConfig = {
