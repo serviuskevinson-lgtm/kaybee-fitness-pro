@@ -1,9 +1,9 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app"; // <--- MODIF 1 : Ajout de getApps/getApp
 import { getAuth, signOut } from "firebase/auth";
 import { getFirestore, collection, getDocs, doc, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// TA CONFIG (Celle que tu avais dans ton HTML)
+// TA CONFIG
 const firebaseConfig = {
   apiKey: "AIzaSyDb7k5657-5Mxu4Dsm6W4XMM1aglwX97s0",
   authDomain: "kaybee-fitness.firebaseapp.com",
@@ -13,7 +13,10 @@ const firebaseConfig = {
   appId: "1:194256924870:web:67660eb37d3a52e87767c7"
 };
 
-const app = initializeApp(firebaseConfig);
+// <--- MODIF 2 : LA SÉCURITÉ ANTI-PLANTAGE
+// Si une app existe déjà (lancée par l'autre fichier), on la récupère. Sinon, on l'initialise.
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);

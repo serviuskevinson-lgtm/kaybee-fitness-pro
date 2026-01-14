@@ -1,61 +1,62 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { createPageUrl } from '../lib/utils';
-import { base44 } from '@/api/base44Client';
-import { 
-  Home, Dumbbell, UtensilsCrossed, Zap, TrendingUp, 
-  Image, Users, Trophy, LogOut, Menu, X, Award, MessageCircle
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext'; // Nouveau système d'auth
+import { doc, getDoc } from 'firebase/firestore'; // Pour charger le niveau du profil
+import { db } from "@/lib/firebase";
+
+// Nouveaux composants de Sidebar
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import AppSidebar from './Sidebar'; // Le fichier Sidebar.jsx qu'on a créé juste avant
+
+import { Award, Menu } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 export default function Layout({ children, currentPageName }) {
-  const [user, setUser] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { currentUser } = useAuth(); // On récupère l'utilisateur connecté via Firebase
   const [userProfile, setUserProfile] = useState(null);
-  const location = useLocation();
 
+  // On charge les infos détaillées (Niveau, etc.) depuis Firestore
   useEffect(() => {
-    loadUser();
-  }, []);
+    const fetchProfile = async () => {
+      if (currentUser?.uid) {
+        try {
+          const docRef = doc(db, "users", currentUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            setUserProfile(docSnap.data());
+          }
+        } catch (error) {
+          console.error("Erreur chargement profil", error);
+        }
+      }
+    };
+    fetchProfile();
+  }, [currentUser]);
 
-  const loadUser = async () => {
-    try {
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-      const profile = await base44.entities.User.filter({ email: currentUser.email });
-      if (profile && profile.length > 0) setUserProfile(profile[0]);
-    } catch (error) { console.error('Error loading user:', error); }
+  // Fonction pour les initiales (basée sur Firebase displayName ou email)
+  const getInitials = () => {
+    if (userProfile?.full_name) return userProfile.full_name.split(' ')[0][0];
+    if (currentUser?.email) return currentUser.email[0].toUpperCase();
+    return 'K';
   };
 
-  const handleLogout = async () => { await base44.auth.logout(); };
-
-  const menuItems = [
-    { name: 'Dashboard', icon: Home, page: 'Dashboard' },
-    { name: 'Exercices', icon: Dumbbell, page: 'Exercises' },
-    { name: 'Repas', icon: UtensilsCrossed, page: 'Meals' },
-    { name: 'Session', icon: Zap, page: 'Session' },
-    { name: 'Performance', icon: TrendingUp, page: 'Performance' },
-    { name: 'Galerie', icon: Image, page: 'Gallery' },
-    { name: 'Coach', icon: Users, page: 'Coach' },
-    { name: 'Messages', icon: MessageCircle, page: 'Messages' },
-    { name: 'Communauté', icon: Users, page: 'Community' },
-    { name: 'Défis', icon: Trophy, page: 'Challenges' }
-  ];
-
-  const getInitials = () => user?.full_name?.split(' ')[0][0] || 'K';
-
   return (
-    <div className="min-h-screen text-white relative font-sans selection:bg-[#00f5d4] selection:text-black">
-      {/* GLOBAL STYLES & BACKGROUND */}
+    <SidebarProvider>
+      {/* GLOBAL STYLES & BACKGROUND (Ton style original conservé) */}
       <style>{`
         :root {
           --kb-purple: #7b2cbf;
           --kb-glow: #9d4edd;
           --kb-cyan: #00f5d4;
           --kb-dark: #0a0a0f;
+          --sidebar-background: #0a0a0f;
+          --sidebar-foreground: #ffffff;
+          --sidebar-border: rgba(123, 44, 191, 0.3);
+          --sidebar-accent: rgba(123, 44, 191, 0.2);
+          --sidebar-accent-foreground: #00f5d4;
+          --sidebar-ring: #00f5d4;
         }
         
-        /* BACKGROUND FIXE */
         body {
           background-color: var(--kb-dark);
           background-image: 
@@ -64,15 +65,12 @@ export default function Layout({ children, currentPageName }) {
           background-size: cover;
           background-attachment: fixed;
           background-position: center;
-          color: white !important; /* Force le blanc partout */
+          color: white !important;
         }
 
-        /* FORCE TEXTE BLANC SUR LES ÉLÉMENTS QUI SERAIENT NOIRS */
-        h1, h2, h3, h4, h5, h6, p, span, div, li {
-           color: inherit;
-        }
+        h1, h2, h3, h4, h5, h6, p, span, div, li { color: inherit; }
         
-        /* CARDS AVEC GLASSMORPHISM & NEON */
+        /* Tes classes cartes existantes */
         .kb-card {
           background: rgba(20, 20, 25, 0.6);
           border: 1px solid rgba(123, 44, 191, 0.3);
@@ -80,16 +78,15 @@ export default function Layout({ children, currentPageName }) {
           box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
           border-radius: 16px;
           transition: all 0.3s ease;
-          color: white; /* Assure que le texte dans les cartes est blanc */
+          color: white;
         }
-
         .kb-card:hover {
           border-color: var(--kb-glow);
           box-shadow: 0 0 25px rgba(123, 44, 191, 0.15);
           transform: translateY(-2px);
         }
 
-        /* SCROLLBAR CUSTOM */
+        /* Scrollbar */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #0a0a0f; }
         ::-webkit-scrollbar-thumb { 
@@ -98,76 +95,54 @@ export default function Layout({ children, currentPageName }) {
         }
       `}</style>
 
-      {/* HEADER */}
-      <header className="fixed top-0 w-full h-20 border-b border-[#7b2cbf]/30 bg-[#0a0a0f]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-8 z-50 shadow-[0_0_15px_rgba(123,44,191,0.2)]">
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-2xl hover:text-[#00f5d4] transition p-2">
-          {sidebarOpen ? <X /> : <Menu />}
-        </button>
-        
-        {/* LOGO ORIGINAL REMIS ICI */}
-        <Link to={createPageUrl('Dashboard')} className="flex flex-col items-center hover:scale-105 transition-transform duration-300">
-           <img 
-            src="https://firebasestorage.googleapis.com/v0/b/kaybee-fitness.firebasestorage.app/o/Logo%20.png?alt=media&token=8d0e94d1-3989-4894-b249-10f5945cf172" 
-            alt="KAYBEE FITNESS" 
-            className="h-14 object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
-          />
-        </Link>
-        
-        <div className="flex items-center gap-4">
-          <NotificationBell userEmail={user?.email} />
-          {userProfile?.level && (
-            <div className="hidden md:flex items-center gap-1 bg-[#7b2cbf]/20 border border-[#7b2cbf] px-3 py-1 rounded-full shadow-[0_0_10px_rgba(123,44,191,0.3)]">
-              <Award className="w-4 h-4 text-[#fdcb6e]" />
-              <span className="text-xs font-bold text-[#e0e0e0]">Niv. {userProfile.level}</span>
-            </div>
-          )}
-          <Link to={createPageUrl('Profile')}>
-            <div className="w-10 h-10 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] rounded-full flex items-center justify-center font-bold text-black ring-2 ring-white/10 hover:ring-[#00f5d4] transition shadow-lg">
-              {getInitials()}
-            </div>
-          </Link>
-        </div>
-      </header>
+      {/* LE NOUVEAU MENU LATÉRAL */}
+      <AppSidebar />
 
-      {/* SIDEBAR */}
-      <nav className={`fixed left-0 top-20 w-72 h-[calc(100vh-80px)] bg-[#0a0a0f]/95 border-r border-[#7b2cbf]/30 transition-transform duration-300 z-40 backdrop-blur-xl ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="py-6 flex flex-col h-full">
-          <div className="space-y-1 px-2">
-            {menuItems.map((item) => {
-              const isActive = location.pathname === createPageUrl(item.page) || (item.page === 'Dashboard' && location.pathname === '/');
-              return (
-                <Link
-                  key={item.page}
-                  to={createPageUrl(item.page)}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`flex items-center gap-4 px-6 py-4 font-bold text-sm rounded-xl transition-all duration-200 ${
-                    isActive
-                      ? 'bg-gradient-to-r from-[#7b2cbf]/20 to-transparent text-[#00f5d4] border-l-4 border-[#00f5d4]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <item.icon className={`w-5 h-5 ${isActive ? 'text-[#00f5d4] drop-shadow-[0_0_5px_rgba(0,245,212,0.5)]' : ''}`} />
-                  {item.name}
-                </Link>
-              );
-            })}
-          </div>
+      {/* LE CONTENU PRINCIPAL */}
+      <SidebarInset className="bg-transparent">
+        {/* HEADER */}
+        <header className="sticky top-0 w-full h-20 border-b border-[#7b2cbf]/30 bg-[#0a0a0f]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-8 z-50 shadow-[0_0_15px_rgba(123,44,191,0.2)]">
           
-          <div className="mt-auto px-6 pb-8">
-            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-6 py-4 font-bold text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition border border-red-900/30">
-              <LogOut className="w-5 h-5" />
-              Déconnexion
-            </button>
+          {/* Groupe Gauche : Trigger + Logo + Titre Page */}
+          <div className="flex items-center gap-4">
+            <SidebarTrigger className="text-white hover:text-[#00f5d4] scale-125" />
+            
+            <Link to="/" className="flex items-center gap-2 md:hidden">
+               <div className="h-8 w-8 bg-yellow-500 rounded flex items-center justify-center font-bold text-black">K</div>
+            </Link>
+
+            {/* Séparateur et Titre */}
+            <div className="hidden md:block w-[1px] h-6 bg-gray-700 mx-2" />
+            <h1 className="text-xl font-bold text-[#00f5d4] drop-shadow-sm hidden md:block">
+              {currentPageName}
+            </h1>
           </div>
-        </div>
-      </nav>
+        
+          {/* Groupe Droite : Notifications + Profil */}
+          <div className="flex items-center gap-4">
+            <NotificationBell userEmail={currentUser?.email} />
+            
+            {userProfile?.level && (
+              <div className="hidden md:flex items-center gap-1 bg-[#7b2cbf]/20 border border-[#7b2cbf] px-3 py-1 rounded-full shadow-[0_0_10px_rgba(123,44,191,0.3)]">
+                <Award className="w-4 h-4 text-[#fdcb6e]" />
+                <span className="text-xs font-bold text-[#e0e0e0]">Niv. {userProfile.level}</span>
+              </div>
+            )}
+            
+            <Link to="/profile">
+              <div className="w-10 h-10 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] rounded-full flex items-center justify-center font-bold text-black ring-2 ring-white/10 hover:ring-[#00f5d4] transition shadow-lg">
+                {getInitials()}
+              </div>
+            </Link>
+          </div>
+        </header>
 
-      {/* MAIN CONTENT */}
-      <main className={`pt-28 pb-10 px-4 md:px-8 max-w-7xl mx-auto transition-all duration-300 ${sidebarOpen ? 'md:ml-72' : ''}`}>
-        {children}
-      </main>
+        {/* CONTENU DE LA PAGE */}
+        <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
+           {children}
+        </main>
 
-      {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />}
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
