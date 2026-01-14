@@ -2,8 +2,6 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 import { getStorage } from "firebase/storage";
-
-// NOUVEAUX IMPORTS POUR LA SÉCURITÉ
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
@@ -17,22 +15,24 @@ const firebaseConfig = {
   measurementId: "G-SPMZX25BQD"
 };
 
-// Singleton pour éviter les erreurs "App already exists"
+// Singleton
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // --- ACTIVATION DE LA SÉCURITÉ (APP CHECK) ---
 if (typeof window !== "undefined") {
-  // Active le mode DEBUG en local pour que localhost ne soit pas bloqué
-  // (Pense à aller chercher le "Debug Token" dans ta console navigateur si besoin)
-  if (process.env.NODE_ENV === 'development') {
-      window.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  // CORRECTION ICI : Utilisation de import.meta.env pour Vite
+  if (import.meta.env.DEV) {
+      self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
   }
 
-  initializeAppCheck(app, {
-    // J'ai inséré TA Clé du Site ici :
-    provider: new ReCaptchaV3Provider('6LdpSkosAAAAAF8_w17-tAzT2oHDMHGU2tho6JQZ'),
-    isTokenAutoRefreshEnabled: true
-  });
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider('6LdpSkosAAAAAF8_w17-tAzT2oHDMHGU2tho6JQZ'),
+      isTokenAutoRefreshEnabled: true
+    });
+  } catch (e) {
+    console.warn("Erreur init App Check (peut être ignoré en dev):", e);
+  }
 }
 
 export const db = getFirestore(app);
