@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore'; // <--- AJOUT updateDoc
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,8 +17,9 @@ import {
 import { motion } from 'framer-motion';
 
 // --- CONFIGURATION API ---
-// ⚠️ TA CLÉ OPENAI
-const OPENAI_API_KEY = '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';
+// 🔒 SÉCURITÉ : La clé est maintenant chargée depuis le fichier .env
+// Assure-toi d'avoir créé le fichier .env à la racine avec : VITE_OPENAI_API_KEY=sk-...
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 
 const SPORTS_LIST = [
   "Musculation", "CrossFit", "Yoga", "Pilates", "Boxe", "MMA",
@@ -34,7 +35,7 @@ export default function Community() {
   const [isLoading, setIsLoading] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [selectedCoach, setSelectedCoach] = useState(null);
-  const [isHiring, setIsHiring] = useState(false); // État pour le chargement du bouton d'embauche
+  const [isHiring, setIsHiring] = useState(false);
 
   // --- FILTRES ---
   const [location, setLocation] = useState('');
@@ -67,7 +68,6 @@ export default function Community() {
         results = results.filter(c => c.city && c.city.toLowerCase().includes(location.toLowerCase()));
       }
       results = results.filter(c => (c.priceStart || 0) <= budget[0]);
-      // Note: Pour sessionType, il faudrait que les coachs aient ce champ dans leur profil
 
       setCoaches(results);
 
@@ -85,6 +85,12 @@ export default function Community() {
 
   // --- 2. FONCTION RECHERCHE IA ---
   const searchRealPlacesWithAI = async (loc, sport) => {
+    // Vérification de sécurité
+    if (!OPENAI_API_KEY) {
+        console.warn("Clé API OpenAI manquante. Vérifiez le fichier .env");
+        return;
+    }
+
     setIsAiLoading(true);
     const sportTerm = sport === 'all' ? 'Fitness Gyms' : sport;
     const prompt = `Tu es un assistant de recherche locale.
@@ -138,26 +144,24 @@ export default function Community() {
     }
   };
 
-  // --- 3. FONCTION D'EMBAUCHE (LE LIEN CRUCIAL) ---
+  // --- 3. FONCTION D'EMBAUCHE ---
   const handleHireCoach = async () => {
     if (!currentUser || !selectedCoach) return;
     
-    // Confirmation simple
     if(!window.confirm(`Voulez-vous engager ${selectedCoach.full_name || selectedCoach.name} comme votre coach ?`)) return;
 
     setIsHiring(true);
     try {
-        // Mise à jour de MON profil utilisateur
         const myProfileRef = doc(db, "users", currentUser.uid);
         
         await updateDoc(myProfileRef, {
-            coachId: selectedCoach.id, // <--- C'est ICI que la magie opère
+            coachId: selectedCoach.id,
             coachName: selectedCoach.full_name || selectedCoach.name,
             joinedCoachAt: new Date().toISOString()
         });
 
         alert(`Félicitations ! Vous faites maintenant partie de l'équipe de ${selectedCoach.full_name || selectedCoach.name}.`);
-        setSelectedCoach(null); // Fermer le modal
+        setSelectedCoach(null);
         
     } catch (e) {
         console.error("Erreur hiring", e);
@@ -282,7 +286,7 @@ export default function Community() {
         {/* --- RÉSULTATS --- */}
         <div className="lg:col-span-3 space-y-8">
           
-          {/* Section Coachs Kaybee (Certifiés) */}
+          {/* Section Coachs Kaybee */}
           {coaches.length > 0 && (
             <div>
               <h2 className="text-2xl font-black text-white italic uppercase mb-4 flex items-center gap-2">
@@ -324,7 +328,7 @@ export default function Community() {
             </div>
           )}
 
-          {/* Section Résultats IA (VRAIS LIEUX) */}
+          {/* Section Résultats IA */}
           {(realWorldResults.length > 0 || isAiLoading) && (
             <div className={coaches.length > 0 ? "pt-8 border-t border-gray-800" : ""}>
                <div className="flex items-center justify-between mb-4">
@@ -345,11 +349,9 @@ export default function Community() {
                      <motion.div key={result.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                        <Card className="kb-card bg-[#1a1a20] border-gray-800 hover:border-[#9d4edd] transition-all cursor-pointer group h-full" onClick={() => setSelectedCoach(result)}>
                           <div className="flex h-full">
-                             {/* Image à gauche */}
                              <div className="w-1/3 bg-gray-900 relative">
                                <img src={result.coverImage} className="w-full h-full object-cover opacity-80" />
                              </div>
-                             {/* Contenu à droite */}
                              <div className="flex-1 p-4 flex flex-col justify-between">
                                 <div>
                                   <div className="flex justify-between items-start">
@@ -362,13 +364,13 @@ export default function Community() {
                                   </div>
                                 </div>
                                 <div className="flex justify-between items-end mt-2">
-                                   <div>
-                                      <p className="text-[10px] text-gray-500">Est.</p>
-                                      <p className="text-white font-black">~{result.estimated_price}$</p>
-                                   </div>
-                                   <Button size="sm" variant="outline" className="h-7 text-xs border-gray-600 hover:bg-[#9d4edd] hover:text-white hover:border-[#9d4edd]">
-                                     <ExternalLink size={12} className="mr-1"/> Infos
-                                   </Button>
+                                     <div>
+                                        <p className="text-[10px] text-gray-500">Est.</p>
+                                        <p className="text-white font-black">~{result.estimated_price}$</p>
+                                     </div>
+                                     <Button size="sm" variant="outline" className="h-7 text-xs border-gray-600 hover:bg-[#9d4edd] hover:text-white hover:border-[#9d4edd]">
+                                       <ExternalLink size={12} className="mr-1"/> Infos
+                                     </Button>
                                 </div>
                              </div>
                           </div>
@@ -398,9 +400,9 @@ export default function Community() {
             <div className="flex flex-col md:flex-row h-[80vh] md:h-[600px]">
               {/* Colonne Gauche : Visuel */}
               <div className="md:w-5/12 bg-gray-900 relative">
-                 <img src={selectedCoach.coverImage || selectedCoach.avatar || "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800"} className="w-full h-full object-cover" />
-                 <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-90"></div>
-                 <div className="absolute bottom-6 left-6 right-6">
+                  <img src={selectedCoach.coverImage || selectedCoach.avatar || "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800"} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-90"></div>
+                  <div className="absolute bottom-6 left-6 right-6">
                     <h2 className="text-2xl font-black text-white leading-tight mb-1">{selectedCoach.full_name || selectedCoach.name}</h2>
                     <p className="text-[#00f5d4] font-bold text-xs uppercase mb-4">{selectedCoach.specialties?.join(' • ')}</p>
                     
@@ -415,20 +417,19 @@ export default function Community() {
                       </div>
                     ) : (
                       <div className="flex gap-2 flex-col">
-                         {/* BOUTON D'EMBAUCHE (Pour Coachs Internes) */}
-                         <Button 
+                          {/* BOUTON D'EMBAUCHE (Pour Coachs Internes) */}
+                          <Button 
                             onClick={handleHireCoach} 
                             disabled={isHiring}
                             className="w-full bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] hover:scale-105 transition-transform font-black rounded-full text-black"
-                         >
-                            {isHiring ? <Loader2 className="animate-spin mr-2"/> : <Handshake className="mr-2 h-5 w-5"/>}
-                            ENGAGER CE COACH
-                         </Button>
-                         
-                         {/* Option secondaire : Message */}
-                         <Button variant="outline" className="w-full border-gray-600 hover:bg-white hover:text-black rounded-full">
+                          >
+                             {isHiring ? <Loader2 className="animate-spin mr-2"/> : <Handshake className="mr-2 h-5 w-5"/>}
+                             ENGAGER CE COACH
+                          </Button>
+                          
+                          <Button variant="outline" className="w-full border-gray-600 hover:bg-white hover:text-black rounded-full">
                             ENVOYER MESSAGE
-                         </Button>
+                          </Button>
                       </div>
                     )}
                  </div>
@@ -443,24 +444,24 @@ export default function Community() {
                     </TabsList>
 
                     <TabsContent value="about" className="space-y-4">
-                       <div className="flex items-start justify-between">
+                        <div className="flex items-start justify-between">
                           <div>
                             <h4 className="font-bold text-white">Bio</h4>
                             <p className="text-gray-300 text-sm mt-1 leading-relaxed">{selectedCoach.bio}</p>
                           </div>
-                       </div>
-                       
-                       {selectedCoach.address && (
-                         <div className="p-3 bg-black/30 rounded-lg border border-gray-800 flex items-center gap-3">
+                        </div>
+                        
+                        {selectedCoach.address && (
+                          <div className="p-3 bg-black/30 rounded-lg border border-gray-800 flex items-center gap-3">
                             <MapPin className="text-[#00f5d4]"/>
                             <div>
                                <p className="text-xs text-gray-500 uppercase font-bold">Adresse</p>
                                <p className="text-white text-sm font-bold">{selectedCoach.address}</p>
                             </div>
-                         </div>
-                       )}
+                          </div>
+                        )}
 
-                       <div className="grid grid-cols-2 gap-4 mt-2">
+                        <div className="grid grid-cols-2 gap-4 mt-2">
                           <div className="p-3 bg-black/30 rounded-lg border border-gray-800 text-center">
                              <p className="text-[10px] text-gray-500 uppercase font-bold">Avis</p>
                              <p className="text-white font-bold flex justify-center items-center gap-1">{selectedCoach.rating} <Star size={12} className="fill-white"/></p>
@@ -469,20 +470,20 @@ export default function Community() {
                              <p className="text-[10px] text-gray-500 uppercase font-bold">Années d'Exp.</p>
                              <p className="text-[#00f5d4] font-bold">{selectedCoach.yearsExperience || "N/A"}</p>
                           </div>
-                       </div>
+                        </div>
                     </TabsContent>
 
                     <TabsContent value="details" className="space-y-4">
-                       {selectedCoach.isExternal ? (
-                         <div className="text-center py-10">
-                            <Globe size={48} className="mx-auto text-gray-600 mb-4"/>
-                            <p className="text-gray-400 text-sm mb-4">Ce lieu a été identifié par notre IA comme correspondant à vos critères.</p>
-                            <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-500 text-xs text-left">
-                               Note : Les tarifs et disponibilités peuvent varier. Vérifiez directement via Google Maps ou leur site officiel.
-                            </div>
-                         </div>
-                       ) : (
-                         <div className="space-y-3">
+                        {selectedCoach.isExternal ? (
+                          <div className="text-center py-10">
+                             <Globe size={48} className="mx-auto text-gray-600 mb-4"/>
+                             <p className="text-gray-400 text-sm mb-4">Ce lieu a été identifié par notre IA comme correspondant à vos critères.</p>
+                             <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-500 text-xs text-left">
+                                Note : Les tarifs et disponibilités peuvent varier. Vérifiez directement via Google Maps ou leur site officiel.
+                             </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
                             <h4 className="font-bold text-white text-sm">Tarifs & Offres</h4>
                             {selectedCoach.rates && selectedCoach.rates.length > 0 ? (
                                 selectedCoach.rates.map((rate, i) => (
@@ -505,8 +506,8 @@ export default function Community() {
                                   <p className="text-white font-bold text-sm">Sur RDV</p>
                                </div>
                             </div>
-                         </div>
-                       )}
+                          </div>
+                        )}
                     </TabsContent>
                  </Tabs>
               </div>
