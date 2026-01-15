@@ -1,21 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext'; // Nouveau système d'auth
-import { doc, getDoc } from 'firebase/firestore'; // Pour charger le niveau du profil
+import { useAuth } from '@/context/AuthContext';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from "@/lib/firebase";
 
 // Nouveaux composants de Sidebar
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
-import AppSidebar from './Sidebar'; // Le fichier Sidebar.jsx qu'on a créé juste avant
+import AppSidebar from './Sidebar';
 
-import { Award, Menu } from 'lucide-react';
+import { Award } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 export default function Layout({ children, currentPageName }) {
-  const { currentUser } = useAuth(); // On récupère l'utilisateur connecté via Firebase
+  const { currentUser } = useAuth();
   const [userProfile, setUserProfile] = useState(null);
 
-  // On charge les infos détaillées (Niveau, etc.) depuis Firestore
   useEffect(() => {
     const fetchProfile = async () => {
       if (currentUser?.uid) {
@@ -33,7 +32,6 @@ export default function Layout({ children, currentPageName }) {
     fetchProfile();
   }, [currentUser]);
 
-  // Fonction pour les initiales (basée sur Firebase displayName ou email)
   const getInitials = () => {
     if (userProfile?.full_name) return userProfile.full_name.split(' ')[0][0];
     if (currentUser?.email) return currentUser.email[0].toUpperCase();
@@ -42,7 +40,6 @@ export default function Layout({ children, currentPageName }) {
 
   return (
     <SidebarProvider>
-      {/* GLOBAL STYLES & BACKGROUND (Ton style original conservé) */}
       <style>{`
         :root {
           --kb-purple: #7b2cbf;
@@ -70,7 +67,6 @@ export default function Layout({ children, currentPageName }) {
 
         h1, h2, h3, h4, h5, h6, p, span, div, li { color: inherit; }
         
-        /* Tes classes cartes existantes */
         .kb-card {
           background: rgba(20, 20, 25, 0.6);
           border: 1px solid rgba(123, 44, 191, 0.3);
@@ -86,7 +82,6 @@ export default function Layout({ children, currentPageName }) {
           transform: translateY(-2px);
         }
 
-        /* Scrollbar */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #0a0a0f; }
         ::-webkit-scrollbar-thumb { 
@@ -95,30 +90,41 @@ export default function Layout({ children, currentPageName }) {
         }
       `}</style>
 
-      {/* LE NOUVEAU MENU LATÉRAL */}
       <AppSidebar />
 
-      {/* LE CONTENU PRINCIPAL */}
       <SidebarInset className="bg-transparent">
-        {/* HEADER */}
-        <header className="sticky top-0 w-full h-20 border-b border-[#7b2cbf]/30 bg-[#0a0a0f]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-8 z-50 shadow-[0_0_15px_rgba(123,44,191,0.2)]">
+        {/* HEADER avec position relative pour centrer le logo */}
+        <header className="sticky top-0 w-full h-20 border-b border-[#7b2cbf]/30 bg-[#0a0a0f]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-8 z-50 shadow-[0_0_15px_rgba(123,44,191,0.2)] relative">
           
-          {/* Groupe Gauche : Trigger + Logo + Titre Page */}
+          {/* Groupe Gauche */}
           <div className="flex items-center gap-4">
             <SidebarTrigger className="text-white hover:text-[#00f5d4] scale-125" />
             
-            <Link to="/" className="flex items-center gap-2 md:hidden">
-               <div className="h-8 w-8 bg-yellow-500 rounded flex items-center justify-center font-bold text-black">K</div>
-            </Link>
+            {/* J'ai retiré le logo d'ici pour éviter le doublon */}
 
-            {/* Séparateur et Titre */}
             <div className="hidden md:block w-[1px] h-6 bg-gray-700 mx-2" />
             <h1 className="text-xl font-bold text-[#00f5d4] drop-shadow-sm hidden md:block">
               {currentPageName}
             </h1>
           </div>
+
+          {/* --- LOGO CENTRAL FLOTTANT (Mobile ET Desktop) --- */}
+          {/* J'ai enlevé 'hidden' pour qu'il s'affiche tout le temps */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none justify-center flex">
+            <Link
+              to="/"
+              className="pointer-events-auto hover:scale-110 transition-transform duration-300 drop-shadow-[0_0_20px_rgba(123,44,191,0.6)]"
+            >
+              {/* h-8 pour mobile, md:h-12 pour desktop */}
+              <img 
+                src="/logo.png" 
+                alt="Kaybee Logo" 
+                className="h-8 md:h-12 w-auto object-contain" 
+              />
+            </Link>
+          </div>
         
-          {/* Groupe Droite : Notifications + Profil */}
+          {/* Groupe Droite */}
           <div className="flex items-center gap-4">
             <NotificationBell userEmail={currentUser?.email} />
             

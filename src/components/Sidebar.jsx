@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import ClientSelector from '@/components/coach/ClientSelector';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -12,7 +15,8 @@ import {
   Trophy,
   LogOut,
   User,
-  Users
+  Users,
+  CreditCard
 } from 'lucide-react';
 
 import {
@@ -30,8 +34,22 @@ import {
 
 export default function AppSidebar() {
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
+  const [isCoach, setIsCoach] = useState(false);
+
+  // Vérifier si l'utilisateur est un coach pour afficher les outils
+  useEffect(() => {
+    const checkRole = async () => {
+        if(currentUser) {
+            const snap = await getDoc(doc(db, "users", currentUser.uid));
+            if(snap.exists() && snap.data().role === 'coach') {
+                setIsCoach(true);
+            }
+        }
+    };
+    checkRole();
+  }, [currentUser]);
 
   const handleLogout = async () => {
     try {
@@ -54,25 +72,35 @@ export default function AppSidebar() {
     { title: "Communauté", url: "/community", icon: Users },
   ];
 
+  // Ajouter Paiements si c'est un coach
+  if (isCoach) {
+      items.push({ title: "Paiements", url: "/payments", icon: CreditCard });
+  }
+
   return (
     <Sidebar className="border-r border-[#7b2cbf]/30 bg-[#0a0a0f]/95 text-white" collapsible="icon">
       
-      {/* HEADER : Ton Logo Kaybee Fitness */}
-      <SidebarHeader className="h-20 flex justify-center items-center border-b border-[#7b2cbf]/20">
-         <div className="flex items-center gap-2 px-2 w-full overflow-hidden transition-all">
+      {/* HEADER : Logo + Sélecteur Client (Si Coach) */}
+      <SidebarHeader className="flex flex-col justify-center border-b border-[#7b2cbf]/20 pt-4 pb-2">
+         <div className="flex items-center gap-2 px-4 w-full overflow-hidden transition-all mb-4">
              <img 
                src="https://firebasestorage.googleapis.com/v0/b/kaybee-fitness.firebasestorage.app/o/Logo%20.png?alt=media&token=8d0e94d1-3989-4894-b249-10f5945cf172" 
                alt="Logo" 
-               className="h-10 w-auto object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
+               className="h-8 w-auto object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
              />
              <span className="font-bold text-lg whitespace-nowrap group-data-[collapsible=icon]:hidden text-[#00f5d4]">
-                Kaybee Fitness
+                Kaybee
              </span>
+         </div>
+         
+         {/* SELECTEUR DE CLIENT (Visible uniquement pour les coachs) */}
+         <div className="group-data-[collapsible=icon]:hidden">
+            {isCoach && <ClientSelector />}
          </div>
       </SidebarHeader>
 
       {/* MENU */}
-      <SidebarContent className="py-4">
+      <SidebarContent className="py-2">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -86,7 +114,7 @@ export default function AppSidebar() {
                       isActive={isActive}
                       tooltip={item.title}
                       className={`
-                        h-12 text-gray-400 hover:text-white hover:bg-[#7b2cbf]/20 transition-all duration-200
+                        h-10 text-gray-400 hover:text-white hover:bg-[#7b2cbf]/20 transition-all duration-200
                         ${isActive ? 'bg-[#7b2cbf]/20 text-[#00f5d4] font-bold shadow-[inset_3px_0_0_0_#00f5d4]' : ''}
                       `}
                     >
