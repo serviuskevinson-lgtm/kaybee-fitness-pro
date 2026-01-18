@@ -1,0 +1,343 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { db, storage } from '@/lib/firebase';
+import { 
+  collection, query, where, getDocs, addDoc, updateDoc, 
+  onSnapshot, orderBy, doc, increment, serverTimestamp, arrayUnion, limit 
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { 
+  Trophy, Swords, Video, Plus, CheckCircle, 
+  Gavel, ThumbsUp, ThumbsDown, Crown, Medal
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next'; // <--- IMPORT
+
+export default function Challenges() {
+  const { currentUser } = useAuth();
+  const { t } = useTranslation(); // <--- HOOK
+  
+  // --- ÉTATS ---
+  const [activeTab, setActiveTab] = useState('active');
+  const [challenges, setChallenges] = useState([]);
+  const [pendingProofs, setPendingProofs] = useState([]); 
+  const [leaderboard, setLeaderboard] = useState([]);
+  
+  // Modal Création
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newTarget, setNewTarget] = useState(''); 
+  const [newPoints, setNewPoints] = useState(100);
+
+  // Modal Preuve
+  const [selectedChallenge, setSelectedChallenge] = useState(null);
+  const [proofFile, setProofFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // --- NOTIFICATION UTILS ---
+  const notifyUser = async (targetUserId, title, body, type) => {
+    if (targetUserId === currentUser.uid) return;
+    try {
+      await addDoc(collection(db, "notifications"), {
+        recipientId: targetUserId, // Correction du champ standard
+        senderId: currentUser.uid,
+        senderName: currentUser.displayName || "Athlète",
+        title: title,
+        message: body, // Correction du champ standard
+        type: type,
+        status: "unread",
+        createdAt: new Date().toISOString()
+      });
+    } catch (e) { console.error("Erreur notif:", e); }
+  };
+
+  // --- 1. CONNEXION DATABASE ---
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // A. Défis
+    const qChallenges = query(collection(db, "challenges"), orderBy("createdAt", "desc"));
+    const unsubChallenges = onSnapshot(qChallenges, (snapshot) => {
+      setChallenges(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    // B. Tribunal
+    const qProofs = query(
+      collection(db, "challenge_proofs"), 
+      where("status", "==", "pending_validation"),
+      orderBy("createdAt", "desc")
+    );
+    const unsubProofs = onSnapshot(qProofs, (snapshot) => {
+      const proofs = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(p => p.userId !== currentUser.uid && !p.voters?.includes(currentUser.uid));
+      setPendingProofs(proofs);
+    });
+
+    // C. Classement
+    const qUsers = query(collection(db, "users"), orderBy("points", "desc"), limit(10));
+    const unsubLeaderboard = onSnapshot(qUsers, (snapshot) => {
+       setLeaderboard(snapshot.docs.map((doc, index) => ({ id: doc.id, rank: index + 1, ...doc.data() })));
+    });
+    
+    return () => { unsubChallenges(); unsubProofs(); unsubLeaderboard(); };
+  }, [currentUser]);
+
+  // --- 2. ACTIONS ---
+
+  const handleCreateChallenge = async () => {
+    if (!newTitle || !newTarget) return;
+    await addDoc(collection(db, "challenges"), {
+      title: newTitle, target: newTarget, points: parseInt(newPoints),
+      creatorId: currentUser.uid, creatorName: currentUser.displayName || "Athlète",
+      participants: [currentUser.uid], completions: [], type: "user_generated",
+      createdAt: serverTimestamp(), status: 'active'
+    });
+    setIsCreateOpen(false); setNewTitle(''); setNewTarget('');
+  };
+
+  const joinChallenge = async (challengeId, creatorId, currentParticipants) => {
+    if (currentParticipants.includes(currentUser.uid)) return;
+    await updateDoc(doc(db, "challenges", challengeId), { participants: arrayUnion(currentUser.uid) });
+    notifyUser(creatorId, t('notif_new_challenger'), `${currentUser.displayName || "Un ami"} ${t('notif_joined_challenge')}`, "challenge_join");
+  };
+
+  const submitProof = async () => {
+    if (!proofFile || !selectedChallenge) return;
+    setIsUploading(true);
+    try {
+      const storageRef = ref(storage, `proofs/${currentUser.uid}/${Date.now()}_${proofFile.name}`);
+      await uploadBytes(storageRef, proofFile);
+      const url = await getDownloadURL(storageRef);
+
+      await addDoc(collection(db, "challenge_proofs"), {
+        challengeId: selectedChallenge.id, challengeTitle: selectedChallenge.title, challengePoints: selectedChallenge.points,
+        userId: currentUser.uid, userName: currentUser.displayName || "Athlète",
+        mediaUrl: url, type: proofFile.type.startsWith('video') ? 'video' : 'image',
+        status: "pending_validation", votes_valid: 0, votes_invalid: 0, voters: [], createdAt: serverTimestamp()
+      });
+
+      notifyUser(selectedChallenge.creatorId, t('notif_proof_received'), `${t('notif_proof_desc')} : ${selectedChallenge.title}`, "proof_submitted");
+      
+      alert(t('success'));
+      setSelectedChallenge(null); setProofFile(null);
+    } catch (e) { console.error(e); }
+    setIsUploading(false);
+  };
+
+  const handleVote = async (proof, verdict) => {
+    const proofRef = doc(db, "challenge_proofs", proof.id);
+    
+    await updateDoc(proofRef, {
+      votes_valid: verdict === 'valid' ? increment(1) : increment(0),
+      votes_invalid: verdict === 'invalid' ? increment(1) : increment(0),
+      voters: arrayUnion(currentUser.uid)
+    });
+    
+    await updateDoc(doc(db, "users", currentUser.uid), { points: increment(5) });
+    notifyUser(proof.userId, t('notif_vote_received'), t('notif_vote_desc'), "vote");
+
+    if (verdict === 'valid' && (proof.votes_valid + 1) >= 3) {
+      await updateDoc(proofRef, { status: 'validated' });
+      await updateDoc(doc(db, "users", proof.userId), { points: increment(proof.challengePoints) });
+      await updateDoc(doc(db, "challenges", proof.challengeId), { completions: arrayUnion(proof.userId) });
+      notifyUser(proof.userId, t('notif_challenge_validated'), `${t('you_won')} ${proof.challengePoints} XP.`, "success");
+      
+    } else if (verdict === 'invalid' && (proof.votes_invalid + 1) >= 3) {
+      await updateDoc(proofRef, { status: 'rejected' });
+      notifyUser(proof.userId, t('notif_challenge_rejected'), t('notif_rejected_desc'), "fail");
+    }
+  };
+
+  return (
+    <div className="space-y-8 pb-20">
+      
+      {/* HEADER */}
+      <div className="relative overflow-hidden bg-[#1a1a20] p-8 rounded-3xl border border-gray-800 flex flex-col md:flex-row justify-between items-center gap-6">
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-[#7b2cbf]/20 to-transparent"></div>
+        <div className="relative z-10">
+          <h1 className="text-4xl font-black italic uppercase text-white flex items-center gap-3">
+            <Swords className="text-[#00f5d4] w-10 h-10"/> {t('challenges_arena')}
+          </h1>
+          <p className="text-gray-400">{t('challenges_subtitle')}</p>
+        </div>
+        <div className="relative z-10 flex gap-4">
+           <div className="bg-black/50 p-4 rounded-xl border border-[#ffd700]/30 text-center min-w-[100px]">
+              <Trophy className="mx-auto text-[#ffd700] mb-1" size={20}/>
+              <p className="text-2xl font-black text-white">{currentUser.points || 0}</p>
+              <p className="text-[10px] uppercase text-gray-500">XP Total</p>
+           </div>
+           <Button onClick={() => setIsCreateOpen(true)} className="h-auto bg-[#00f5d4] text-black font-black hover:scale-105 transition-transform">
+             <Plus className="mr-2"/> {t('launch_challenge')}
+           </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* COLONNE GAUCHE (2/3) */}
+        <div className="lg:col-span-2 space-y-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="bg-[#1a1a20] border-gray-800 p-1 w-full justify-start">
+              <TabsTrigger value="active" className="text-white data-[state=active]:bg-[#7b2cbf] flex-1">🔥 {t('active_challenges')}</TabsTrigger>
+              <TabsTrigger value="tribunal" className="text-white data-[state=active]:bg-red-600 relative flex-1">
+                ⚖️ {t('tribunal')}
+                {pendingProofs.length > 0 && <span className="absolute top-1 right-2 w-2 h-2 bg-[#00f5d4] rounded-full animate-ping"/>}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* DÉFIS ACTIFS */}
+            <TabsContent value="active" className="space-y-4 mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {challenges.map((challenge) => {
+                  const isParticipant = challenge.participants?.includes(currentUser.uid);
+                  const isCompleted = challenge.completions?.includes(currentUser.uid);
+                  return (
+                    <Card key={challenge.id} className={`kb-card border-l-4 ${isCompleted ? 'border-l-green-500 opacity-75' : 'border-l-[#00f5d4]'} bg-[#1a1a20]`}>
+                      <CardHeader className="pb-2">
+                        <div className="flex justify-between items-start">
+                          <Badge className="bg-[#7b2cbf] text-white border-none">{challenge.points} XP</Badge>
+                          {isCompleted && <CheckCircle className="text-green-500"/>}
+                        </div>
+                        <CardTitle className="text-lg font-black text-white uppercase italic leading-tight mt-2">{challenge.title}</CardTitle>
+                        <p className="text-xs text-gray-400">{t('target')} : <span className="text-white font-bold">{challenge.target}</span></p>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
+                          <Avatar className="w-5 h-5"><AvatarFallback>C</AvatarFallback></Avatar>
+                          <span>{t('by')} {challenge.creatorName} • {challenge.participants?.length || 0} {t('participants')}</span>
+                        </div>
+                        {!isParticipant ? (
+                          <Button size="sm" onClick={() => joinChallenge(challenge.id, challenge.creatorId, challenge.participants)} className="w-full bg-white/10 text-white hover:bg-[#00f5d4] hover:text-black font-bold">{t('accept')}</Button>
+                        ) : isCompleted ? (
+                          <Button size="sm" disabled className="w-full bg-green-500/20 text-green-500 border border-green-500 font-bold">{t('validated')} ✅</Button>
+                        ) : (
+                          <Button size="sm" onClick={() => setSelectedChallenge(challenge)} className="w-full bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf] text-black font-bold">
+                            <Video size={14} className="mr-2"/> {t('proof')}
+                          </Button>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </TabsContent>
+
+            {/* TRIBUNAL */}
+            <TabsContent value="tribunal" className="space-y-4 mt-4">
+               {pendingProofs.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {pendingProofs.map((proof) => (
+                    <Card key={proof.id} className="kb-card bg-[#1a1a20] border-gray-800">
+                      <div className="aspect-video bg-black relative flex items-center justify-center">
+                        {proof.type === 'video' ? <video src={proof.mediaUrl} controls className="w-full h-full object-contain"/> : <img src={proof.mediaUrl} className="w-full h-full object-contain"/>}
+                      </div>
+                      <CardContent className="p-3">
+                        <div className="flex justify-between items-start mb-2">
+                          <div><h4 className="font-bold text-white text-sm">{proof.userName}</h4><p className="text-[10px] text-gray-400">{t('challenge')}: {proof.challengeTitle}</p></div>
+                          <Badge variant="outline" className="text-[10px]">{proof.challengePoints} XP</Badge>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleVote(proof, 'invalid')} variant="outline" className="flex-1 border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white"><ThumbsDown size={14}/></Button>
+                          <Button size="sm" onClick={() => handleVote(proof, 'valid')} className="flex-1 bg-[#00f5d4] text-black hover:bg-[#00f5d4]/80"><ThumbsUp size={14}/></Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                   ))}
+                 </div>
+               ) : (
+                 <div className="text-center py-10 text-gray-500 bg-[#1a1a20] rounded-xl border border-gray-800 border-dashed">
+                   <Gavel size={32} className="mx-auto mb-2 opacity-30"/>
+                   <p>{t('no_proofs')}</p>
+                 </div>
+               )}
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        {/* COLONNE DROITE : CLASSEMENT */}
+        <div className="lg:col-span-1">
+          <div className="sticky top-4">
+            <Card className="kb-card bg-[#1a1a20] border-gray-800 shadow-2xl overflow-hidden">
+              <CardHeader className="bg-gradient-to-b from-[#ffd700]/10 to-transparent pb-4">
+                <CardTitle className="text-[#ffd700] uppercase italic flex items-center gap-2">
+                  <Crown size={20} className="fill-[#ffd700]"/> {t('top_elite')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-gray-800">
+                  {leaderboard.map((user, index) => (
+                    <div key={user.id} className={`flex items-center justify-between p-3 hover:bg-white/5 transition ${currentUser.uid === user.id ? 'bg-[#7b2cbf]/20' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${
+                          index === 0 ? 'bg-[#ffd700] text-black' : 
+                          index === 1 ? 'bg-gray-300 text-black' : 
+                          index === 2 ? 'bg-[#cd7f32] text-white' : 'text-gray-500 font-mono'
+                        }`}>
+                          {index + 1}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Avatar className="w-8 h-8 border border-gray-700"><AvatarImage src={user.avatar}/><AvatarFallback className="text-xs bg-gray-900 text-gray-400">{user.email ? user.email[0].toUpperCase() : 'U'}</AvatarFallback></Avatar>
+                          <div className="overflow-hidden">
+                            <p className={`font-bold text-sm truncate w-24 ${index === 0 ? 'text-[#ffd700]' : 'text-white'}`}>{user.name || t('unknown')}</p>
+                            <p className="text-[10px] text-gray-500">Lvl {Math.floor((user.points || 0) / 1000) + 1}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-black text-white text-sm">{user.points || 0}</p>
+                        <p className="text-[8px] text-gray-500 uppercase">XP</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            
+            <div className="mt-6 p-4 rounded-xl bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] text-center">
+              <Medal className="mx-auto text-white mb-2 w-8 h-8"/>
+              <p className="text-white font-bold text-sm">{t('next_level')} : {Math.floor((currentUser.points || 0) / 1000) + 2}</p>
+              <div className="w-full bg-black/30 h-1.5 rounded-full mt-2 overflow-hidden">
+                <div className="bg-white h-full" style={{ width: `${((currentUser.points || 0) % 1000) / 10}%` }}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* MODALS */}
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
+          <DialogHeader><DialogTitle className="uppercase text-[#00f5d4]">{t('launch_challenge')}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <Input placeholder={t('title')} className="bg-black border-gray-700" value={newTitle} onChange={e => setNewTitle(e.target.value)}/>
+            <Input placeholder={t('objective')} className="bg-black border-gray-700" value={newTarget} onChange={e => setNewTarget(e.target.value)}/>
+            <Input type="number" placeholder="XP" className="bg-black border-gray-700" value={newPoints} onChange={e => setNewPoints(e.target.value)}/>
+            <Button onClick={handleCreateChallenge} className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] font-black mt-2">{t('publish')}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedChallenge} onOpenChange={() => setSelectedChallenge(null)}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
+          <DialogHeader><DialogTitle className="uppercase text-[#00f5d4]">{t('video_proof')}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4 text-center">
+            <div className="border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center">
+               <Video size={32} className="text-gray-500 mb-2"/>
+               <p className="text-xs text-gray-400 mb-4">{t('for')} : <span className="text-white font-bold">{selectedChallenge?.title}</span></p>
+               <Input type="file" accept="video/*,image/*" className="hidden" id="proof-upload" onChange={(e) => setProofFile(e.target.files[0])}/>
+               <Button variant="outline" size="sm" onClick={() => document.getElementById('proof-upload').click()}>{proofFile ? proofFile.name : t('choose_file')}</Button>
+            </div>
+            <Button onClick={submitProof} disabled={!proofFile || isUploading} className="w-full bg-[#00f5d4] text-black font-black">{isUploading ? "..." : t('send')}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

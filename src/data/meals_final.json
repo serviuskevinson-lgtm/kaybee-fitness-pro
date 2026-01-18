@@ -1,0 +1,41 @@
+[
+  {
+    "id": "meal_01",
+    "name": "Bol de Poulet Teriyaki Fit",
+    "type": "Dinner",
+    "calories": 450,
+    "protein": 45,
+    "carbs": 40,
+    "fat": 8,
+    "prepTime": "20 min",
+    "ingredients": ["150g de blanc de poulet", "50g de riz jasmin", "Brocoli vapeur", "Sauce soja allégée", "Gingembre frais"],
+    "instructions": "Saisir le poulet en dés sans matière grasse. Ajouter le gingembre et la sauce soja. Servir sur le riz avec les brocolis.",
+    "imageUrl": "https://storage.googleapis.com/kaybee-fitness.firebasestorage.app/meals/chicken_teriyaki.png"
+  },
+  {
+    "id": "meal_02",
+    "name": "Pancakes Protéinés Myrtilles",
+    "type": "Déjeuner",
+    "calories": 310,
+    "protein": 30,
+    "carbs": 25,
+    "fat": 6,
+    "prepTime": "15 min",
+    "ingredients": ["1 dose de whey vanille", "2 blancs d'oeufs", "30g de flocons d'avoine", "Myrtilles fraîches"],
+    "instructions": "Mixer les ingrédients sauf les myrtilles. Cuire à la poêle antiadhésive, ajouter les myrtilles au dernier moment.",
+    "imageUrl": "https://storage.googleapis.com/kaybee-fitness.firebasestorage.app/meals/protein_pancakes.png"
+  },
+  {
+    "id": "meal_03",
+    "name": "Mousse Chocolat Skyr",
+    "type": "Dessert",
+    "calories": 180,
+    "protein": 15,
+    "carbs": 12,
+    "fat": 4,
+    "prepTime": "5 min",
+    "ingredients": ["150g de Skyr nature", "1 cac de cacao non sucré", "Stévia", "Éclats de noisettes"],
+    "instructions": "Mélanger vigoureusement le Skyr, le cacao et la stévia jusqu'à obtenir une texture lisse. Placer au frais 1h.",
+    "imageUrl": "https://storage.googleapis.com/kaybee-fitness.firebasestorage.app/meals/skyr_mousse.png"
+  }
+]
