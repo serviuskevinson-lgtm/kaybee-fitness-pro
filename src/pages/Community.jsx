@@ -407,15 +407,20 @@ export default function Community() {
 
     setIsAiLoading(true);
     const sportTerm = sport === 'all' ? 'Fitness Gyms' : sport;
-    const prompt = `Tu es un assistant de recherche locale.
-    Trouve 3 VRAIS studios, gyms ou clubs de sport existants à ${loc} spécialisés dans : ${sportTerm}.
+    
+    // --- MODIFICATION ICI : PROMPT AMÉLIORÉ POUR LES QUARTIERS ---
+    const prompt = `Tu es un expert local en fitness à ${loc}.
+    1. Si la ville est grande (ex: Paris, Montréal), divise impérativement les résultats par QUARTIERS différents (ex: Plateau, Griffintown, Mile-End).
+    2. Trouve 3 à 5 VRAIS studios ou gyms existants spécialisés en : ${sportTerm}.
+    3. Dans le nom du lieu, ajoute le quartier entre parenthèses. Ex: "Gym du Plateau (Mont-Royal)".
+    
     Réponds en JSON STRICT format :
     {
       "results": [
         {
-          "name": "Nom du lieu",
-          "bio": "Courte description réelle",
-          "address": "Adresse approximative",
+          "name": "Nom du lieu (Quartier)",
+          "bio": "Description courte",
+          "address": "Adresse précise",
           "rating": 4.8,
           "specialties": ["Tag1", "Tag2"],
           "estimated_price": 50

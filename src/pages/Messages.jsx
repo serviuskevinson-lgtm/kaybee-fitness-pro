@@ -195,13 +195,45 @@ export default function Messages() {
   };
 
   // --- 6. RECHERCHE & MEDIA ---
-  const handleSearch = async () => {
-    if (searchTerm.length < 3) return;
-    const q = query(collection(db, "users"), where("email", ">=", searchTerm), where("email", "<=", searchTerm + '\uf8ff'), limit(5));
-    const snap = await getDocs(q);
-    setSearchResults(snap.docs.map(d => ({uid: d.id, ...d.data()})).filter(u => u.uid !== currentUser.uid));
-    setActiveTab('search');
-  };
+  // DANS Messages.jsx
+
+const handleSearch = async () => {
+  if (searchTerm.length < 3) return;
+  setIsLoading(true); // Ajoute un état de chargement si tu veux
+  
+  try {
+      // 1. Chercher par Email
+      const qEmail = query(collection(db, "users"), 
+          where("email", ">=", searchTerm.toLowerCase()), 
+          where("email", "<=", searchTerm.toLowerCase() + '\uf8ff'), 
+          limit(5));
+
+      // 2. Chercher par Nom (Assure-toi que les utilisateurs ont un champ 'full_name' ou 'name')
+      // Note: Firestore ne permet pas le "OR" simple sur différents champs facilement, on fait 2 requêtes.
+      const qName = query(collection(db, "users"), 
+          where("full_name", ">=", searchTerm), 
+          where("full_name", "<=", searchTerm + '\uf8ff'), 
+          limit(5));
+
+      const [snapEmail, snapName] = await Promise.all([getDocs(qEmail), getDocs(qName)]);
+      
+      const results = [];
+      snapEmail.forEach(doc => results.push({uid: doc.id, ...doc.data()}));
+      snapName.forEach(doc => results.push({uid: doc.id, ...doc.data()}));
+
+      // Enlever les doublons et soi-même
+      const uniqueResults = results
+          .filter((v,i,a)=>a.findIndex(t=>(t.uid===v.uid))===i)
+          .filter(u => u.uid !== currentUser.uid);
+
+      setSearchResults(uniqueResults);
+      setActiveTab('search');
+  } catch (e) {
+      console.error("Erreur recherche", e);
+  } finally {
+      setIsLoading(false);
+  }
+};
 
   const sendFriendRequest = async (targetUser) => {
     await addDoc(collection(db, "friend_requests"), {

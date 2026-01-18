@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTranslation } from 'react-i18next'; // <--- IMPORT
+import { useNavigate } from 'react-router-dom';
 
 // --- CONFIGURATION ---
 const ITEMS_PER_PAGE = 24;
@@ -81,6 +82,27 @@ export default function Exercises() {
     { id: 'abs', name: t('abs'), icon: '🍫', keywords: ['abs', 'waist', 'abdominals', 'core'] },
     { id: 'cardio', name: t('cardio'), icon: '🏃', keywords: ['cardio', 'cardiovascular'] }
   ];
+
+  const navigate = useNavigate();
+
+// ...
+
+// Remplace le bouton "Start" ou "Assigner" par :
+<Button 
+    className="..." 
+    disabled={cart.length === 0} 
+    onClick={() => {
+        if (isCoachView) {
+            // Logique assignation coach (déjà gérée par saveTemplate ?)
+            setIsSaveModalOpen(true);
+        } else {
+            // Rediriger vers la page Session Active avec les exos
+            navigate('/session', { state: { sessionData: cart } });
+        }
+    }}
+>
+    {isCoachView ? t('assign_to_client') : t('start')}
+</Button>
 
   // --- 1. CHARGEMENT API ---
   useEffect(() => {

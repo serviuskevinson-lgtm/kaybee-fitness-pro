@@ -296,7 +296,8 @@ export default function Meals() {
           {plannerStep <= 4 ? (
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {dailyMeals.slice(0, 8).map(m => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-2"></div>
+                {dailyMeals.map(m => (
                     <div key={m.id} onClick={() => {
                         const key = plannerStep === 1 ? 'breakfast' : plannerStep === 2 ? 'lunch' : plannerStep === 3 ? 'dinner' : 'dessert';
                         setCurrentPlan({...currentPlan, [key]: m});

@@ -12,9 +12,16 @@ export default defineConfig({
       
       // --- AJOUTE CE BLOC ICI ---
       workbox: {
-        maximumFileSizeToCacheInBytes: 4000000, // Augmente la limite à 4 Mo
+        maximumFileSizeToCacheInBytes: 4000000, // Augmente la limite à 4 Mo (4 millions d'octets)
       },
       // --------------------------
+ build: {
+    chunkSizeWarningLimit: 3000, // On monte la limite à 3 Mo pour qu'il arrête de chialer
+  },
+  // --------------------------
+  resolve: {
+    // ...
+  },
 
       manifest: {
         name: 'Kaybee Fitness Pro',
@@ -45,6 +52,9 @@ export default defineConfig({
       }
     })
   ],
+  
+
+  
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
