@@ -16,7 +16,7 @@ export default defineConfig({
       },
       // --------------------------
  build: {
-    chunkSizeWarningLimit: 3000, // On monte la limite à 3 Mo pour qu'il arrête de chialer
+    chunkSizeWarningLimit: 5000, // On monte la limite à 3 Mo pour qu'il arrête de chialer
   },
   // --------------------------
   resolve: {
