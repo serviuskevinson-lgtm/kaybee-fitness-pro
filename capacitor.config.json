@@ -1,0 +1,13 @@
+{
+  "appId": "com.kaybeefitness.app",
+  "appName": "Kaybee Fitness",
+  "bundledWebRuntime": false,
+  "npmClient": "npm",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  },
+  "cordova": {}
+}
