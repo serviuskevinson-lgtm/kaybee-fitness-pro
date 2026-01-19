@@ -139,9 +139,13 @@ export default function SmartCalorieWidget({ userProfile }) {
                                 {isThinking ? "Analyse IA..." : <><ScanSearch className="mr-2 h-4 w-4"/> Demander à l'IA</>}
                             </Button>
                             
-                            <Button onClick={() => handleManualAdd(parseInt(foodInput) || 0)} variant="outline" className="border-gray-700">
-                                Ajout Manuel (Kcal)
-                            </Button>
+                            <Button 
+    onClick={() => handleManualAdd(parseInt(foodInput) || 0)} 
+    variant="outline" 
+    className="bg-white text-black hover:bg-gray-200 border-none font-bold"
+>
+    Ajout Manuel (Kcal)
+</Button>
                         </div>
                     </div>
                 </DialogContent>

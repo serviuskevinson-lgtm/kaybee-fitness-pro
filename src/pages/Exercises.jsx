@@ -3,13 +3,13 @@ import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { db, storage } from '@/lib/firebase';
 import { 
-  collection, getDocs, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where 
+  collection, getDocs, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, updateDoc, arrayUnion 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   Dumbbell, Search, Plus, Trash2, Save, Play, 
-  ChevronRight, ChevronLeft, Users, Star, LayoutList, History, Filter, Info, 
-  Upload, CheckCircle, Loader2, Clock, Image as ImageIcon, Video
+  ChevronRight, ChevronLeft, LayoutList, History, Filter, Info, 
+  Upload, CheckCircle, Loader2, Clock, CalendarDays, Star, Image as ImageIcon
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useTranslation } from 'react-i18next'; // <--- IMPORT
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 // --- CONFIGURATION ---
@@ -42,7 +42,8 @@ const EQUIPMENTS = [
 export default function Exercises() {
   const { currentUser } = useAuth();
   const { selectedClient, isCoachView, targetUserId } = useClient();
-  const { t } = useTranslation(); // <--- HOOK
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   
   // --- ÉTATS ---
   const [exercisesDB, setExercisesDB] = useState([]); 
@@ -61,6 +62,12 @@ export default function Exercises() {
   const [selectedExo, setSelectedExo] = useState(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  
+  // NOUVEAU : PROGRAMMATION
+  const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
+  const [programName, setProgramName] = useState("");
+  const [selectedDays, setSelectedDays] = useState([]);
+
   const [newTemplateName, setNewTemplateName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [templateToLoad, setTemplateToLoad] = useState(null);
@@ -71,7 +78,7 @@ export default function Exercises() {
   const [uploadFile, setUploadFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // --- DÉFINITION DYNAMIQUE DES GROUPES (POUR TRADUCTION) ---
+  // --- DÉFINITION DYNAMIQUE DES GROUPES ---
   const MUSCLE_GROUPS = [
     { id: 'custom', name: 'Coach', icon: '👑', keywords: [] },
     { id: 'chest', name: t('chest'), icon: '🛡️', keywords: ['chest', 'pectorals', 'poitrine'] },
@@ -82,27 +89,6 @@ export default function Exercises() {
     { id: 'abs', name: t('abs'), icon: '🍫', keywords: ['abs', 'waist', 'abdominals', 'core'] },
     { id: 'cardio', name: t('cardio'), icon: '🏃', keywords: ['cardio', 'cardiovascular'] }
   ];
-
-  const navigate = useNavigate();
-
-// ...
-
-// Remplace le bouton "Start" ou "Assigner" par :
-<Button 
-    className="..." 
-    disabled={cart.length === 0} 
-    onClick={() => {
-        if (isCoachView) {
-            // Logique assignation coach (déjà gérée par saveTemplate ?)
-            setIsSaveModalOpen(true);
-        } else {
-            // Rediriger vers la page Session Active avec les exos
-            navigate('/session', { state: { sessionData: cart } });
-        }
-    }}
->
-    {isCoachView ? t('assign_to_client') : t('start')}
-</Button>
 
   // --- 1. CHARGEMENT API ---
   useEffect(() => {
@@ -167,42 +153,26 @@ export default function Exercises() {
     loadExercises();
   }, []);
 
-  // --- 2. CHARGEMENT EXERCICES PERSO (COACH) ---
+  // --- 2. CHARGEMENT EXERCICES PERSO ---
   useEffect(() => {
     const fetchCustomExercises = async () => {
         if (!currentUser) return;
+        let authorIdToFetch = isCoachView ? currentUser.uid : null;
         
-        let authorIdToFetch = null;
-        if (isCoachView) {
-            authorIdToFetch = currentUser.uid;
-        } else {
+        if (!isCoachView) {
             try {
                 const userDoc = await getDocs(query(collection(db, "users"), where("uid", "==", currentUser.uid)));
-                if (!userDoc.empty) {
-                    const userData = userDoc.docs[0].data();
-                    authorIdToFetch = userData.coachId;
-                }
-            } catch (e) { console.error("Erreur fetch user data", e); }
+                if (!userDoc.empty) authorIdToFetch = userDoc.docs[0].data().coachId;
+            } catch (e) { console.error(e); }
         }
 
         if (!authorIdToFetch) return;
 
         try {
-            const q = query(
-                collection(db, "custom_exercises"), 
-                where("authorId", "==", authorIdToFetch),
-                orderBy("createdAt", "desc")
-            );
+            const q = query(collection(db, "custom_exercises"), where("authorId", "==", authorIdToFetch));
             const snapshot = await getDocs(q);
-            const customData = snapshot.docs.map(doc => ({ 
-                id: doc.id, 
-                ...doc.data(),
-                isCustom: true
-            }));
-            setCustomExercises(customData);
-        } catch (e) {
-            console.error("Erreur loading custom exos", e);
-        }
+            setCustomExercises(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isCustom: true })));
+        } catch (e) { console.error(e); }
     };
     fetchCustomExercises();
   }, [currentUser, isCoachView]);
@@ -220,7 +190,93 @@ export default function Exercises() {
     fetchTemplates();
   }, [targetUserId]);
 
-  // --- CRÉATION EXERCICE ---
+  // --- LOGIQUE PANIER ---
+  const addToCart = (exo) => {
+    const newExo = { ...exo, uniqueId: Date.now() + Math.random(), sets: 3, reps: 10, rest: 60 };
+    setCart([...cart, newExo]);
+  };
+
+  const removeFromCart = (uniqueId) => setCart(cart.filter(item => item.uniqueId !== uniqueId));
+  
+  const updateExoDetails = (uniqueId, field, value) => {
+      setCart(cart.map(item => item.uniqueId === uniqueId ? { ...item, [field]: value } : item));
+  };
+
+  // --- LOGIQUE SAUVEGARDE & PROGRAMMATION ---
+  
+  // 1. Sauvegarder comme modèle
+  const handleSaveTemplate = async () => {
+    if (!newTemplateName.trim()) return;
+    setIsSaving(true);
+    try {
+      const templateData = {
+        name: newTemplateName,
+        exercises: cart,
+        createdBy: isCoachView ? 'coach' : 'client', 
+        createdAt: serverTimestamp()
+      };
+      await addDoc(collection(db, "users", targetUserId, "templates"), templateData);
+      setIsSaveModalOpen(false);
+      setNewTemplateName("");
+    } catch (e) { console.error(e); } finally { setIsSaving(false); }
+  };
+
+  // 2. PROGRAMMER POUR LA SEMAINE (Lien Dashboard)
+  const handleProgramWeek = async () => {
+      if (!programName.trim() || selectedDays.length === 0) {
+          alert("Donne un nom et choisis au moins un jour.");
+          return;
+      }
+      setIsSaving(true);
+      try {
+          const workoutData = {
+              id: Date.now().toString(),
+              name: programName,
+              exercises: cart,
+              scheduledDays: selectedDays, 
+              createdAt: new Date().toISOString(),
+              assignedBy: isCoachView ? 'coach' : 'self'
+          };
+
+          const userRef = doc(db, "users", targetUserId);
+          await updateDoc(userRef, {
+              workouts: arrayUnion(workoutData)
+          });
+
+          setIsProgramModalOpen(false);
+          setProgramName("");
+          setSelectedDays([]);
+      } catch (e) {
+          console.error("Erreur programmation:", e);
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const toggleDaySelection = (day) => {
+      if (selectedDays.includes(day)) {
+          setSelectedDays(selectedDays.filter(d => d !== day));
+      } else {
+          setSelectedDays([...selectedDays, day]);
+      }
+  };
+
+  const confirmLoadTemplate = () => {
+    if (!templateToLoad) return;
+    const freshCart = templateToLoad.exercises.map(ex => ({ ...ex, uniqueId: Date.now() + Math.random() }));
+    setCart(freshCart);
+    setTemplateToLoad(null);
+  };
+
+  const deleteTemplate = async (e, id) => {
+    if (!window.confirm(t('confirm_delete'))) return;
+    try {
+      await deleteDoc(doc(db, "users", targetUserId, "templates", id));
+      setTemplates(templates.filter(t => t.id !== id));
+    } catch (e) { console.error(e); }
+  };
+
+  // --- CRÉATION EXERCICE (COACH) ---
   const handleCreateExercise = async () => {
       if (!newExoData.name || !uploadFile) {
           alert(t('error'));
@@ -254,92 +310,34 @@ export default function Exercises() {
           setIsCreateOpen(false);
           setNewExoData({ name: '', group: 'chest', equipment: 'body weight', description: '' });
           setUploadFile(null);
-          alert(t('success'));
 
       } catch (e) {
           console.error("Erreur création exo:", e);
-          alert(t('error'));
       } finally {
           setIsUploading(false);
       }
   };
 
-  // --- LOGIQUE PANIER ---
-  const addToCart = (exo) => {
-    const newExo = { ...exo, uniqueId: Date.now() + Math.random(), sets: 3, reps: 10, rest: 60 };
-    setCart([...cart, newExo]);
-  };
-
-  const removeFromCart = (uniqueId) => {
-    setCart(cart.filter(item => item.uniqueId !== uniqueId));
-  };
-
-  const updateExoDetails = (uniqueId, field, value) => {
-    setCart(cart.map(item => item.uniqueId === uniqueId ? { ...item, [field]: value } : item));
-  };
-
-  const handleSaveTemplate = async () => {
-    if (!newTemplateName.trim()) return;
-    setIsSaving(true);
-    try {
-      const templateData = {
-        name: newTemplateName,
-        exercises: cart,
-        createdBy: isCoachView ? 'coach' : 'client', 
-        authorName: isCoachView ? 'Coach' : (currentUser.displayName || 'Moi'),
-        createdAt: serverTimestamp()
-      };
-      const docRef = await addDoc(collection(db, "users", targetUserId, "templates"), templateData);
-      setTemplates([{ id: docRef.id, ...templateData }, ...templates]);
-      setIsSaveModalOpen(false);
-      setNewTemplateName("");
-    } catch (e) { console.error(e); } finally { setIsSaving(false); }
-  };
-
-  const confirmLoadTemplate = () => {
-    if (!templateToLoad) return;
-    const freshCart = templateToLoad.exercises.map(ex => ({ ...ex, uniqueId: Date.now() + Math.random() }));
-    setCart(freshCart);
-    setTemplateToLoad(null);
-  };
-
-  const deleteTemplate = async (e, id) => {
-    if (!window.confirm(t('confirm_delete'))) return;
-    try {
-      await deleteDoc(doc(db, "users", targetUserId, "templates", id));
-      setTemplates(templates.filter(t => t.id !== id));
-    } catch (e) { console.error(e); }
-  };
-
   // --- FILTRAGE ---
-  const allExercises = useMemo(() => {
-      return [...customExercises, ...exercisesDB];
-  }, [customExercises, exercisesDB]);
-
+  const allExercises = useMemo(() => [...customExercises, ...exercisesDB], [customExercises, exercisesDB]);
   const filteredExercises = useMemo(() => {
       return allExercises.filter(ex => {
-        let matchesGroup = false;
-        if (activeTab === 'all') matchesGroup = true;
-        else if (activeTab === 'custom') matchesGroup = ex.isCustom; 
-        else matchesGroup = ex.group === activeTab;
-
+        let matchesGroup = true;
+        if (activeTab === 'custom') matchesGroup = ex.isCustom; 
+        else if (activeTab !== 'all') matchesGroup = ex.group === activeTab;
+        
         const matchesEquipment = activeEquipment === 'all' || ex.equipment === activeEquipment;
         const matchesSearch = ex.name.toLowerCase().includes(search.toLowerCase());
-        
         return matchesGroup && matchesEquipment && matchesSearch;
       });
   }, [allExercises, activeTab, activeEquipment, search]);
 
-  const totalPages = Math.ceil(filteredExercises.length / ITEMS_PER_PAGE);
-  const currentExercises = filteredExercises.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE, 
-    currentPage * ITEMS_PER_PAGE
-  );
+  const currentExercises = filteredExercises.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
-    <div className="p-4 lg:p-8 min-h-screen bg-gradient-to-br from-[#0a0a0f] to-[#111118] text-white pb-32 selection:bg-[#9d4edd] selection:text-white font-sans">
+    <div className="p-4 lg:p-8 min-h-screen bg-gradient-to-br from-[#0a0a0f] to-[#111118] text-white pb-32">
       
-      {/* HEADER AVEC BOUTON CRÉER EXERCICE BIEN VISIBLE */}
+      {/* HEADER */}
       <div className="max-w-7xl mx-auto mb-10">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 shadow-xl">
             <div className="flex-1">
@@ -352,7 +350,6 @@ export default function Exercises() {
                 </p>
             </div>
 
-            {/* BOUTON CRÉER (VISIBLE SI COACH) */}
             {isCoachView && (
                 <div className="flex-shrink-0">
                     <Button 
@@ -400,7 +397,6 @@ export default function Exercises() {
         
         {/* --- COLONNE GAUCHE : SÉLECTION --- */}
         <div className="lg:col-span-2 space-y-6">
-            
             <div className="bg-[#1a1a20]/90 backdrop-blur p-5 rounded-3xl border border-gray-800 sticky top-4 z-10 shadow-2xl">
                 <div className="relative mb-5">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20}/>
@@ -412,13 +408,11 @@ export default function Exercises() {
                         <ScrollArea className="w-full whitespace-nowrap rounded-xl bg-black/50 border border-gray-800">
                             <TabsList className="bg-transparent w-full justify-start h-auto p-1.5">
                                 <TabsTrigger value="all" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all">{t('all')}</TabsTrigger>
-                                
                                 {customExercises.length > 0 && (
                                     <TabsTrigger value="custom" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all border border-[#9d4edd]/50 mx-1">
                                         <span className="mr-1.5">👑</span> Coach
                                     </TabsTrigger>
                                 )}
-
                                 {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => (
                                     <TabsTrigger key={g.id} value={g.id} className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all whitespace-nowrap">
                                         <span className="mr-1.5 opacity-80">{g.icon}</span> {g.name}
@@ -449,22 +443,14 @@ export default function Exercises() {
                         return (
                             <div key={exo.id} className={`rounded-2xl border transition-all group overflow-hidden flex flex-col h-full ${exo.isCustom ? 'bg-[#1a1a25] border-[#9d4edd]/30 hover:border-[#9d4edd] hover:shadow-[0_0_20px_rgba(157,78,221,0.2)]' : 'bg-[#1a1a20] border-gray-800 hover:border-[#9d4edd]'}`}>
                                 <div className="relative h-40 bg-gray-900 cursor-pointer overflow-hidden" onClick={() => { setSelectedExo(exo); setIsDetailOpen(true); }}>
-                                    
                                     {exo.mediaType === 'video' ? (
                                         <div className="w-full h-full flex items-center justify-center bg-black">
                                             <video src={exo.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" muted loop onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()}/>
                                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Play className="fill-white text-white opacity-50" size={32}/></div>
                                         </div>
                                     ) : (
-                                        <img 
-                                            src={exo.imageUrl} 
-                                            alt={exo.name} 
-                                            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" 
-                                            loading="lazy"
-                                            onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}
-                                        />
+                                        <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" loading="lazy" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/>
                                     )}
-
                                     <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a20] to-transparent opacity-80 pointer-events-none"></div>
                                     <div className="absolute bottom-2 left-3 pointer-events-none">
                                         <Badge className={`text-[10px] font-bold border-none px-2 mb-1 capitalize ${exo.isCustom ? 'bg-white text-[#9d4edd]' : 'bg-[#9d4edd] text-white'}`}>
@@ -473,7 +459,6 @@ export default function Exercises() {
                                     </div>
                                     <div className="absolute top-2 right-2 bg-black/60 rounded-full p-1.5 backdrop-blur-md pointer-events-none"><Info size={14} className="text-white"/></div>
                                 </div>
-
                                 <div className="p-4 flex-1 flex flex-col justify-between">
                                     <div>
                                         <h3 className="font-bold text-white text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[#9d4edd] transition-colors">{exo.name}</h3>
@@ -508,32 +493,63 @@ export default function Exercises() {
                     </div>
                     <p className="text-xs text-gray-400 font-medium">{t('drag_adjust_save')}</p>
                 </div>
+                
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                    {cart.length === 0 ? (
+                    {cart.map((item, index) => (
+                        <div key={item.uniqueId} className="bg-[#0f0f13] p-4 rounded-2xl border border-gray-800 hover:border-[#9d4edd]/50 transition-colors group animate-in slide-in-from-right duration-300">
+                            <div className="flex justify-between items-start mb-3">
+                                <span className="font-bold text-sm text-white flex gap-3 items-center"><span className="w-5 h-5 rounded-full bg-[#9d4edd] text-white flex items-center justify-center text-[10px] font-black">{index + 1}</span> <span className="truncate w-40">{item.name}</span></span>
+                                <button onClick={() => removeFromCart(item.uniqueId)} className="text-gray-600 hover:text-red-500 transition-colors p-1 hover:bg-red-500/10 rounded-md"><Trash2 size={14}/></button>
+                            </div>
+                            
+                            {/* --- ICI : LES INPUTS SONT RESTAURÉS --- */}
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700">
+                                    <label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5">{t('sets')}</label>
+                                    <Input type="number" value={item.sets} onChange={(e) => updateExoDetails(item.uniqueId, 'sets', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded"/>
+                                </div>
+                                <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700">
+                                    <label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5">Reps</label>
+                                    <Input type="number" value={item.reps} onChange={(e) => updateExoDetails(item.uniqueId, 'reps', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded"/>
+                                </div>
+                                <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700">
+                                    <label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5 flex items-center justify-center gap-1"><Clock size={8}/> Repos</label>
+                                    <Input type="number" value={item.rest} onChange={(e) => updateExoDetails(item.uniqueId, 'rest', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded" placeholder="60"/>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    {cart.length === 0 && (
                         <div className="text-center text-gray-500 py-10 italic flex flex-col items-center justify-center h-full">
                             <div className="w-20 h-20 rounded-full bg-gray-800/30 flex items-center justify-center mb-4 border border-dashed border-gray-700"><Plus className="text-gray-600" size={32}/></div>
                             <p className="font-bold text-gray-400">{t('session_empty')}</p>
                             <p className="text-xs mt-2 text-gray-600">{t('add_from_left')}</p>
                         </div>
-                    ) : (
-                        cart.map((item, index) => (
-                            <div key={item.uniqueId} className="bg-[#0f0f13] p-4 rounded-2xl border border-gray-800 hover:border-[#9d4edd]/50 transition-colors group animate-in slide-in-from-right duration-300">
-                                <div className="flex justify-between items-start mb-3">
-                                    <span className="font-bold text-sm text-white flex gap-3 items-center"><span className="w-5 h-5 rounded-full bg-[#9d4edd] text-white flex items-center justify-center text-[10px] font-black">{index + 1}</span> <span className="truncate w-40">{item.name}</span></span>
-                                    <button onClick={() => removeFromCart(item.uniqueId)} className="text-gray-600 hover:text-red-500 transition-colors p-1 hover:bg-red-500/10 rounded-md"><Trash2 size={14}/></button>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700"><label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5">{t('sets')}</label><Input type="number" value={item.sets} onChange={(e) => updateExoDetails(item.uniqueId, 'sets', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded"/></div>
-                                    <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700"><label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5">Reps</label><Input type="number" value={item.reps} onChange={(e) => updateExoDetails(item.uniqueId, 'reps', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded"/></div>
-                                    <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700"><label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5 flex items-center justify-center gap-1"><Clock size={8}/> Repos</label><Input type="number" value={item.rest} onChange={(e) => updateExoDetails(item.uniqueId, 'rest', e.target.value)} className="h-6 text-sm bg-gray-800 border-none text-center text-white font-bold p-0 focus-visible:ring-0 rounded" placeholder="60"/></div>
-                                </div>
-                            </div>
-                        ))
                     )}
                 </div>
+
+                {/* --- FOOTER ACTIONS --- */}
                 <div className="p-5 border-t border-gray-800 bg-[#15151a] space-y-3">
-                    <Button disabled={cart.length === 0} onClick={() => setIsSaveModalOpen(true)} className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold tracking-wide rounded-xl shadow-lg transition-colors"><Save className="mr-2 h-4 w-4" /> {t('save_favorite')}</Button>
-                    <Button className={`w-full font-black text-white py-6 text-lg shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] rounded-xl ${isCoachView ? 'bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd]' : 'bg-gradient-to-r from-[#00f5d4] to-[#00b89f] text-black'}`} disabled={cart.length === 0} onClick={() => alert("Séance prête !")}>{isCoachView ? t('assign_to_client') : t('start')}</Button>
+                    <Button disabled={cart.length === 0} onClick={() => setIsSaveModalOpen(true)} className="w-full bg-[#1a1a20] border border-gray-700 hover:bg-gray-800 text-white font-bold h-12 rounded-xl">
+                        <Save className="mr-2 h-4 w-4" /> {t('save_favorite')}
+                    </Button>
+
+                    {/* --- BOUTON PROGRAMMER SEMAINE --- */}
+                    <Button 
+                        disabled={cart.length === 0} 
+                        onClick={() => setIsProgramModalOpen(true)}
+                        className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold h-12 rounded-xl"
+                    >
+                        <CalendarDays className="mr-2 h-4 w-4" /> Programmer Semaine
+                    </Button>
+
+                    <Button 
+                        className={`w-full font-black text-white h-14 text-lg rounded-xl shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] ${isCoachView ? 'bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd]' : 'bg-gradient-to-r from-[#00f5d4] to-[#00b89f] text-black'}`} 
+                        disabled={cart.length === 0} 
+                        onClick={() => navigate('/session', { state: { sessionData: cart } })}
+                    >
+                        {isCoachView ? t('assign_to_client') : t('start')}
+                    </Button>
                 </div>
             </Card>
         </div>
@@ -568,60 +584,22 @@ export default function Exercises() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL CRÉATION EXERCICE */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-lg">
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('create_exercise')}</DialogTitle><DialogDescription>Cet exercice sera visible par vos clients.</DialogDescription></DialogHeader>
             <div className="space-y-4 py-4">
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nom</label>
-                    <Input value={newExoData.name} onChange={(e) => setNewExoData({...newExoData, name: e.target.value})} className="bg-black border-gray-700"/>
-                </div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nom</label><Input value={newExoData.name} onChange={(e) => setNewExoData({...newExoData, name: e.target.value})} className="bg-black border-gray-700"/></div>
                 <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Groupe</label>
-                        <Select value={newExoData.group} onValueChange={(val) => setNewExoData({...newExoData, group: val})}>
-                            <SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger>
-                            <SelectContent className="bg-[#1a1a20] border-gray-700 text-white">
-                                {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Équipement</label>
-                        <Select value={newExoData.equipment} onValueChange={(val) => setNewExoData({...newExoData, equipment: val})}>
-                            <SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger>
-                            <SelectContent className="bg-[#1a1a20] border-gray-700 text-white">
-                                {EQUIPMENTS.filter(e => e.id !== 'all').map(e => <SelectItem key={e.id} value={e.id}>{t(e.name)}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Groupe</label><Select value={newExoData.group} onValueChange={(val) => setNewExoData({...newExoData, group: val})}><SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-700 text-white">{MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent></Select></div>
+                    <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Équipement</label><Select value={newExoData.equipment} onValueChange={(val) => setNewExoData({...newExoData, equipment: val})}><SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-700 text-white">{EQUIPMENTS.filter(e => e.id !== 'all').map(e => <SelectItem key={e.id} value={e.id}>{t(e.name)}</SelectItem>)}</SelectContent></Select></div>
                 </div>
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Instructions</label>
-                    <Textarea value={newExoData.description} onChange={(e) => setNewExoData({...newExoData, description: e.target.value})} className="bg-black border-gray-700 min-h-[100px]"/>
-                </div>
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Média</label>
-                    <div className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center cursor-pointer hover:border-[#9d4edd] relative group">
-                        <input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setUploadFile(e.target.files[0])}/>
-                        {uploadFile ? (
-                            <div className="flex items-center justify-center gap-2 text-[#9d4edd] font-bold"><CheckCircle size={16}/> {uploadFile.name}</div>
-                        ) : (
-                            <div className="text-gray-500 group-hover:text-white transition-colors"><Upload className="mx-auto mb-2"/> <span className="text-xs">{t('drag_drop_media')}</span></div>
-                        )}
-                    </div>
-                </div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Instructions</label><Textarea value={newExoData.description} onChange={(e) => setNewExoData({...newExoData, description: e.target.value})} className="bg-black border-gray-700 min-h-[100px]"/></div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Média</label><div className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center cursor-pointer hover:border-[#9d4edd] relative group"><input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setUploadFile(e.target.files[0])}/>{uploadFile ? <div className="flex items-center justify-center gap-2 text-[#9d4edd] font-bold"><CheckCircle size={16}/> {uploadFile.name}</div> : <div className="text-gray-500 group-hover:text-white transition-colors"><Upload className="mx-auto mb-2"/> <span className="text-xs">{t('drag_drop_media')}</span></div>}</div></div>
             </div>
-            <DialogFooter>
-                <Button onClick={handleCreateExercise} disabled={isUploading} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold w-full h-12 rounded-xl">
-                    {isUploading ? <><Loader2 className="animate-spin mr-2"/> {t('uploading')}</> : t('create_exercise')}
-                </Button>
-            </DialogFooter>
+            <DialogFooter><Button onClick={handleCreateExercise} disabled={isUploading} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold w-full h-12 rounded-xl">{isUploading ? <><Loader2 className="animate-spin mr-2"/> {t('uploading')}</> : t('create_exercise')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* MODAL SAUVEGARDE */}
       <Dialog open={isSaveModalOpen} onOpenChange={setIsSaveModalOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl">
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('name_session')}</DialogTitle></DialogHeader>
@@ -630,7 +608,21 @@ export default function Exercises() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL CHARGEMENT */}
+      {/* --- MODAL PROGRAMMATION --- */}
+      <Dialog open={isProgramModalOpen} onOpenChange={setIsProgramModalOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-md">
+            <DialogHeader>
+                <DialogTitle className="text-2xl font-black italic text-[#9d4edd] uppercase">Programmer</DialogTitle>
+                <DialogDescription className="text-gray-400">Définis le nom et les jours pour cet entraînement. Il apparaîtra sur ton Dashboard.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-6 py-4">
+                <div><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Nom de la séance</label><Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Ex: Pectoraux Lundi, Leg Day..." className="bg-black border-gray-700 text-white h-12 rounded-xl"/></div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Jours planifiés</label><div className="grid grid-cols-4 gap-2">{['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'].map(day => (<button key={day} onClick={() => toggleDaySelection(day)} className={`h-10 rounded-lg text-xs font-bold transition-all border ${selectedDays.includes(day) ? 'bg-[#9d4edd] text-white border-[#9d4edd]' : 'bg-black/30 text-gray-400 border-gray-700 hover:border-gray-500'}`}>{day.slice(0, 3)}</button>))}</div></div>
+            </div>
+            <DialogFooter><Button onClick={handleProgramWeek} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-bold h-12 rounded-xl">{isSaving ? "Enregistrement..." : "Confirmer"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!templateToLoad} onOpenChange={() => setTemplateToLoad(null)}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-sm p-0 overflow-hidden">
             <div className="h-2 w-full bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd]"></div>

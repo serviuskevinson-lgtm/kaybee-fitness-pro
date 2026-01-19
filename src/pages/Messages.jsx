@@ -18,11 +18,11 @@ import {
   Image as ImageIcon, Paperclip, Loader2, RefreshCw, Smartphone, Facebook, Briefcase
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { useTranslation } from 'react-i18next'; // <--- IMPORT
+import { useTranslation } from 'react-i18next';
 
 export default function Messages() {
   const { currentUser } = useAuth();
-  const { t } = useTranslation(); // <--- HOOK
+  const { t } = useTranslation();
   
   // États
   const [activeTab, setActiveTab] = useState('friends');
@@ -34,17 +34,53 @@ export default function Messages() {
   const [searchResults, setSearchResults] = useState([]);
   const [friendList, setFriendList] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
-  const [coachRequests, setCoachRequests] = useState([]); // <--- NOUVEAU
+  const [coachRequests, setCoachRequests] = useState([]);
   
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
-  const [galleryItems, setGalleryItems] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const messagesEndRef = useRef(null);
 
-  // --- 1. GESTION REALTIME ---
+  // --- 1. RECHERCHE LIVE (TYPE-AHEAD) ---
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchTerm.length >= 2) {
+        // Recherche combinée Nom + Email
+        const qName = query(
+            collection(db, "users"), 
+            where("full_name", ">=", searchTerm), 
+            where("full_name", "<=", searchTerm + '\uf8ff'), 
+            limit(5)
+        );
+        const qEmail = query(
+            collection(db, "users"), 
+            where("email", ">=", searchTerm), 
+            where("email", "<=", searchTerm + '\uf8ff'), 
+            limit(5)
+        );
+
+        const [snapName, snapEmail] = await Promise.all([getDocs(qName), getDocs(qEmail)]);
+        const results = [];
+        snapName.forEach(d => results.push({uid: d.id, ...d.data()}));
+        snapEmail.forEach(d => results.push({uid: d.id, ...d.data()}));
+
+        // Dédoublonnage et retirer soi-même
+        const unique = results
+            .filter((v,i,a)=>a.findIndex(t=>(t.uid===v.uid))===i)
+            .filter(u => u.uid !== currentUser.uid);
+
+        setSearchResults(unique);
+        if(activeTab !== 'search') setActiveTab('search');
+      }
+    }, 300); // Délai de 300ms
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm, currentUser]);
+
+
+  // --- 2. GESTION REALTIME AMIS/REQUETES ---
   useEffect(() => {
     if (!currentUser) return;
 
@@ -54,8 +90,7 @@ export default function Messages() {
       setFriendRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // B. Requêtes de Coaching (Pour les coachs)
-    // On écoute la collection notifications pour le type 'coach_request'
+    // B. Requêtes de Coaching
     const qCoachReqs = query(
         collection(db, "notifications"), 
         where("recipientId", "==", currentUser.uid), 
@@ -70,8 +105,6 @@ export default function Messages() {
     const handleFriendsUpdate = async () => {
       const q1 = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "accepted"));
       const q2 = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "accepted"));
-      
-      // Ajouter aussi les clients qui m'ont comme coach
       const qClients = query(collection(db, "users"), where("coachId", "==", currentUser.uid));
 
       const [snap1, snap2, snapClients] = await Promise.all([getDocs(q1), getDocs(q2), getDocs(qClients)]);
@@ -81,7 +114,6 @@ export default function Messages() {
       snap2.forEach(d => friends.push({ uid: d.data().fromId, email: d.data().fromEmail, name: d.data().fromName, type: 'friend' }));
       snapClients.forEach(d => friends.push({ uid: d.id, email: d.data().email, name: d.data().full_name || d.data().firstName, type: 'client' }));
 
-      // Dédoublonnage par UID
       const unique = friends.filter((v,i,a)=>a.findIndex(t=>(t.uid===v.uid))===i);
       setFriendList(unique);
     };
@@ -92,89 +124,65 @@ export default function Messages() {
     return () => { unsubRequests(); unsubCoachRequests(); clearInterval(interval); };
   }, [currentUser]);
 
-  // --- 2. GESTION DU CHAT ---
+  // --- 3. GESTION DU CHAT ---
   useEffect(() => {
     if (!selectedFriend || !currentUser) return;
+    
+    // ID unique deterministe
     const conversationId = [currentUser.uid, selectedFriend.uid].sort().join('_');
-    const qMessages = query(collection(db, "messages"), where("conversationId", "==", conversationId), orderBy("createdAt", "asc"));
+    
+    const qMessages = query(
+        collection(db, "messages"), 
+        where("conversationId", "==", conversationId), 
+        orderBy("createdAt", "asc")
+    );
+
     const unsubMessages = onSnapshot(qMessages, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMessages(msgs);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     });
     return () => unsubMessages();
   }, [selectedFriend, currentUser]);
 
-  // --- 3. SYNCHRONISATION ---
-  const processSyncedContacts = async (contactsFound) => {
-    if (contactsFound.length === 0) return 0;
-    let addedCount = 0;
-    for (const contactIdentifier of contactsFound) {
-      const qUser = query(collection(db, "users"), where("email", "==", contactIdentifier));
-      const userSnap = await getDocs(qUser);
-      if (!userSnap.empty) {
-        const targetUser = userSnap.docs[0].data();
-        const targetUserId = userSnap.docs[0].id;
-        if (targetUserId !== currentUser.uid && !friendList.some(f => f.uid === targetUserId)) {
-           await addDoc(collection(db, "friend_requests"), {
-             fromId: currentUser.uid, fromEmail: currentUser.email, fromName: currentUser.displayName || "Moi",
-             toId: targetUserId, toEmail: targetUser.email, toName: targetUser.name || "Ami Contact",
-             status: "accepted", source: "contact_sync", createdAt: serverTimestamp()
-           });
-           addedCount++;
-        }
-      }
-    }
-    return addedCount;
-  };
+  // --- ACTIONS ---
 
-  const syncPhoneContacts = async () => {
-    setIsSyncing(true);
+  const sendMessage = async (txt = messageText, img = null) => {
+    if ((!txt.trim() && !img) || !selectedFriend || !currentUser) return;
+    
     try {
-      if ('contacts' in navigator && 'ContactsManager' in window) {
-        const contacts = await navigator.contacts.select(['name', 'email'], { multiple: true });
-        const identifiers = [];
-        contacts.forEach(c => { if (c.email) c.email.forEach(e => identifiers.push(e)); });
-        const count = await processSyncedContacts(identifiers);
-        alert(`${count} amis ajoutés !`);
-      } else { alert("Fonction non supportée sur cet appareil."); }
-    } catch (ex) { console.error(ex); } 
-    finally { setIsSyncing(false); setIsSyncModalOpen(false); }
-  };
-
-  const syncFacebookFriends = async () => {
-    setIsSyncing(true);
-    try {
-      const provider = new FacebookAuthProvider();
-      await linkWithPopup(auth.currentUser, provider);
-      alert("Compte lié ! Recherche des amis...");
-    } catch (error) {
-      alert("Erreur de connexion Facebook.");
-    } finally {
-      setIsSyncing(false); setIsSyncModalOpen(false);
+        const conversationId = [currentUser.uid, selectedFriend.uid].sort().join('_');
+        
+        await addDoc(collection(db, "messages"), {
+          conversationId, 
+          senderId: currentUser.uid, 
+          senderName: currentUser.displayName || "Moi",
+          text: txt, 
+          mediaUrl: img, 
+          createdAt: serverTimestamp(), 
+          read: false
+        });
+        
+        setMessageText(''); 
+        setIsMediaModalOpen(false);
+    } catch (e) {
+        console.error("Erreur envoi message:", e);
     }
   };
-
-  // --- 4. LOGIQUE REQUÊTES ---
 
   const acceptFriendRequest = async (requestId) => {
     await updateDoc(doc(db, "friend_requests", requestId), { status: "accepted" });
     alert(t('now_friends'));
   };
 
-  // ACCEPTER CLIENT (La nouvelle fonction demandée)
   const acceptCoachRequest = async (request) => {
       try {
-          // 1. Mettre à jour le profil du client avec mon ID
           await updateDoc(doc(db, "users", request.senderId), {
               coachId: currentUser.uid,
               coachName: currentUser.displayName || "Coach",
               joinedCoachAt: new Date().toISOString()
           });
-
-          // 2. Marquer la notif comme "accepted"
           await updateDoc(doc(db, "notifications", request.id), { status: "accepted" });
-
-          // 3. Ouvrir le chat direct
           setSelectedFriend({ uid: request.senderId, name: request.senderName, email: "Client", type: 'client' });
           alert(t('client_added'));
       } catch (e) { console.error(e); }
@@ -184,61 +192,10 @@ export default function Messages() {
       await updateDoc(doc(db, collectionName, id), { status: "rejected" });
   };
 
-  // --- 5. ENVOI MESSAGES ---
-  const sendMessage = async (txt = messageText, img = null) => {
-    if ((!txt.trim() && !img) || !selectedFriend) return;
-    const conversationId = [currentUser.uid, selectedFriend.uid].sort().join('_');
-    await addDoc(collection(db, "messages"), {
-      conversationId, senderId: currentUser.uid, text: txt, mediaUrl: img, createdAt: serverTimestamp(), read: false
-    });
-    setMessageText(''); setIsMediaModalOpen(false);
-  };
-
-  // --- 6. RECHERCHE & MEDIA ---
-  // DANS Messages.jsx
-
-const handleSearch = async () => {
-  if (searchTerm.length < 3) return;
-  setIsLoading(true); // Ajoute un état de chargement si tu veux
-  
-  try {
-      // 1. Chercher par Email
-      const qEmail = query(collection(db, "users"), 
-          where("email", ">=", searchTerm.toLowerCase()), 
-          where("email", "<=", searchTerm.toLowerCase() + '\uf8ff'), 
-          limit(5));
-
-      // 2. Chercher par Nom (Assure-toi que les utilisateurs ont un champ 'full_name' ou 'name')
-      // Note: Firestore ne permet pas le "OR" simple sur différents champs facilement, on fait 2 requêtes.
-      const qName = query(collection(db, "users"), 
-          where("full_name", ">=", searchTerm), 
-          where("full_name", "<=", searchTerm + '\uf8ff'), 
-          limit(5));
-
-      const [snapEmail, snapName] = await Promise.all([getDocs(qEmail), getDocs(qName)]);
-      
-      const results = [];
-      snapEmail.forEach(doc => results.push({uid: doc.id, ...doc.data()}));
-      snapName.forEach(doc => results.push({uid: doc.id, ...doc.data()}));
-
-      // Enlever les doublons et soi-même
-      const uniqueResults = results
-          .filter((v,i,a)=>a.findIndex(t=>(t.uid===v.uid))===i)
-          .filter(u => u.uid !== currentUser.uid);
-
-      setSearchResults(uniqueResults);
-      setActiveTab('search');
-  } catch (e) {
-      console.error("Erreur recherche", e);
-  } finally {
-      setIsLoading(false);
-  }
-};
-
   const sendFriendRequest = async (targetUser) => {
     await addDoc(collection(db, "friend_requests"), {
-      fromId: currentUser.uid, fromEmail: currentUser.email, fromName: currentUser.displayName,
-      toId: targetUser.uid, toEmail: targetUser.email, toName: targetUser.name,
+      fromId: currentUser.uid, fromEmail: currentUser.email, fromName: currentUser.displayName || "Utilisateur",
+      toId: targetUser.uid, toEmail: targetUser.email, toName: targetUser.name || targetUser.full_name,
       status: "pending", createdAt: serverTimestamp()
     });
     alert(t('request_sent'));
@@ -257,6 +214,10 @@ const handleSearch = async () => {
     setIsUploading(false);
   };
 
+  // Sync Dummy Functions
+  const syncPhoneContacts = () => alert("Fonctionnalité mobile requise");
+  const syncFacebookFriends = () => alert("API Facebook requise");
+
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col md:flex-row gap-6 pb-6">
       
@@ -271,12 +232,15 @@ const handleSearch = async () => {
                <RefreshCw size={18} />
              </Button>
            </div>
-           <div className="relative flex gap-2">
-             <div className="relative flex-1">
+           {/* RECHERCHE LIVE */}
+           <div className="relative">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"/>
-               <Input placeholder={t('search_athlete')} className="pl-10 bg-black/50 border-gray-700 h-10 text-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()}/>
-             </div>
-             <Button size="icon" className="bg-[#00f5d4] text-black" onClick={handleSearch}><Search size={18}/></Button>
+               <Input 
+                 placeholder={t('search_athlete')} 
+                 className="pl-10 bg-black/50 border-gray-700 h-10 text-white focus:border-[#00f5d4]" 
+                 value={searchTerm} 
+                 onChange={(e) => setSearchTerm(e.target.value)} 
+               />
            </div>
         </div>
 
@@ -287,6 +251,7 @@ const handleSearch = async () => {
               {t('requests')}
               {(friendRequests.length + coachRequests.length) > 0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full animate-pulse"/>}
             </TabsTrigger>
+            <TabsTrigger value="search" className="hidden">Search</TabsTrigger>
           </TabsList>
 
           <TabsContent value="friends" className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -344,15 +309,17 @@ const handleSearch = async () => {
           </TabsContent>
 
           <TabsContent value="search" className="flex-1 overflow-y-auto p-2 space-y-2">
-            {searchResults.map(user => (
+            {searchResults.length > 0 ? searchResults.map(user => (
               <div key={user.uid} className="p-3 bg-black/40 rounded-xl border border-gray-700 flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center font-bold text-white">{user.email[0]}</div>
-                  <div><p className="text-sm font-bold text-white">{user.name || "Athlète"}</p></div>
+                  <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center font-bold text-white">{user.email?.[0]}</div>
+                  <div><p className="text-sm font-bold text-white">{user.full_name || user.name || "Athlète"}</p></div>
                 </div>
                 <Button size="icon" variant="ghost" className="text-[#00f5d4]" onClick={() => sendFriendRequest(user)}><UserPlus size={18}/></Button>
               </div>
-            ))}
+            )) : (
+                <p className="text-gray-500 text-center text-sm mt-4">Aucun résultat trouvé.</p>
+            )}
           </TabsContent>
         </Tabs>
       </Card>
@@ -410,7 +377,7 @@ const handleSearch = async () => {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL SYNCHRONISATION (Restaurée) */}
+      {/* MODAL SYNC */}
       <Dialog open={isSyncModalOpen} onOpenChange={setIsSyncModalOpen}>
         <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-md">
           <DialogHeader>
