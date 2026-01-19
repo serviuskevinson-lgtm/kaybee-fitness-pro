@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'r
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 import MyCoach from '@/pages/client/MyCoach'; // Assure-toi de créer le dossier client/
+import Privacy from './pages/Privacy';
 
 // --- IMPORTS CONTEXT ---
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -98,7 +99,7 @@ const AppContent = () => {
               <Route path="/mon-coach" element={<MyCoach />} />
               {/* Route Finance */}
               <Route path="/coach/payments" element={<Payments />} />
-
+              <Route path="/privacy" element={<Privacy />} />
               <Route path="/unauthorized" element={<UserNotRegisteredError />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
