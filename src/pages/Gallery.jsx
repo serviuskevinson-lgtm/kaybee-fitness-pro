@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useClient } from '@/context/ClientContext'; // <--- LE CERVEAU DU MODE COACH
+import { useClient } from '@/context/ClientContext';
 import { db, storage } from '@/lib/firebase';
 import { 
   collection, addDoc, query, where, orderBy, getDocs, deleteDoc, doc, updateDoc, serverTimestamp 
@@ -17,17 +17,16 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { 
   Upload, Image as ImageIcon, Video, Trash2, Eye, Users, Lock, Globe, Play, 
-  Camera, SplitSquareHorizontal, X, UserCheck, Heart, MessageCircle, Share2, LayoutGrid
+  Camera, SplitSquareHorizontal, X, UserCheck, Heart, MessageCircle, Share2, LayoutGrid, FileImage
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useTranslation } from 'react-i18next'; // <--- IMPORT AJOUTÉ
+import { useTranslation } from 'react-i18next';
 
 // --- CONSTANTES ---
-// Note: J'ai déplacé les labels dans le render pour utiliser la traduction dynamique
 const CATEGORIES = [
   { id: 'all', icon: <LayoutGrid size={14}/> },
   { id: 'physique', icon: <Users size={14}/> },
@@ -38,28 +37,27 @@ const CATEGORIES = [
 
 export default function Gallery() {
   const { currentUser } = useAuth();
-  const { t } = useTranslation(); // <--- HOOK ACTIVÉ
+  const { t } = useTranslation();
   
-  // --- MODE HYBRIDE : Cible = Moi OU Client sélectionné ---
+  // --- MODE HYBRIDE ---
   const clientContext = useClient() || {};
   const { selectedClient, isCoachView, targetUserId } = clientContext;
   const activeUserId = targetUserId || currentUser?.uid;
 
   // --- ÉTATS ---
-  const [activeTab, setActiveTab] = useState('gallery'); // 'gallery' | 'social'
+  const [activeTab, setActiveTab] = useState('gallery');
   const [filterCategory, setFilterCategory] = useState('all');
   
   // Données
   const [mediaList, setMediaList] = useState([]);
-  const [socialStories, setSocialStories] = useState([]);
   const [publicTicker, setPublicTicker] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Upload
+  // Upload (MODIFIÉ POUR MULTIPLE)
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadFiles, setUploadFiles] = useState([]); // Tableau au lieu d'un seul fichier
   const [uploadCategory, setUploadCategory] = useState('physique');
-  const [uploadPrivacy, setUploadPrivacy] = useState('Coach'); // Par défaut Coach pour le suivi
+  const [uploadPrivacy, setUploadPrivacy] = useState('Coach');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -67,7 +65,7 @@ export default function Gallery() {
   // Lightbox & Comparaison
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [compareMode, setCompareMode] = useState(false);
-  const [compareSelection, setCompareSelection] = useState([]); // [img1, img2]
+  const [compareSelection, setCompareSelection] = useState([]);
 
   // --- 1. CHARGEMENT DES DONNÉES ---
   useEffect(() => {
@@ -88,7 +86,7 @@ export default function Gallery() {
         const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setMediaList(posts);
 
-        // B. Données Sociales
+        // B. Données Sociales (Seulement si Client)
         if (!isCoachView) {
             const qPublic = query(
                 postsRef, 
@@ -109,61 +107,76 @@ export default function Gallery() {
     fetchData();
   }, [activeUserId, isCoachView, currentUser]);
 
-  // --- 2. GESTION UPLOAD ---
+  // --- 2. GESTION UPLOAD MULTIPLE ---
+  
   const handleFileSelect = (e) => {
-    if (e.target.files && e.target.files[0]) {
-        setUploadFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+        // Convertir FileList en Array et ajouter aux fichiers existants
+        const newFiles = Array.from(e.target.files);
+        setUploadFiles(prev => [...prev, ...newFiles]);
     }
   };
 
+  const removeFile = (index) => {
+      setUploadFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleUpload = async () => {
-    if (!uploadFile || !currentUser) return;
+    if (uploadFiles.length === 0 || !currentUser) return;
     setIsUploading(true);
+    setUploadProgress(0);
+
+    const newPosts = [];
+    let processedCount = 0;
 
     try {
-        const interval = setInterval(() => {
-            setUploadProgress(prev => {
-                if (prev >= 90) return 90;
-                return prev + 10;
-            });
-        }, 200);
+        // Boucle sur chaque fichier
+        for (const file of uploadFiles) {
+            const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${file.name}`;
+            const storagePath = `gallery/${activeUserId}/${fileName}`;
+            const storageRef = ref(storage, storagePath);
+            
+            // Upload
+            await uploadBytes(storageRef, file);
+            const downloadURL = await getDownloadURL(storageRef);
 
-        const fileName = `${Date.now()}_${uploadFile.name}`;
-        const storagePath = `gallery/${activeUserId}/${fileName}`;
-        const storageRef = ref(storage, storagePath);
+            // Création Objet Post
+            const newPost = {
+                userId: activeUserId,
+                authorId: currentUser.uid,
+                authorName: isCoachView ? "Coach" : (currentUser.displayName || "Moi"),
+                mediaUrl: downloadURL,
+                type: file.type.startsWith('video') ? 'video' : 'image',
+                category: isCoachView ? 'reference' : uploadCategory,
+                privacy: uploadPrivacy,
+                uploadedByCoach: isCoachView,
+                createdAt: new Date().toISOString(),
+                likes: 0,
+                comments: []
+            };
+
+            // Sauvegarde Firestore
+            const docRef = await addDoc(collection(db, "posts"), newPost);
+            newPosts.push({ id: docRef.id, ...newPost });
+
+            // Mise à jour progression
+            processedCount++;
+            setUploadProgress(Math.round((processedCount / uploadFiles.length) * 100));
+        }
+
+        // Mise à jour de l'état local (Ajout des nouveaux posts en haut)
+        setMediaList(prev => [...newPosts, ...prev]);
         
-        await uploadBytes(storageRef, uploadFile);
-        const downloadURL = await getDownloadURL(storageRef);
-
-        clearInterval(interval);
-        setUploadProgress(100);
-
-        const newPost = {
-            userId: activeUserId,
-            authorId: currentUser.uid,
-            authorName: isCoachView ? "Coach" : (currentUser.displayName || "Moi"),
-            mediaUrl: downloadURL,
-            type: uploadFile.type.startsWith('video') ? 'video' : 'image',
-            category: isCoachView ? 'reference' : uploadCategory,
-            privacy: uploadPrivacy,
-            uploadedByCoach: isCoachView,
-            createdAt: new Date().toISOString(),
-            likes: 0,
-            comments: []
-        };
-
-        const docRef = await addDoc(collection(db, "posts"), newPost);
-        setMediaList([ { id: docRef.id, ...newPost }, ...mediaList ]);
-        
+        // Reset
         setTimeout(() => {
             setIsUploadOpen(false);
-            setUploadFile(null);
+            setUploadFiles([]);
             setUploadProgress(0);
             setIsUploading(false);
         }, 500);
 
     } catch (e) {
-        console.error("Erreur upload", e);
+        console.error("Erreur upload multiple", e);
         setIsUploading(false);
         alert(t('error'));
     }
@@ -257,13 +270,12 @@ export default function Gallery() {
         </div>
 
         <div className="flex gap-2">
-            {/* --- BOUTON COMPARER (MODIFIÉ) --- */}
             <Button 
                 variant="outline" 
                 className={`font-bold transition-all ${
                     compareMode 
                     ? 'bg-red-500 hover:bg-red-600 text-white border-none' 
-                    : 'bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black hover:scale-105 border-none' // <--- COULEUR APPLIQUÉE
+                    : 'bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black hover:scale-105 border-none'
                 }`}
                 onClick={() => { setCompareMode(!compareMode); setCompareSelection([]); }}
             >
@@ -281,7 +293,7 @@ export default function Gallery() {
         </div>
       </div>
 
-      {/* --- ZONE D'UPLOAD (COLLAPSIBLE) --- */}
+      {/* --- ZONE D'UPLOAD MULTIPLE (COLLAPSIBLE) --- */}
       <AnimatePresence>
         {isUploadOpen && (
             <motion.div 
@@ -293,42 +305,69 @@ export default function Gallery() {
                 <Card className="bg-[#1a1a20] border border-[#00f5d4]/30 shadow-[0_0_30px_rgba(0,245,212,0.1)]">
                     <CardContent className="p-6">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {/* Zone Drop / Input */}
-                            <div 
-                                className="border-2 border-dashed border-gray-700 rounded-xl flex flex-col items-center justify-center p-8 cursor-pointer hover:border-[#00f5d4] hover:bg-[#00f5d4]/5 transition-all group"
-                                onClick={() => fileInputRef.current.click()}
-                            >
-                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*" onChange={handleFileSelect}/>
-                                {uploadFile ? (
-                                    <div className="text-center">
-                                        <ImageIcon className="w-10 h-10 text-[#00f5d4] mx-auto mb-2" />
-                                        <p className="text-white font-bold">{uploadFile.name}</p>
-                                        <p className="text-xs text-gray-500">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                                    </div>
-                                ) : (
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
-                                            <Upload className="text-gray-400 group-hover:text-[#00f5d4]" />
+                            
+                            {/* ZONE DE DROP / APERÇU */}
+                            <div className="md:col-span-2">
+                                <div 
+                                    className="border-2 border-dashed border-gray-700 rounded-xl flex flex-col items-center justify-center p-6 cursor-pointer hover:border-[#00f5d4] hover:bg-[#00f5d4]/5 transition-all min-h-[200px]"
+                                    onClick={() => fileInputRef.current.click()}
+                                >
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        className="hidden" 
+                                        accept="image/*,video/*" 
+                                        multiple // <--- MULTIPLE ACTIVÉ
+                                        onChange={handleFileSelect}
+                                    />
+                                    
+                                    {uploadFiles.length > 0 ? (
+                                        <div className="w-full">
+                                            <p className="text-center text-[#00f5d4] font-bold mb-4">{uploadFiles.length} fichier(s) sélectionné(s)</p>
+                                            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
+                                                {uploadFiles.map((file, idx) => (
+                                                    <div key={idx} className="relative group aspect-square bg-black rounded-lg overflow-hidden border border-gray-700" onClick={(e) => e.stopPropagation()}>
+                                                        {file.type.startsWith('video') ? (
+                                                            <div className="w-full h-full flex items-center justify-center text-gray-500"><Video size={20}/></div>
+                                                        ) : (
+                                                            <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover opacity-80" />
+                                                        )}
+                                                        <button 
+                                                            onClick={() => removeFile(idx)}
+                                                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                <div className="aspect-square flex items-center justify-center bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors" onClick={() => fileInputRef.current.click()}>
+                                                    <PlusIcon />
+                                                </div>
+                                            </div>
                                         </div>
-                                        <p className="text-gray-300 font-bold">{t('drag_drop_media')}</p>
-                                        <p className="text-xs text-gray-500">JPG, PNG, MP4</p>
-                                    </div>
-                                )}
+                                    ) : (
+                                        <div className="text-center">
+                                            <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-3">
+                                                <Upload className="text-gray-400" />
+                                            </div>
+                                            <p className="text-gray-300 font-bold">{t('drag_drop_media')}</p>
+                                            <p className="text-xs text-gray-500">Sélection multiple supportée</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            {/* Options */}
-                            <div className="md:col-span-2 space-y-4">
+                            {/* OPTIONS & BOUTON */}
+                            <div className="space-y-4">
                                 <h3 className="font-bold text-white flex items-center gap-2">
                                     <Camera size={16} className="text-[#00f5d4]"/> {t('new_media')}
                                 </h3>
                                 
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-4">
                                     <div>
                                         <label className="text-xs text-gray-500 uppercase font-bold mb-1 block">{t('category')}</label>
                                         <Select value={uploadCategory} onValueChange={setUploadCategory}>
-                                            <SelectTrigger className="bg-black border-gray-700 text-white">
-                                                <SelectValue />
-                                            </SelectTrigger>
+                                            <SelectTrigger className="bg-black border-gray-700 text-white"><SelectValue /></SelectTrigger>
                                             <SelectContent className="bg-[#1a1a20] border-gray-700 text-white">
                                                 <SelectItem value="physique">{t('physique')}</SelectItem>
                                                 <SelectItem value="posing">{t('posing')}</SelectItem>
@@ -340,9 +379,7 @@ export default function Gallery() {
                                     <div>
                                         <label className="text-xs text-gray-500 uppercase font-bold mb-1 block">{t('privacy')}</label>
                                         <Select value={uploadPrivacy} onValueChange={setUploadPrivacy}>
-                                            <SelectTrigger className="bg-black border-gray-700 text-white">
-                                                <SelectValue />
-                                            </SelectTrigger>
+                                            <SelectTrigger className="bg-black border-gray-700 text-white"><SelectValue /></SelectTrigger>
                                             <SelectContent className="bg-[#1a1a20] border-gray-700 text-white">
                                                 <SelectItem value="Coach">{t('visible_coach')}</SelectItem>
                                                 <SelectItem value="Privé">{t('me_only')}</SelectItem>
@@ -365,10 +402,10 @@ export default function Gallery() {
 
                                 <Button 
                                     className={`w-full font-black ${isCoachView ? 'bg-[#7b2cbf] hover:bg-[#9d4edd]' : 'bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black'}`}
-                                    disabled={!uploadFile || isUploading}
+                                    disabled={uploadFiles.length === 0 || isUploading}
                                     onClick={handleUpload}
                                 >
-                                    {t('publish')}
+                                    {isUploading ? "Envoi..." : `${t('publish')} (${uploadFiles.length})`}
                                 </Button>
                             </div>
                         </div>
@@ -388,7 +425,7 @@ export default function Gallery() {
                     <TabsList className="bg-[#1a1a20] border border-gray-800 h-10">
                         {CATEGORIES.map(cat => (
                             <TabsTrigger key={cat.id} value={cat.id} className="data-[state=active]:bg-[#00f5d4] data-[state=active]:text-black text-xs px-3 h-8">
-                                <span className="mr-2">{cat.icon}</span> {t(cat.id)} {/* Traduction dynamique */}
+                                <span className="mr-2">{cat.icon}</span> {t(cat.id)} 
                             </TabsTrigger>
                         ))}
                     </TabsList>
@@ -420,7 +457,7 @@ export default function Gallery() {
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     <AnimatePresence>
-                        {filteredMedia.map((media, index) => {
+                        {filteredMedia.map((media) => {
                             const isSelectedForCompare = compareSelection.find(p => p.id === media.id);
                             
                             return (
@@ -595,3 +632,10 @@ export default function Gallery() {
     </div>
   );
 }
+
+// Composant icône plus pour l'ajout multiple
+const PlusIcon = () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 5V19M5 12H19" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+);

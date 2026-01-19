@@ -9,7 +9,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   Dumbbell, Search, Plus, Trash2, Save, Play, 
   ChevronRight, ChevronLeft, LayoutList, History, Filter, Info, 
-  Upload, CheckCircle, Loader2, Clock, CalendarDays, Star, Image as ImageIcon
+  Upload, CheckCircle, Loader2, Clock, Calendar, Star, Image as ImageIcon, Video
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,8 @@ const EQUIPMENTS = [
 
 export default function Exercises() {
   const { currentUser } = useAuth();
-  const { selectedClient, isCoachView, targetUserId } = useClient();
+  // Sécurité anti-crash si le context est undefined
+  const { selectedClient, isCoachView, targetUserId } = useClient() || {};
   const { t } = useTranslation();
   const navigate = useNavigate();
   
@@ -246,6 +247,7 @@ export default function Exercises() {
           setIsProgramModalOpen(false);
           setProgramName("");
           setSelectedDays([]);
+          alert(t('program_saved')); 
       } catch (e) {
           console.error("Erreur programmation:", e);
       } finally {
@@ -332,6 +334,8 @@ export default function Exercises() {
       });
   }, [allExercises, activeTab, activeEquipment, search]);
 
+  // --- CALCUL PAGINATION (C'est ici que c'était manquant) ---
+  const totalPages = Math.ceil(filteredExercises.length / ITEMS_PER_PAGE);
   const currentExercises = filteredExercises.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
@@ -379,7 +383,7 @@ export default function Exercises() {
                             </div>
                             <div className="flex items-center justify-between text-xs text-gray-400 mb-4">
                                 <span className="flex items-center gap-1"><LayoutList size={12}/> {tpl.exercises?.length || 0} Exos</span>
-                                <span>{new Date(tpl.createdAt?.seconds * 1000).toLocaleDateString()}</span>
+                                <span>{tpl.createdAt?.seconds ? new Date(tpl.createdAt.seconds * 1000).toLocaleDateString() : ""}</span>
                             </div>
                             <div className="flex gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
                                 <Button size="sm" className="h-8 text-xs w-full font-bold bg-white/10 hover:bg-white/20 text-white"><Play size={12} className="mr-2"/> {t('load')}</Button>
@@ -540,7 +544,7 @@ export default function Exercises() {
                         onClick={() => setIsProgramModalOpen(true)}
                         className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold h-12 rounded-xl"
                     >
-                        <CalendarDays className="mr-2 h-4 w-4" /> Programmer Semaine
+                        <Calendar className="mr-2 h-4 w-4" /> Programmer Semaine
                     </Button>
 
                     <Button 
@@ -627,7 +631,7 @@ export default function Exercises() {
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-sm p-0 overflow-hidden">
             <div className="h-2 w-full bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd]"></div>
             <div className="flex flex-col items-center text-center p-8">
-                <div className="w-20 h-20 rounded-full bg-[#9d4edd]/20 flex items-center justify-center mb-6 text-[#9d4edd] border-4 border-[#1a1a20] shadow-[0_0_20px_rgba(157,78,221,0.3)]"><History size={40} /></div>
+                <div className="w-20 h-20 rounded-full bg-[#9d4edd]/20 flex items-center justify-center mb-6 text-[#9d4edd] border-4 border-[#1a1a20] shadow-[0_0_20px_rgba(157,78,221,0.3)]"><Star size={40} /></div>
                 <h3 className="text-2xl font-black text-white mb-2 leading-tight">Charger<br/>"{templateToLoad?.name}" ?</h3>
                 <p className="text-gray-400 text-sm mb-8 px-4">Attention, cela va <span className="text-red-400 font-bold">remplacer</span> votre sélection.</p>
                 <div className="grid grid-cols-2 gap-4 w-full">
