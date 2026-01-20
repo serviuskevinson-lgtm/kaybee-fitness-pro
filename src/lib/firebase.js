@@ -1,8 +1,8 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 import { getStorage } from "firebase/storage";
-// import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // <--- 1. COMMENTE L'IMPORT
+// Note: On n'importe pas Vertex AI ici, on le fait dans gemini.js
 
 const firebaseConfig = {
   apiKey: "AIzaSyDb7k5657-5Mxu4Dsm6W4XMM1aglwX97s0",
@@ -15,34 +15,20 @@ const firebaseConfig = {
   measurementId: "G-SPMZX25BQD"
 };
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// 1. Initialiser l'App UNE SEULE FOIS
+const app = initializeApp(firebaseConfig);
 
-// --- 2. COMMENTE TOUT CE BLOC ---
-/*
-if (typeof window !== "undefined") {
-  if (import.meta.env.DEV) {
-      self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-  }
-  try {
-    initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider('6LdpSkosAAAAAF8_w17-tAzT2oHDMHGU2tho6JQZ'),
-      isTokenAutoRefreshEnabled: true
-    });
-  } catch (e) {
-    console.warn("App Check désactivé");
-  }
-}
-*/
-// --------------------------------
+// 2. Initialiser les services
+const db = getFirestore(app);
+const auth = getAuth(app);
+const storage = getStorage(app);
+const googleProvider = new GoogleAuthProvider();
+const appleProvider = new OAuthProvider('apple.com');
 
-export const db = getFirestore(app);
-export const auth = getAuth(app);
-export const storage = getStorage(app);
+// 3. EXPORTS (C'est ça qui manquait pour l'erreur "does not provide an export named app")
+export { app, auth, db, storage, googleProvider, appleProvider };
 
-export const googleProvider = new GoogleAuthProvider();
-export const appleProvider = new OAuthProvider('apple.com');
-
-// Tes fonctions existantes...
+// --- Tes fonctions utilitaires ---
 export const getAllExercises = async () => {
   try {
     const querySnapshot = await getDocs(collection(db, "exercises"));

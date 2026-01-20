@@ -10,6 +10,7 @@ import { getEveningAdvice } from '@/lib/coachingEngine';
 import { doc, updateDoc, increment, getDoc } from 'firebase/firestore'; // Assure-toi d'avoir ces imports
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+import { analyzeFoodWithGemini } from '@/lib/gemini';
 
 export default function SmartCalorieWidget({ userProfile }) {
     const { currentUser } = useAuth();
@@ -46,17 +47,30 @@ export default function SmartCalorieWidget({ userProfile }) {
     };
 
     const handleAIAnalyze = async () => {
-        if (!foodInput) return;
-        setIsThinking(true);
-        const result = await estimateMealCalories(foodInput);
-        if (result && result.calories) {
-            if(window.confirm(`L'IA estime : ${result.calories} kcal (${result.protein}g Prot). Ajouter ?`)) {
-                handleManualAdd(result.calories);
-            }
-        } else {
-            alert("Je n'ai pas pu estimer ce plat. Essaie d'être plus précis.");
-        }
-        setIsThinking(false);
+    if (!foodInput.trim()) return;
+    
+    setIsThinking(true);
+    setError(null);
+
+    try {
+      // Appel à notre nouvelle fonction Firebase Gemini
+      const data = await analyzeFoodWithGemini(foodInput);
+
+      // On remplit les données reçues
+      setAiResult({
+        food: data.name,
+        calories: data.calories,
+        macros: { p: data.protein, c: data.carbs, f: data.fats },
+        advice: data.advice
+      });
+
+    } catch (err) {
+      console.error(err);
+      setError("Désolé, je n'ai pas compris ce repas. Essaie d'être plus précis.");
+    } finally {
+      setIsThinking(false);
+    }
+  
     };
 
     // Calculs Visuels

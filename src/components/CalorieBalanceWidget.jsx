@@ -3,26 +3,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Flame, Plus, ScanSearch, BellRing, X } from 'lucide-react';
-import { estimateMealCalories } from '@/lib/aiNutrition';
+import { Flame, Plus, ScanSearch, BellRing, X, Loader2 } from 'lucide-react';
+import { analyzeFoodWithGemini } from '@/lib/gemini'; // <--- GEMINI
 import { getEveningAdvice } from '@/lib/coachingEngine';
 import { useAuth } from '@/context/AuthContext';
-import { useTranslation } from 'react-i18next'; // <--- IMPORT
+import { useTranslation } from 'react-i18next'; 
 
 export default function SmartCalorieWidget({ userProfile }) {
     const { currentUser } = useAuth();
-    const { t } = useTranslation(); // <--- HOOK
+    const { t } = useTranslation(); 
     
     // --- ÉTATS ---
-    const [stats, setStats] = useState({ eaten: 0, burned: 2000 }); // Valeurs par défaut
+    const [stats, setStats] = useState({ eaten: 0, burned: 2000 }); 
     const [inputMode, setInputMode] = useState(false);
     const [foodInput, setFoodInput] = useState("");
     const [isThinking, setIsThinking] = useState(false);
     const [notification, setNotification] = useState(null);
 
-    // --- 1. CHARGEMENT DONNÉES (Simulé ici) ---
+    // --- 1. CHARGEMENT DONNÉES (Simulé) ---
     useEffect(() => {
-        // Logique de fetch ici (ex: lire daily_logs)
+        // Logique de fetch ici
     }, []);
 
     // --- 2. VÉRIFICATION NOTIFICATION 19H ---
@@ -30,7 +30,6 @@ export default function SmartCalorieWidget({ userProfile }) {
         const goal = userProfile?.goal || 'lose_weight'; 
         const deficit = stats.burned - stats.eaten;
         
-        // On passe la fonction 't' au moteur de coaching pour traduire les messages
         const advice = getEveningAdvice(goal, deficit, stats.burned, t);
         if (advice) setNotification(advice);
     }, [stats, userProfile, t]);
@@ -44,21 +43,28 @@ export default function SmartCalorieWidget({ userProfile }) {
     };
 
     const handleAIAnalyze = async () => {
-        if (!foodInput) return;
+        if (!foodInput.trim()) return;
         setIsThinking(true);
-        const result = await estimateMealCalories(foodInput);
-        if (result && result.calories) {
-            const confirmMsg = t('ai_confirm', { 
-                calories: result.calories, 
-                protein: result.protein 
-            });
-            if(window.confirm(confirmMsg)) {
-                handleManualAdd(result.calories);
+        
+        try {
+            const result = await analyzeFoodWithGemini(foodInput);
+            
+            if (result && result.calories) {
+                // Création d'un message de confirmation propre avec les macros
+                const message = `${result.name}\n\nCalories: ${result.calories}\nProtéines: ${result.protein}g\nGlucides: ${result.carbs}g\nLipides: ${result.fats}g\n\nConseil: ${result.advice}\n\nAjouter ce repas ?`;
+                
+                if(window.confirm(message)) {
+                    handleManualAdd(result.calories);
+                }
+            } else {
+                alert("Désolé, je n'ai pas pu analyser ce repas. Essaie d'être plus précis.");
             }
-        } else {
-            alert(t('ai_error'));
+        } catch (error) {
+            console.error(error);
+            alert("Erreur lors de l'analyse. Vérifie ta connexion.");
+        } finally {
+            setIsThinking(false);
         }
-        setIsThinking(false);
     };
 
     const balance = stats.burned - stats.eaten;
@@ -68,7 +74,7 @@ export default function SmartCalorieWidget({ userProfile }) {
     return (
         <Card className="bg-[#1a1a20] border-gray-800 shadow-xl overflow-visible relative">
             
-            {/* NOTIFICATION FLOTTANTE (PUSH IN-APP) */}
+            {/* NOTIFICATION FLOTTANTE */}
             {notification && (
                 <div className="absolute -top-4 left-4 right-4 bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] p-4 rounded-xl shadow-2xl z-50 animate-in slide-in-from-top duration-500 border border-white/20">
                     <div className="flex justify-between items-start">
@@ -135,7 +141,7 @@ export default function SmartCalorieWidget({ userProfile }) {
                         
                         <div className="grid grid-cols-2 gap-3">
                             <Button onClick={handleAIAnalyze} disabled={isThinking || !foodInput} className="bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white font-bold">
-                                {isThinking ? t('ai_analyzing') : <><ScanSearch className="mr-2 h-4 w-4"/> {t('ask_ai')}</>}
+                                {isThinking ? <><Loader2 className="animate-spin mr-2 h-4 w-4"/> {t('ai_analyzing')}</> : <><ScanSearch className="mr-2 h-4 w-4"/> {t('ask_ai')}</>}
                             </Button>
                             
                             <Button onClick={() => handleManualAdd(parseInt(foodInput) || 0)} variant="outline" className="border-gray-700">
