@@ -3,6 +3,7 @@ apply plugin: 'com.android.application'
 android {
     namespace "com.kaybeefitness.app"
     compileSdkVersion rootProject.ext.compileSdkVersion
+
     defaultConfig {
         applicationId "com.kaybeefitness.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -11,6 +12,7 @@ android {
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -44,4 +46,14 @@ try {
     }
 } catch(Exception e) {
     logger.warn("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+
+    // ... (Laissez tout le code existant au-dessus)
+
+// AJOUTEZ CE BLOC À LA TOUTE FIN DU FICHIER :
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.activity:activity:1.9.0'
+        force 'androidx.activity:activity-ktx:1.9.0'
+    }
+}
 }

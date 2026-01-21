@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { db } from '@/lib/firebase';
 import { 
-  doc, getDoc, collection, addDoc, query, where, getDocs, orderBy, deleteDoc, updateDoc 
+  doc, getDoc, collection, addDoc, query, where, getDocs, orderBy, deleteDoc, updateDoc, arrayUnion 
 } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,8 @@ import { useTranslation } from 'react-i18next';
 import HealthTracker from '@/components/HealthTracker';
 import SmartCalorieWidget from '@/components/SmartCalorieWidget';
 import { Capacitor } from '@capacitor/core';
-// import { GoogleFit } from '@perfood/capacitor-google-fit';
+// IMPORT MOTION (Pour le fallback accéléromètre si besoin)
+import { Motion } from '@capacitor/motion';
 
 // --- FONCTION DE SÉCURITÉ POUR LES DATES ---
 const safeDate = (dateVal) => {
@@ -32,6 +33,9 @@ const safeDate = (dateVal) => {
         return d.toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     } catch (e) { return ""; }
 };
+
+// Utilitaire pour la date format YYYY-MM-DD
+const getTodayString = () => new Date().toISOString().split('T')[0];
 
 export default function Dashboard() {
   const auth = useAuth();
@@ -53,23 +57,6 @@ export default function Dashboard() {
   const [coachTemplates, setCoachTemplates] = useState([]);
   const [appointments, setAppointments] = useState([]);
   
-  // --- ÉTAT SANTÉ MOBILE ---
-  const [mobileStats, setMobileStats] = useState({ steps: 0, calories: 0 });
-
-  const connectToHealthParams = async () => {
-    if (!Capacitor.isNativePlatform()) return;
-    try {
-      // Logique Google Fit (commentée pour éviter crash si plugin absent)
-      console.log("Mode mobile détecté (Plugin Health en attente)");
-    } catch (e) {
-      console.error("Erreur Health:", e);
-    }
-  };
-
-  useEffect(() => {
-      connectToHealthParams();
-  }, []);
-
   // État Facturation
   const [hasPendingInvoices, setHasPendingInvoices] = useState(false);
   
@@ -79,7 +66,7 @@ export default function Dashboard() {
   const weekDaysShort = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   const todayName = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][new Date().getDay()];
 
-  // 1. INITIALISATION DES DONNÉES
+  // 1. INITIALISATION DES DONNÉES & LOGIQUE RESET MINUIT
   useEffect(() => {
     let isMounted = true;
 
@@ -102,9 +89,47 @@ export default function Dashboard() {
             // B. Profil Utilisateur Cible & Factures
             const targetId = targetUserId || currentUser.uid;
             if(targetId) {
-                const profileSnap = await getDoc(doc(db, "users", targetId));
-                if (profileSnap.exists() && isMounted) {
-                    setUserProfile(profileSnap.data());
+                const profileRef = doc(db, "users", targetId);
+                const profileSnap = await getDoc(profileRef);
+                
+                if (profileSnap.exists()) {
+                    let data = profileSnap.data();
+                    
+                    // --- LOGIQUE RESET MINUIT (Hydratation, Pas & CALORIES) ---
+                    const todayStr = getTodayString();
+                    
+                    // Si la date enregistrée n'est pas celle d'aujourd'hui, on reset tout
+                    if (data.lastActiveDate !== todayStr && !isCoachView) {
+                        console.log("🌙 Nouveau jour détecté : Reset complet (Eau, Pas, Calories)...");
+                        
+                        // 1. Archiver la journée d'hier dans l'historique santé
+                        const yesterdayStats = {
+                            date: data.lastActiveDate || new Date().toISOString(),
+                            water: data.dailyWater || 0,
+                            steps: data.dailySteps || 0,
+                            calories: data.dailyCalories || 0, // Calories mangées
+                            burned: data.dailyBurnedCalories || 0, // Calories brûlées
+                            type: 'daily_summary'
+                        };
+
+                        // 2. Mise à jour Database (Reset + Archive)
+                        await updateDoc(profileRef, {
+                            dailyWater: 0,
+                            dailySteps: 0,
+                            dailyCalories: 0, // RESET DES CALORIES CONSOMMÉES
+                            // dailyBurnedCalories se resettera tout seul via HealthConnect qui lit "depuis minuit"
+                            lastActiveDate: todayStr,
+                            history: arrayUnion(yesterdayStats) 
+                        });
+                        
+                        // Mise à jour locale immédiate pour l'UI
+                        data.dailyWater = 0;
+                        data.dailySteps = 0;
+                        data.dailyCalories = 0;
+                        data.lastActiveDate = todayStr;
+                    }
+
+                    if (isMounted) setUserProfile(data);
                 }
 
                 if (!isCoachView) {
@@ -129,7 +154,96 @@ export default function Dashboard() {
     return () => { isMounted = false; };
   }, [currentUser, targetUserId, isCoachView]);
 
-  // 2. LOGIQUE COACH
+  // 2. INTEGRATION HEALTH CONNECT (PAS & CALORIES BRÛLÉES)
+  useEffect(() => {
+    // Ne s'exécute que sur mobile et pas en mode vue coach
+    if (!Capacitor.isNativePlatform() || isCoachView || !currentUser) return;
+
+    const fetchHealthData = async () => {
+        try {
+            const isAvailable = await HealthConnect.isAvailable();
+            if (isAvailable) {
+                // Vérifier/Demander permissions
+                const permissions = await HealthConnect.checkPermissions({
+                    read: ['Steps', 'TotalCaloriesBurned']
+                });
+                
+                if (permissions.granted.length === 0) {
+                     await HealthConnect.requestPermissions({
+                        read: ['Steps', 'TotalCaloriesBurned']
+                    });
+                }
+
+                // Lire les données d'aujourd'hui (Depuis Minuit)
+                const now = new Date();
+                const startOfDay = new Date(now);
+                startOfDay.setHours(0, 0, 0, 0);
+
+                const result = await HealthConnect.queryAggregate({
+                    startTime: startOfDay,
+                    endTime: now,
+                    aggregate: {
+                        stepCount: 'count',
+                        caloriesBurned: 'total'
+                    }
+                });
+
+                // Mise à jour si nouvelles données
+                if (result) {
+                    const steps = result.stepCount || 0;
+                    const burned = result.caloriesBurned?.kilocalories || result.caloriesBurned || 0;
+
+                    // On ne met à jour Firebase que si ça a changé significativement
+                    if (userProfile && (steps !== userProfile.dailySteps || burned !== userProfile.dailyBurnedCalories)) {
+                        const userRef = doc(db, "users", currentUser.uid);
+                        await updateDoc(userRef, {
+                            dailySteps: steps,
+                            dailyBurnedCalories: Math.floor(burned) // Sauvegarde des calories brûlées
+                        });
+                        setUserProfile(prev => ({ 
+                            ...prev, 
+                            dailySteps: steps,
+                            dailyBurnedCalories: Math.floor(burned)
+                        }));
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Erreur Sync Health Connect:", e);
+        }
+    };
+
+    // Lancer la synchro
+    fetchHealthData();
+    // Rafraîchir toutes les 5 min
+    const interval = setInterval(fetchHealthData, 300000); 
+
+    return () => clearInterval(interval);
+  }, [currentUser, isCoachView, userProfile]);
+
+  // 3. FONCTION AJOUT EAU (Passée au HealthTracker)
+  const handleAddWater = async (amountML) => {
+    if (!currentUser || isCoachView) return;
+    
+    try {
+        const currentWater = userProfile?.dailyWater || 0;
+        const newTotal = currentWater + amountML;
+        
+        // Mise à jour Optimiste UI
+        setUserProfile(prev => ({ ...prev, dailyWater: newTotal }));
+
+        // Sauvegarde DB
+        const userRef = doc(db, "users", currentUser.uid);
+        await updateDoc(userRef, {
+            dailyWater: newTotal,
+            lastActiveDate: getTodayString() // Confirme l'activité du jour
+        });
+    } catch (e) {
+        console.error("Erreur ajout eau:", e);
+    }
+  };
+
+  // 4. LOGIQUE COACH (Existante - inchangée)
   const loadCoachTemplates = async (uid) => {
       try {
           const q = query(collection(db, "users", uid, "templates"), orderBy("createdAt", "desc"));
@@ -176,20 +290,7 @@ export default function Dashboard() {
       } catch(e) { alert(t('error')); }
   };
 
-  const deleteAppointment = async (id) => {
-      if(!window.confirm(t('confirm_delete'))) return;
-      try {
-          await deleteDoc(doc(db, "appointments", id));
-          setAppointments(appointments.filter(a => a.id !== id));
-      } catch(e) { console.error(e); }
-  };
-
-  // --- CALENDRIER ---
-  const changeMonth = (offset) => {
-      const newDate = new Date(currentDate.setMonth(currentDate.getMonth() + offset));
-      setCurrentDate(new Date(newDate));
-  };
-
+  // --- CALENDRIER UI ---
   const renderCalendarDays = () => {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
@@ -371,8 +472,12 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* TRACKER SANTÉ (PAS & EAU) - INTÉGRÉ ICI */}
-            <HealthTracker userProfile={userProfile} />
+            {/* TRACKER SANTÉ (PAS & EAU) */}
+            {/* J'ai ajouté la prop onAddWater pour permettre au composant d'appeler notre fonction de sauvegarde */}
+            <HealthTracker 
+                userProfile={userProfile} 
+                onAddWater={handleAddWater} 
+            />
 
         </div>
 
@@ -391,7 +496,6 @@ export default function Dashboard() {
                             <Plus size={14} className="mr-1"/> {t('add')}
                         </Button>
                     </div>
-                    {/* ... code calendrier coach existant ... */}
                      <div className="grid grid-cols-7 gap-1 text-center mb-2">
                         {weekDaysShort.map(d => <span key={d} className="text-[10px] text-gray-500 uppercase">{d}</span>)}
                     </div>
@@ -400,7 +504,7 @@ export default function Dashboard() {
                     </div>
                 </div>
             ) : (
-                // SEMAINE CLIENT (MODIFIÉ : PLUS COMPACT)
+                // SEMAINE CLIENT
                 <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 h-fit max-h-[500px] shadow-xl flex flex-col">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="text-lg font-bold text-white flex items-center gap-2"><Calendar className="text-[#00f5d4]"/> {t('week')}</h3>
@@ -426,9 +530,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ZONE 4 : STATS RAPIDES (MODIFIÉ : ORDRE CHANGÉ) */}
+      {/* ZONE 4 : STATS RAPIDES */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* NOUVEL ORDRE : Points, Défis, Séances, Calories */}
         <StatCard icon={TrendingUp} title={t('points')} value={userProfile?.points || 0} color="#7b2cbf" />
         <StatCard icon={Trophy} title={t('challenges')} value={userProfile?.challengesCompleted?.length || 0} color="#9d4edd" />
         <StatCard icon={Dumbbell} title={t('workouts')} value={userProfile?.history?.length || 0} color="#00f5d4" />
