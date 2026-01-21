@@ -1,91 +1,109 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { 
   Star, Award, Calendar, Users, MessageCircle, 
-  CheckCircle, Clock, XCircle, TrendingUp 
+  CheckCircle, Clock, XCircle 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+// IMPORT NOTIFICATIONS
+import { sendNotification } from '@/lib/notifications';
 
 export default function Coach() {
+  const { currentUser } = useAuth();
   const [selectedCoach, setSelectedCoach] = useState(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestMessage, setRequestMessage] = useState('');
   const [goals, setGoals] = useState('');
   const queryClient = useQueryClient();
 
-  const { data: coaches, isLoading } = useQuery({
-    queryKey: ['coaches'],
-    queryFn: () => base44.entities.Coach.list('-rating'),
-    initialData: []
-  });
-
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
-  });
-
+  // 1. CHARGER MON PROFIL (Pour voir si j'ai déjà un coach)
   const { data: userProfile } = useQuery({
-    queryKey: ['userProfile', user?.email],
+    queryKey: ['userProfile', currentUser?.uid],
     queryFn: async () => {
-      const profiles = await base44.entities.User.filter({ email: user.email });
-      return profiles.length > 0 ? profiles[0] : null;
+      if (!currentUser) return null;
+      const docSnap = await getDoc(doc(db, "users", currentUser.uid));
+      return docSnap.exists() ? docSnap.data() : null;
     },
-    enabled: !!user
+    enabled: !!currentUser
   });
 
-  const { data: myRequests } = useQuery({
-    queryKey: ['coachRequests', user?.email],
-    queryFn: () => base44.entities.CoachRequest.filter({ created_by: user.email }),
-    initialData: [],
-    enabled: !!user
+  // 2. CHARGER LES COACHS DISPONIBLES (Firebase)
+  const { data: coaches = [], isLoading } = useQuery({
+    queryKey: ['coaches'],
+    queryFn: async () => {
+      const q = query(collection(db, "users"), where("role", "==", "coach"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    }
   });
 
+  // 3. CHARGER MES REQUÊTES EN ATTENTE (Firebase)
+  const { data: myRequests = [] } = useQuery({
+    queryKey: ['coachRequests', currentUser?.uid],
+    queryFn: async () => {
+      if(!currentUser) return [];
+      const q = query(
+          collection(db, "notifications"), 
+          where("senderId", "==", currentUser.uid), 
+          where("type", "==", "coach_request")
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    },
+    enabled: !!currentUser
+  });
+
+  // 4. MUTATION : ENVOYER LA DEMANDE
   const requestCoachMutation = useMutation({
-    mutationFn: async (data) => base44.entities.CoachRequest.create(data),
+    mutationFn: async () => {
+      // Envoi de la notification au coach
+      await sendNotification(
+          selectedCoach.id, // ID du coach
+          currentUser.uid, // Mon ID
+          currentUser.displayName || userProfile?.first_name || "Athlète", // Mon Nom
+          "Nouvelle Demande 🚀", // Titre
+          `${goals} - ${requestMessage}`, // Message combiné
+          "coach_request" // Type
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['coachRequests']);
       setShowRequestModal(false);
       setRequestMessage('');
       setGoals('');
       setSelectedCoach(null);
+      alert("Demande envoyée !");
+    },
+    onError: (error) => {
+        console.error("Erreur demande:", error);
+        alert("Erreur lors de l'envoi de la demande.");
     }
   });
 
   const handleRequestCoach = () => {
-    if (!selectedCoach || !requestMessage || !goals) {
-      alert('Veuillez remplir tous les champs');
-      return;
-    }
-
-    requestCoachMutation.mutate({
-      coach_email: selectedCoach.email,
-      coach_name: selectedCoach.name,
-      message: requestMessage,
-      goals: goals,
-      status: 'En attente'
-    });
+    if (!selectedCoach || !requestMessage || !goals) return alert('Merci de remplir vos objectifs et le message.');
+    requestCoachMutation.mutate();
   };
 
   const getStatusIcon = (status) => {
     switch(status) {
-      case 'Acceptée': return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'Refusée': return <XCircle className="w-4 h-4 text-red-500" />;
-      case 'Annulée': return <XCircle className="w-4 h-4 text-gray-500" />;
+      case 'accepted': return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'rejected': return <XCircle className="w-4 h-4 text-red-500" />;
       default: return <Clock className="w-4 h-4 text-yellow-500" />;
     }
   };
 
   const getStatusColor = (status) => {
     switch(status) {
-      case 'Acceptée': return 'bg-green-100 text-green-800 border-green-200';
-      case 'Refusée': return 'bg-red-100 text-red-800 border-red-200';
-      case 'Annulée': return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'accepted': return 'bg-green-100 text-green-800 border-green-200';
+      case 'rejected': return 'bg-red-100 text-red-800 border-red-200';
       default: return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     }
   };
@@ -95,14 +113,14 @@ export default function Coach() {
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-[#7b2cbf] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-400">Chargement des coachs...</p>
+          <p className="text-gray-400">Recherche des coachs...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-20">
       {/* Header */}
       <div>
         <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#9d4edd] to-[#00f5d4] uppercase mb-2">
@@ -111,8 +129,8 @@ export default function Coach() {
         <p className="text-gray-400">Connectez-vous avec des entraîneurs certifiés et atteignez vos objectifs</p>
       </div>
 
-      {/* Current Coach */}
-      {userProfile?.coach_email && (
+      {/* AFFICHER MON COACH ACTUEL (Si j'en ai un) */}
+      {userProfile?.coachId && (
         <Card className="kb-card border-[#00f5d4]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-[#00f5d4]">
@@ -121,12 +139,12 @@ export default function Coach() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-gray-300">Coach: <span className="font-bold">{userProfile.coach_email}</span></p>
+            <p className="text-gray-300">Coach: <span className="font-bold text-white">{userProfile.coachName || "Inconnu"}</span></p>
           </CardContent>
         </Card>
       )}
 
-      {/* My Requests */}
+      {/* MES DEMANDES EN COURS */}
       {myRequests.length > 0 && (
         <Card className="kb-card">
           <CardHeader>
@@ -140,12 +158,13 @@ export default function Coach() {
               {myRequests.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-3 bg-black/50 rounded border border-gray-800">
                   <div>
-                    <p className="font-bold text-white">{request.coach_name}</p>
-                    <p className="text-xs text-gray-400">{request.message.substring(0, 50)}...</p>
+                    {/* On essaie d'afficher le nom du coach si possible, sinon 'Demande envoyée' */}
+                    <p className="font-bold text-white">Demande de Coaching</p>
+                    <p className="text-xs text-gray-400">{request.createdAt ? new Date(request.createdAt).toLocaleDateString() : 'Récemment'}</p>
                   </div>
                   <Badge className={`${getStatusColor(request.status)} border flex items-center gap-1`}>
                     {getStatusIcon(request.status)}
-                    {request.status}
+                    {request.status === 'unread' ? 'En attente' : request.status}
                   </Badge>
                 </div>
               ))}
@@ -154,7 +173,7 @@ export default function Coach() {
         </Card>
       )}
 
-      {/* Coaches Grid */}
+      {/* GRILLE DES COACHS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {coaches.map((coach, index) => (
           <motion.div
@@ -167,25 +186,24 @@ export default function Coach() {
               <CardContent className="p-6">
                 {/* Photo */}
                 <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] flex items-center justify-center text-3xl font-black overflow-hidden">
-                  {coach.photo_url ? (
-                    <img src={coach.photo_url} alt={coach.name} className="w-full h-full object-cover" />
+                  {coach.avatar ? (
+                    <img src={coach.avatar} alt={coach.full_name} className="w-full h-full object-cover" />
                   ) : (
-                    coach.name.split(' ').map(n => n[0]).join('').toUpperCase()
+                    (coach.full_name || coach.name || "C")[0].toUpperCase()
                   )}
                 </div>
 
                 {/* Info */}
-                <h3 className="text-xl font-black text-center mb-1">{coach.name}</h3>
+                <h3 className="text-xl font-black text-center mb-1 text-white">{coach.full_name || coach.name}</h3>
                 
                 {/* Rating */}
                 <div className="flex items-center justify-center gap-1 mb-3">
                   {[...Array(5)].map((_, i) => (
                     <Star
                       key={i}
-                      className={`w-4 h-4 ${i < (coach.rating || 0) ? 'text-[#fdcb6e] fill-[#fdcb6e]' : 'text-gray-600'}`}
+                      className={`w-4 h-4 ${i < (coach.rating || 5) ? 'text-[#fdcb6e] fill-[#fdcb6e]' : 'text-gray-600'}`}
                     />
                   ))}
-                  <span className="text-xs text-gray-400 ml-1">({coach.rating || 0})</span>
                 </div>
 
                 {/* Specialties */}
@@ -201,23 +219,23 @@ export default function Coach() {
                 <div className="grid grid-cols-2 gap-2 mb-4 text-center text-xs">
                   <div className="bg-black/50 p-2 rounded">
                     <Calendar className="w-4 h-4 mx-auto mb-1 text-[#00f5d4]" />
-                    <p className="font-bold">{coach.experience_years || 0} ans</p>
+                    <p className="font-bold text-gray-300">{coach.experience || '5+'} ans</p>
                   </div>
                   <div className="bg-black/50 p-2 rounded">
                     <Users className="w-4 h-4 mx-auto mb-1 text-[#00f5d4]" />
-                    <p className="font-bold">{coach.clients_count || 0} clients</p>
+                    <p className="font-bold text-gray-300">{coach.clientCount || '10+'} clients</p>
                   </div>
                 </div>
 
                 {/* Bio */}
-                <p className="text-xs text-gray-400 text-center mb-4 line-clamp-2">
-                  {coach.bio || 'Coach professionnel certifié'}
+                <p className="text-xs text-gray-400 text-center mb-4 line-clamp-2 min-h-[2.5em]">
+                  {coach.bio || 'Coach professionnel certifié prêt à vous aider.'}
                 </p>
 
                 {/* Price & CTA */}
                 <div className="text-center mb-3">
                   <p className="text-2xl font-black text-[#fdcb6e]">
-                    {coach.price_per_month || 0}€
+                    {coach.priceStart || 50}€
                     <span className="text-xs text-gray-500">/mois</span>
                   </p>
                 </div>
@@ -236,23 +254,24 @@ export default function Coach() {
                 >
                   {coach.availability === 'Complet' ? 'Complet' : 'Demander ce coach'}
                 </Button>
-
-                {coach.availability === 'Liste d\'attente' && (
-                  <p className="text-[10px] text-center text-yellow-500 mt-2">Liste d'attente disponible</p>
-                )}
               </CardContent>
             </Card>
           </motion.div>
         ))}
+        {coaches.length === 0 && !isLoading && (
+            <div className="col-span-full text-center text-gray-500 py-10">
+                Aucun coach disponible pour le moment.
+            </div>
+        )}
       </div>
 
       {/* Request Modal */}
       {showRequestModal && selectedCoach && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
-          <Card className="kb-card w-full max-w-lg">
+          <Card className="kb-card w-full max-w-lg bg-[#1a1a20] border-gray-700">
             <CardHeader>
               <CardTitle className="text-2xl font-black text-[#00f5d4]">
-                Demander {selectedCoach.name}
+                Demander {selectedCoach.full_name || selectedCoach.name}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -289,14 +308,14 @@ export default function Coach() {
                     setGoals('');
                   }}
                   variant="outline"
-                  className="flex-1"
+                  className="flex-1 border-gray-600 text-gray-300 hover:text-white"
                 >
                   Annuler
                 </Button>
                 <Button
                   onClick={handleRequestCoach}
                   disabled={requestCoachMutation.isPending}
-                  className="flex-1 bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] font-bold"
+                  className="flex-1 bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] font-bold text-black"
                 >
                   {requestCoachMutation.isPending ? 'Envoi...' : 'Envoyer la Demande'}
                 </Button>

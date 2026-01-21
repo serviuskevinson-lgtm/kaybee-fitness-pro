@@ -8,6 +8,7 @@ import Privacy from './pages/Privacy';
 // --- IMPORTS CONTEXT ---
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { ClientProvider } from '@/context/ClientContext';
+import { NotificationProvider } from '@/context/NotificationContext'; // <--- AJOUTE ÇA
 
 // --- CORRECTION DES IMPORTS (Chemins simplifiés) ---
 import Login from '@/pages/Login';       
@@ -115,10 +116,14 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider> 
         <ClientProvider>
-          <Router>
-            <AppContent />
-            <Toaster />
-          </Router>
+          {/* AJOUTE LE PROVIDER ICI */}
+          <NotificationProvider> 
+            <Router>
+              <AppContent />
+              <Toaster />
+            </Router>
+          </NotificationProvider>
+          {/* FIN DU PROVIDER */}
         </ClientProvider>
       </AuthProvider>
     </QueryClientProvider>

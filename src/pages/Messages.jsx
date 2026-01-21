@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useTranslation } from 'react-i18next';
+import { sendNotification } from '@/lib/notifications';
 
 export default function Messages() {
   const { currentUser } = useAuth();
@@ -33,6 +34,7 @@ export default function Messages() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [friendList, setFriendList] = useState([]);
+  const [receivedRequests, setReceivedRequests] = useState([]); // Reçues
   const [friendRequests, setFriendRequests] = useState([]);
   const [coachRequests, setCoachRequests] = useState([]);
   
@@ -88,6 +90,12 @@ export default function Messages() {
     const qRequests = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "pending"));
     const unsubRequests = onSnapshot(qRequests, (snapshot) => {
       setFriendRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    // B. Envoyées (Amis - Pour gérer le Pending/Annuler)
+    const qSent = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "pending"));
+    const unsubSent = onSnapshot(qSent, (snapshot) => {
+      setSentRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     // B. Requêtes de Coaching
@@ -162,12 +170,36 @@ export default function Messages() {
           createdAt: serverTimestamp(), 
           read: false
         });
+
+        await sendNotification(
+            selectedFriend.uid, 
+            currentUser.uid, 
+            currentUser.displayName || "Ami", 
+            "Nouveau Message 💬", 
+            txt ? `Message: ${txt.substring(0, 30)}...` : "Photo reçue 📷", 
+            "message"
+        );
         
         setMessageText(''); 
         setIsMediaModalOpen(false);
     } catch (e) {
         console.error("Erreur envoi message:", e);
     }
+  };
+
+const setFriendRequest = async (targetUser) => {
+    // Vérif Anti-Spam
+    const alreadySent = sentRequests.some(req => req.toId === targetUser.uid);
+    if (alreadySent) return alert("Demande déjà en attente !");
+
+    await addDoc(collection(db, "friend_requests"), {
+      fromId: currentUser.uid, fromEmail: currentUser.email, fromName: currentUser.displayName || "Athlète",
+      toId: targetUser.uid, toEmail: targetUser.email, toName: targetUser.full_name || targetUser.name,
+      status: "pending", createdAt: serverTimestamp()
+    });
+    
+    await sendNotification(targetUser.uid, currentUser.uid, currentUser.displayName || "Athlète", "Demande d'ami 👋", "Veut t'ajouter en ami.", "friend_request");
+    alert(t('request_sent'));
   };
 
   const acceptFriendRequest = async (requestId) => {

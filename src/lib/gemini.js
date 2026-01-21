@@ -1,15 +1,14 @@
 import { getAI, getGenerativeModel } from "firebase/ai";
-import { app } from "./firebase"; // Assure-toi que le chemin vers firebase.js est correct
+import { app } from "./firebase"; 
 
 // 1. Initialiser le service Vertex AI
 const vertexAI = getAI(app);
 
-// 2. Choisir le modèle (Flash est rapide et pas cher, parfait pour le fitness)
+// 2. Choisir le modèle (Flash est rapide et idéal pour le fitness)
 const model = getGenerativeModel(vertexAI, { model: "gemini-2.5-flash" });
 
 /**
  * Analyse un repas (Texte) pour donner les calories/macros
- * @param {string} description - Ex: "2 oeufs et une toast"
  */
 export const analyzeFoodWithGemini = async (description) => {
   try {
@@ -19,22 +18,18 @@ export const analyzeFoodWithGemini = async (description) => {
       Retourne UNIQUEMENT un objet JSON valide (sans Markdown, sans texte autour) avec ce format exact :
       {
         "name": "Nom court du plat",
-        "calories": 0, // Nombre entier
-        "protein": 0, // en grammes
-        "carbs": 0, // en grammes
-        "fats": 0, // en grammes
+        "calories": 0,
+        "protein": 0,
+        "carbs": 0,
+        "fats": 0,
         "advice": "Court conseil (max 10 mots)"
       }
-      Si tu ne peux pas estimer précisément, mets des valeurs approximatives basées sur des portions standards.
+      Si tu ne peux pas estimer, mets des valeurs approximatives basées sur des portions standards.
     `;
 
     const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
-
-    // Nettoyage du JSON (Gemini met parfois ```json ... ``` autour)
+    const text = result.response.text();
     const jsonString = text.replace(/```json|```/g, "").trim();
-    
     return JSON.parse(jsonString);
 
   } catch (error) {
@@ -44,79 +39,60 @@ export const analyzeFoodWithGemini = async (description) => {
 };
 
 /**
- * Générateur de Workout personnalisé
- * @param {string} goal - Ex: "Prise de masse"
- * @param {string} level - Ex: "Débutant"
- * @param {string} equipment - Ex: "Haltères seulement"
+ * Générateur de Workout (Placeholder pour l'instant)
  */
 export const generateWorkoutWithGemini = async (goal, level, equipment) => {
-  try {
-    const prompt = `
-      Crée un entraînement unique pour un niveau ${level}, objectif ${goal}, avec le matériel suivant : ${equipment}.
-      
-      Retourne UNIQUEMENT un tableau JSON valide d'exercices. Format :
-      [
-        {
-          "name": "Nom de l'exercice",
-          "sets": 3,
-          "reps": "10-12",
-          "rest": 60,
-          "notes": "Court conseil technique"
-        }
-      ]
-      Ne mets pas de texte avant ou après le JSON.
-    `;
-
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
-
-    return JSON.parse(jsonString);
-
-  } catch (error) {
-    console.error("Erreur Gemini (Workout):", error);
     return [];
-  }
 };
 
 /**
- * Recherche des coachs via IA (Simulation pour la Communauté)
- * @param {string} location - Ville ou région (ex: "Montréal")
- * @param {string} specialty - Spécialité (ex: "Bodybuilding")
+ * RECHERCHE COACH INTELLIGENTE (Vraies données + Filtres stricts)
  */
-export const searchCoachesWithGemini = async (location, specialty) => {
+export const searchCoachesWithGemini = async (location, specialty, budget, type) => {
   try {
+    // Prompt ultra-spécifique pour forcer des vrais résultats
     const prompt = `
-      Agis comme un moteur de recherche de fitness local.
-      Je cherche des coachs sportifs à "${location}" spécialisés en "${specialty}".
+      Agis comme un expert fitness local à "${location}".
+      Ta mission : Trouver 5 coachs, studios ou gyms RÉELS et EXISTANTS qui correspondent à ces critères :
       
-      Retourne UNIQUEMENT un tableau JSON valide contenant 3 profils recommandés (fictifs ou basés sur des profils types).
+      1. Discipline : ${specialty}
+      2. Budget max : ${budget}$ par séance/mois.
+      3. Format : ${type} (ex: Cours Privé, Groupe, Semi-Privé).
       
-      Format JSON attendu :
+      Si la ville est grande, précise le quartier.
+      Si tu ne trouves pas de correspondance exacte pour le prix, cherche le plus proche mais mentionne le vrai prix.
+
+      Retourne UNIQUEMENT un tableau JSON valide (sans Markdown). Format :
       [
         {
-          "id": "ai_1", 
-          "full_name": "Prénom Nom",
-          "bio": "Courte description accrocheuse (15 mots max)",
+          "full_name": "Nom du Coach/Lieu (Quartier)",
+          "bio": "Description courte (inclure mention du prix et du style)",
           "specialty": "${specialty}",
-          "location": "${location}",
-          "isVerified": false,
-          "isAi": true
+          "location": "Adresse ou Quartier",
+          "priceStart": 50, 
+          "rating": 4.9,
+          "website": "Lien ou 'N/A'"
         }
       ]
-      Ne mets pas de texte avant ou après le JSON.
     `;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
     
-    // On ajoute des IDs uniques au cas où
+    // Nettoyage du JSON (au cas où Gemini met des ```json ...)
+    const jsonString = text.replace(/```json|```/g, "").trim();
     const data = JSON.parse(jsonString);
-    return data.map((c, i) => ({ ...c, id: `ai_${Date.now()}_${i}` }));
+    
+    // Ajout d'IDs uniques et flags pour le frontend
+    return data.map((c, i) => ({ 
+        ...c, 
+        id: `ai_${Date.now()}_${i}`, 
+        isAi: true, 
+        isExternal: true 
+    }));
 
   } catch (error) {
-    console.error("Erreur Gemini (Recherche Coach):", error);
-    return []; // Retourne une liste vide en cas d'erreur pour ne pas bloquer l'UI
+    console.error("Erreur Gemini Search:", error);
+    return [];
   }
 };

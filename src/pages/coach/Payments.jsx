@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { useTranslation } from 'react-i18next'; // <--- 1. IMPORT
+import { sendNotification } from '@/lib/notifications';
 
 // --- UTILITAIRES DATES ---
 const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
@@ -64,6 +65,7 @@ export default function Payments() {
     }
   };
 
+
   // 1. CHARGEMENT
   useEffect(() => {
     const fetchData = async () => {
@@ -102,7 +104,7 @@ export default function Payments() {
 
   // --- LOGIQUE FINANCIÈRE ---
 
-  const handleCreateInvoice = async () => {
+ const handleCreateInvoice = async () => {
       if(!invoiceData.clientId || !invoiceData.amount) return alert(t('error'));
       const amount = parseFloat(invoiceData.amount);
       const fee = amount * 0.05;
@@ -123,6 +125,17 @@ export default function Payments() {
           };
           const docRef = await addDoc(collection(db, "invoices"), newInvoice);
           setTransactions([{id: docRef.id, ...newInvoice, dateObj: new Date()}, ...transactions]);
+          
+          // NOTIFIER LE CLIENT
+          await sendNotification(
+              invoiceData.clientId,
+              currentUser.uid,
+              "Coach Kaybee",
+              "Nouvelle Facture 💳",
+              `Une facture de ${amount}$ est disponible.`,
+              "invoice"
+          );
+
           setIsInvoiceOpen(false);
           setInvoiceData({ clientId: '', amount: '', description: '' });
       } catch (e) { console.error(e); }

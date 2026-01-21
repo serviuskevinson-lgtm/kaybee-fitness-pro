@@ -20,6 +20,8 @@ import {
   Gavel, ThumbsUp, ThumbsDown, Crown, Medal, Users, Globe, Trash2, Clock
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+// IMPORT DE LA NOUVELLE FONCTION DE NOTIFICATION GLOBALE
+import { sendNotification } from '@/lib/notifications';
 
 export default function Challenges() {
   const { currentUser } = useAuth();
@@ -45,23 +47,6 @@ export default function Challenges() {
   const [proofFile, setProofFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // --- NOTIFICATION UTILS ---
-  const notifyUser = async (targetUserId, title, body, type) => {
-    if (targetUserId === currentUser.uid) return;
-    try {
-      await addDoc(collection(db, "notifications"), {
-        recipientId: targetUserId,
-        senderId: currentUser.uid,
-        senderName: currentUser.displayName || "Ami",
-        title: title,
-        message: body,
-        type: type,
-        status: "unread",
-        createdAt: new Date().toISOString()
-      });
-    } catch (e) { console.error("Erreur notif:", e); }
-  };
-
   // --- 1. CHARGEMENT AMIS & LISTES ---
   useEffect(() => {
     if (!currentUser) return;
@@ -81,7 +66,6 @@ export default function Challenges() {
     fetchFriends();
 
     // B. Écouter les Défis (Filtrage dynamique selon le mode)
-    // Note: Firestore a des limites sur les filtres "OR". On charge les défis récents et on filtre en JS pour l'affichage complexe.
     const qChallenges = query(collection(db, "challenges"), orderBy("createdAt", "desc"), limit(50));
     const unsubChallenges = onSnapshot(qChallenges, (snapshot) => {
       const allChallenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -122,12 +106,16 @@ export default function Challenges() {
 
   // --- FONCTIONS UTILITAIRES ---
   
-  // Récupérer le vrai prénom depuis la DB User
-  const getUserFirstName = async () => {
+  // Récupérer le vrai prénom/pseudo depuis la DB User
+  const getUserIdentity = async () => {
       try {
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
           if (userDoc.exists()) {
-              return userDoc.data().first_name || userDoc.data().firstName || "Athlète";
+              const d = userDoc.data();
+              // Priorité : Pseudo > Prénom > "Athlète"
+              if (d.username) return `@${d.username}`;
+              if (d.first_name) return d.first_name;
+              if (d.firstName) return d.firstName;
           }
       } catch (e) { console.error(e); }
       return "Athlète";
@@ -167,7 +155,7 @@ export default function Challenges() {
   const handleCreateChallenge = async () => {
     if (!newTitle || !newTarget) return;
     
-    const realName = await getUserFirstName();
+    const realName = await getUserIdentity();
     const expirationDate = new Date();
     expirationDate.setDate(expirationDate.getDate() + 7); // + 7 jours
 
@@ -176,7 +164,7 @@ export default function Challenges() {
       target: newTarget, 
       points: parseInt(newPoints),
       creatorId: currentUser.uid, 
-      creatorName: realName, // Vrai Prénom
+      creatorName: realName, 
       participants: [currentUser.uid], 
       completions: [], 
       type: "user_generated",
@@ -191,8 +179,17 @@ export default function Challenges() {
   const joinChallenge = async (challengeId, creatorId, currentParticipants) => {
     if (currentParticipants.includes(currentUser.uid)) return;
     await updateDoc(doc(db, "challenges", challengeId), { participants: arrayUnion(currentUser.uid) });
-    const realName = await getUserFirstName();
-    notifyUser(creatorId, t('notif_new_challenger'), `${realName} ${t('notif_joined_challenge')}`, "challenge_join");
+    
+    const realName = await getUserIdentity();
+    // ENVOI NOTIFICATION
+    await sendNotification(
+        creatorId, 
+        currentUser.uid, 
+        realName, 
+        t('notif_new_challenger'), 
+        `${realName} ${t('notif_joined_challenge')}`, 
+        "friend_request" // Icône utilisateur
+    );
   };
 
   const submitProof = async () => {
@@ -203,14 +200,14 @@ export default function Challenges() {
       await uploadBytes(storageRef, proofFile);
       const url = await getDownloadURL(storageRef);
 
-      const realName = await getUserFirstName();
+      const realName = await getUserIdentity();
 
       await addDoc(collection(db, "challenge_proofs"), {
         challengeId: selectedChallenge.id, 
         challengeTitle: selectedChallenge.title, 
         challengePoints: selectedChallenge.points,
         userId: currentUser.uid, 
-        userName: realName, // Vrai Prénom
+        userName: realName, 
         mediaUrl: url, 
         type: proofFile.type.startsWith('video') ? 'video' : 'image',
         status: "pending_validation", 
@@ -220,7 +217,15 @@ export default function Challenges() {
         createdAt: serverTimestamp()
       });
 
-      notifyUser(selectedChallenge.creatorId, t('notif_proof_received'), `${realName} a envoyé une preuve.`, "proof_submitted");
+      // ENVOI NOTIFICATION AU CRÉATEUR DU DÉFI
+      await sendNotification(
+          selectedChallenge.creatorId,
+          currentUser.uid,
+          realName,
+          t('notif_proof_received'),
+          `${realName} a envoyé une preuve pour : ${selectedChallenge.title}`,
+          "challenge"
+      );
       
       alert(t('success'));
       setSelectedChallenge(null); setProofFile(null);
@@ -249,14 +254,41 @@ export default function Challenges() {
     
     await updateDoc(doc(db, "users", currentUser.uid), { points: increment(5) });
 
+    // ENVOI NOTIFICATION DE VOTE
+    await sendNotification(
+        proof.userId,
+        currentUser.uid,
+        "Juge", // Anonyme ou nom réel au choix
+        t('notif_vote_received'),
+        t('notif_vote_desc'),
+        "vote"
+    );
+
     if (verdict === 'valid' && (proof.votes_valid + 1) >= 3) {
       await updateDoc(proofRef, { status: 'validated' });
       await updateDoc(doc(db, "users", proof.userId), { points: increment(proof.challengePoints) });
       await updateDoc(doc(db, "challenges", proof.challengeId), { completions: arrayUnion(proof.userId) });
-      notifyUser(proof.userId, t('notif_challenge_validated'), `Victoire ! +${proof.challengePoints} XP.`, "success");
+      
+      await sendNotification(
+          proof.userId,
+          "system",
+          "Système",
+          t('notif_challenge_validated'),
+          `Victoire ! +${proof.challengePoints} XP.`,
+          "achievement"
+      );
+
     } else if (verdict === 'invalid' && (proof.votes_invalid + 1) >= 3) {
       await updateDoc(proofRef, { status: 'rejected' });
-      notifyUser(proof.userId, t('notif_challenge_rejected'), "Preuve rejetée par le tribunal.", "fail");
+      
+      await sendNotification(
+          proof.userId,
+          "system",
+          "Système",
+          t('notif_challenge_rejected'),
+          "Preuve rejetée par le tribunal.",
+          "info"
+      );
     }
   };
 
@@ -318,7 +350,8 @@ export default function Challenges() {
                 {filteredChallenges.map((challenge) => {
                   const isParticipant = challenge.participants?.includes(currentUser.uid);
                   const isCompleted = challenge.completions?.includes(currentUser.uid);
-                  const creatorFirstName = challenge.creatorName?.split(' ')[0] || t('unknown');
+                  // Affichage Nom
+                  const creatorFirstName = challenge.creatorName || t('unknown');
 
                   return (
                     <Card key={challenge.id} className={`kb-card border-l-4 ${isCompleted ? 'border-l-green-500 opacity-75' : 'border-l-[#00f5d4]'} bg-[#1a1a20]`}>
@@ -365,7 +398,7 @@ export default function Challenges() {
                {filteredProofs.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                    {filteredProofs.map((proof) => {
-                     const proofUserName = proof.userName?.split(' ')[0] || t('unknown');
+                     const proofUserName = proof.userName || t('unknown');
                      const isMyProof = proof.userId === currentUser.uid;
 
                      return (
@@ -423,7 +456,8 @@ export default function Challenges() {
                 {leaderboard.length > 0 ? (
                     <div className="divide-y divide-gray-800">
                       {leaderboard.map((user, index) => {
-                        const userFirstName = user.first_name || user.firstName || user.name?.split(' ')[0] || t('unknown');
+                        // Logique Nom/Pseudo
+                        const userFirstName = user.username ? `@${user.username}` : (user.first_name || user.firstName || "Inconnu");
                         const initial = userFirstName[0]?.toUpperCase() || 'U';
 
                         return (
