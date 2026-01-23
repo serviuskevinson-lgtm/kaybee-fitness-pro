@@ -1,18 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
 import { 
   Timer, CheckCircle, ChevronDown, ChevronUp, 
-  Play, RotateCcw, Dumbbell, AlertCircle, ArrowRight, XCircle, Save, 
-  Trophy, Scale, Camera, Activity
+  Play, RotateCcw, Dumbbell, AlertCircle, XCircle, Save, 
+  Trophy, CalendarClock, ArrowRight
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useTranslation } from 'react-i18next';
+import { registerPlugin } from '@capacitor/core';
+
+const WearConnectivity = registerPlugin('WearConnectivity');
 
 export default function Session() {
   const { currentUser } = useAuth();
@@ -21,101 +23,131 @@ export default function Session() {
   const { t } = useTranslation();
 
   // --- ÉTATS ---
+  const [userProfile, setUserProfile] = useState(null);
   const [workout, setWorkout] = useState(null); 
   const [loading, setLoading] = useState(true);
+  
+  // États Séance Active
   const [isSessionStarted, setIsSessionStarted] = useState(false); 
-  const [isSaving, setIsSaving] = useState(false);
-
+  const [isCompletedToday, setIsCompletedToday] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [expandedExo, setExpandedExo] = useState(null);
   const [sessionLogs, setSessionLogs] = useState({});
   const [activeRest, setActiveRest] = useState({ exoIdx: null, timeLeft: 0 });
 
-  // --- ÉTATS POUR LES MODALES (REMPLACEMENT DES ALERTS) ---
+  // Modales
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
-  const [sessionStats, setSessionStats] = useState({ volume: 0, sets: 0, time: 0 });
+  const [sessionStats, setSessionStats] = useState({ volume: 0, sets: 0, time: 0, calories: 0 });
 
-  // Son de fin de repos
-  const playEndRestSound = () => {
-    try {
-      const context = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = context.createOscillator();
-      const gainNode = context.createGain();
-      oscillator.connect(gainNode);
-      gainNode.connect(context.destination);
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(880, context.currentTime);
-      gainNode.gain.setValueAtTime(0.1, context.currentTime);
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.5);
-      if ("vibrate" in navigator) navigator.vibrate([200, 100, 200]);
-    } catch (e) { console.error("Audio bloqué", e); }
-  };
-
-  // --- CHARGEMENT ---
+  // --- 1. LOGIQUE DE CHARGEMENT & COMPTE À REBOURS ---
   useEffect(() => {
-    const loadData = async () => {
+    const initSession = async () => {
+      if (!currentUser) return;
       setLoading(true);
+
+      // Si on vient du bouton "Commencer" du dashboard
       if (location.state?.workout) {
         setWorkout(location.state.workout);
-      } else if (location.state?.sessionData) {
-        setWorkout({ name: "Séance Personnalisée", exercises: location.state.sessionData });
-      } else {
-        setWorkout(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      // Sinon, on cherche la séance du jour dans le profil
+      try {
+        const docSnap = await getDoc(doc(db, "users", currentUser.uid));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setUserProfile(data);
+
+          // Vérifier si déjà faite aujourd'hui
+          const today = new Date().toISOString().split('T')[0];
+          const lastWorkoutDate = data.history?.length > 0 ? data.history[data.history.length - 1].date : "";
+          
+          if (lastWorkoutDate.startsWith(today)) {
+              setIsCompletedToday(true);
+          }
+
+          // Trouver la séance prévue ce jour
+          const weekDays = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+          const todayName = weekDays[new Date().getDay()];
+          const todayWorkout = data.workouts?.find(w => w.scheduledDays?.includes(todayName));
+          
+          setWorkout(todayWorkout || null);
+        }
+      } catch (e) { console.error(e); } 
+      finally { setLoading(false); }
     };
-    loadData();
+    initSession();
   }, [currentUser, location]);
 
-  // Chrono Global
+  // Fonction pour trouver le prochain jour d'entraînement
+  const getNextWorkoutInfo = () => {
+    if (!userProfile?.workouts) return "Aucun programme défini";
+    const weekDays = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+    const currentDayIdx = new Date().getDay();
+    
+    for (let i = 1; i <= 7; i++) {
+        const nextIdx = (currentDayIdx + i) % 7;
+        const nextDayName = weekDays[nextIdx];
+        const hasWorkout = userProfile.workouts.some(w => w.scheduledDays?.includes(nextDayName));
+        
+        if (hasWorkout) {
+            return i === 1 ? "Demain" : `Dans ${i} jours (${nextDayName})`;
+        }
+    }
+    return "Aucun autre entraînement prévu";
+  };
+
+  // --- 2. DÉMARRAGE ET MONTRE ---
+  const handleStartSession = async () => {
+    setIsSessionStarted(true);
+    if (workout) {
+        // Envoi à la montre
+        const watchData = {
+            name: workout.name,
+            exercises: (workout.exercises || []).map(e => ({
+                name: e.name,
+                sets: parseInt(e.sets || 3),
+                reps: parseInt(e.reps || 10),
+                weight: parseFloat(e.weight || 0)
+            }))
+        };
+        try {
+            await WearConnectivity.sendDataToWatch({
+                path: "/start-session",
+                data: JSON.stringify(watchData)
+            });
+        } catch (e) {}
+    }
+  };
+
+  // --- 3. GESTION CHRONO & LOGS ---
   useEffect(() => {
     let interval = null;
-    if (isSessionStarted && !showSummaryModal) {
-      interval = setInterval(() => setSeconds(prev => prev + 1), 1000);
-    }
+    if (isSessionStarted && !showSummaryModal) interval = setInterval(() => setSeconds(s => s + 1), 1000);
     return () => clearInterval(interval);
   }, [isSessionStarted, showSummaryModal]);
 
-  // Chrono Repos
   useEffect(() => {
     let timer = null;
-    if (activeRest.timeLeft > 0) {
-      timer = setInterval(() => setActiveRest(prev => ({ ...prev, timeLeft: prev.timeLeft - 1 })), 1000);
-    } else if (activeRest.exoIdx !== null && activeRest.timeLeft === 0) {
-      playEndRestSound();
-      setActiveRest({ exoIdx: null, timeLeft: 0 });
-    }
+    if (activeRest.timeLeft > 0) timer = setInterval(() => setActiveRest(p => ({ ...p, timeLeft: p.timeLeft - 1 })), 1000);
     return () => clearInterval(timer);
   }, [activeRest]);
 
-  const startRest = (exoIdx, restTime) => {
-    setActiveRest({ exoIdx, timeLeft: restTime || 90 });
-  };
-
-  const formatTime = (totalSeconds) => {
-    const hrs = Math.floor(totalSeconds / 3600);
-    const mins = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
-    return `${hrs > 0 ? hrs + ':' : ''}${mins < 10 && hrs > 0 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
+  const startRest = (exoIdx, restTime) => setActiveRest({ exoIdx, timeLeft: restTime || 90 });
+  
   const handleSetChange = (exoIdx, setIdx, field, value) => {
-    const key = `${exoIdx}-${setIdx}`;
-    setSessionLogs(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+    setSessionLogs(prev => ({ ...prev, [`${exoIdx}-${setIdx}`]: { ...prev[`${exoIdx}-${setIdx}`], [field]: value } }));
   };
-
   const toggleSetComplete = (exoIdx, setIdx) => {
-    const key = `${exoIdx}-${setIdx}`;
-    setSessionLogs(prev => ({ ...prev, [key]: { ...prev[key], done: !prev[key]?.done } }));
+    setSessionLogs(prev => ({ ...prev, [`${exoIdx}-${setIdx}`]: { ...prev[`${exoIdx}-${setIdx}`], done: !prev[`${exoIdx}-${setIdx}`]?.done } }));
   };
 
-  // --- PRÉPARATION DU RÉSUMÉ (AVANT SAUVEGARDE) ---
+  // --- 4. FIN DE SÉANCE ---
   const handleOpenSummary = () => {
     let totalVolume = 0;
     let totalSets = 0;
-
     Object.values(sessionLogs).forEach(log => {
         if (log.done) {
             totalSets++;
@@ -123,26 +155,26 @@ export default function Session() {
         }
     });
 
-    setSessionStats({
-        volume: totalVolume,
-        sets: totalSets,
-        time: seconds
-    });
+    // Formule Calories Muscu : Poids * Durée(min) * 0.07
+    const weight = parseFloat(userProfile?.weight) || 80;
+    const minutes = seconds / 60;
+    const caloriesBurned = Math.floor(minutes * weight * 0.07);
+
+    setSessionStats({ volume: totalVolume, sets: totalSets, time: seconds, calories: caloriesBurned });
     setShowSummaryModal(true);
   };
 
-  // --- SAUVEGARDE RÉELLE DANS FIREBASE ---
   const confirmSaveSession = async () => {
     if (!currentUser || !workout) return;
     setIsSaving(true);
-
     try {
         const historyItem = {
             id: Date.now().toString(),
-            name: workout.name || "Séance Libre",
+            name: workout.name,
             date: new Date().toISOString(),
             duration: sessionStats.time,
             volume: sessionStats.volume,
+            calories: sessionStats.calories, 
             totalSets: sessionStats.sets,
             type: 'workout', 
             logs: sessionLogs 
@@ -152,294 +184,145 @@ export default function Session() {
         await updateDoc(userRef, {
             history: arrayUnion(historyItem),
             workoutsCompleted: increment(1),
-            points: increment(sessionStats.sets * 10),
-            totalVolume: increment(sessionStats.volume)
+            points: increment(sessionStats.sets * 5 + 50),
+            totalVolume: increment(sessionStats.volume),
+            dailyBurnedCalories: increment(sessionStats.calories), // IMPORTANT: Ajout au dashboard
+            lastActiveDate: new Date().toISOString().split('T')[0]
         });
-
+        
+        try { await WearConnectivity.sendDataToWatch({ path: "/stop-session", data: "{}" }); } catch(e){}
         navigate('/dashboard'); 
-
-    } catch (e) {
-        console.error("Erreur sauvegarde session:", e);
-        alert("Erreur réseau. Réessaie.");
-    } finally {
-        setIsSaving(false);
+    } catch (e) { 
+        console.error(e);
+        setIsSaving(false); 
     }
   };
 
-  const confirmCancelSession = () => {
-      navigate('/dashboard');
-  };
+  if (loading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white">{t('loading')}...</div>;
 
-  if (loading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white">{t('loading')}</div>;
-
-  // --- ÉTAT : PAS DE SÉANCE ACTIVE ---
-  if (!workout) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white p-8 flex flex-col items-center justify-center relative overflow-hidden">
-        <div className="relative z-10 w-full max-w-2xl text-center">
-            <div className="mb-12 text-center opacity-50">
-                <h2 className="text-2xl font-bold uppercase">{t('no_active_session')}</h2>
+  // --- VUE 1 : DÉJÀ FAIT (COMPTE À REBOURS) ---
+  if (isCompletedToday) {
+      return (
+        <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col items-center justify-center p-8 text-center">
+            <CheckCircle className="w-24 h-24 text-[#00f5d4] mb-6" />
+            <h1 className="text-3xl font-black italic uppercase mb-2">Séance Terminée !</h1>
+            <p className="text-gray-400 mb-8">Excellent travail. Récupère bien.</p>
+            
+            <div className="bg-[#1a1a20] p-8 rounded-3xl border border-gray-800 w-full max-w-sm">
+                <p className="text-sm text-gray-500 font-bold uppercase mb-2">Prochain Entraînement</p>
+                <div className="flex items-center justify-center gap-3 text-[#7b2cbf]">
+                    <CalendarClock className="w-8 h-8"/>
+                    <span className="text-2xl font-black text-white">{getNextWorkoutInfo()}</span>
+                </div>
             </div>
-            <Link to="/exercises">
-                <Button className="bg-[#7b2cbf] hover:bg-[#9d4edd] gap-2 py-6 px-10 rounded-2xl font-black italic">
-                    {t('go_catalog')} <ArrowRight size={20} />
-                </Button>
-            </Link>
+            <Button onClick={() => navigate('/dashboard')} className="mt-8 bg-white text-black font-bold h-12 px-8 rounded-xl">Retour Dashboard</Button>
         </div>
-      </div>
-    );
+      );
   }
 
-  // --- ÉTAT : SÉANCE ACTIVE ---
+  // --- VUE 2 : PRÉSENTATION SÉANCE (AVANT START) ---
+  if (!isSessionStarted) {
+      return (
+        <div className="min-h-screen bg-[#0a0a0f] text-white p-6 pb-32">
+            <div className="mb-8">
+                <Button variant="ghost" onClick={() => navigate('/dashboard')} className="text-gray-500 pl-0 mb-4 hover:text-white"><ArrowRight className="rotate-180 mr-2"/> Retour</Button>
+                <h1 className="text-4xl font-black italic uppercase text-transparent bg-clip-text bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf]">
+                    {workout?.name || "Séance Libre"}
+                </h1>
+                <div className="flex gap-4 mt-4">
+                    <div className="bg-[#1a1a20] px-3 py-1 rounded-lg border border-gray-800 text-xs font-bold text-gray-400 flex items-center gap-2">
+                        <Dumbbell size={14}/> {workout?.exercises?.length || 0} Exercices
+                    </div>
+                    <div className="bg-[#1a1a20] px-3 py-1 rounded-lg border border-gray-800 text-xs font-bold text-gray-400 flex items-center gap-2">
+                        <Trophy size={14}/> +50 Pts
+                    </div>
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                {workout?.exercises?.map((exo, idx) => (
+                    <div key={idx} className="flex items-center gap-4 bg-[#1a1a20] p-3 rounded-2xl border border-gray-800">
+                        <div className="w-16 h-16 bg-black rounded-xl overflow-hidden flex-shrink-0">
+                            <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80" alt=""/>
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-lg leading-tight">{exo.name}</h3>
+                            <p className="text-xs text-gray-500 font-bold uppercase mt-1">{exo.sets} Séries x {exo.reps} Reps</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="fixed bottom-0 left-0 w-full p-4 bg-[#0a0a0f]/90 backdrop-blur-md border-t border-gray-800">
+                <Button onClick={handleStartSession} className="w-full h-14 text-xl font-black bg-[#00f5d4] text-black rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)]">
+                    <Play className="mr-2 fill-black"/> COMMENCER
+                </Button>
+            </div>
+        </div>
+      );
+  }
+
+  // --- VUE 3 : SÉANCE EN COURS ---
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white p-4 lg:p-8 pb-32">
-      <div className="max-w-3xl mx-auto">
-        
-        {/* Header */}
-        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-gray-800 pb-8">
-          <div className="flex-1">
-            <h1 className="text-4xl md:text-5xl font-black text-white uppercase italic tracking-tighter leading-none">
-              {workout.name}
-            </h1>
-            <div className="flex items-center gap-4 mt-4 text-gray-500">
-              <span className="flex items-center gap-1.5 bg-white/5 px-3 py-1 rounded-full text-xs font-bold border border-white/10">
-                <Dumbbell size={14} className="text-[#00f5d4]" /> {workout.exercises?.length} {t('exercises').toUpperCase()}
-              </span>
-              <span className="flex items-center gap-1.5 bg-white/5 px-3 py-1 rounded-full text-xs font-bold border border-white/10">
-                <Timer size={14} className="text-[#7b2cbf]" /> {formatTime(seconds)}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex gap-2 w-full md:w-auto">
-            {!isSessionStarted ? (
-                <Button 
-                onClick={() => setIsSessionStarted(true)}
-                className="flex-1 md:flex-none bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black font-black py-6 px-8 text-xl rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)] hover:scale-105 transition-transform italic"
-                >
-                <Play className="mr-2 fill-black" /> {t('lets_go')}
-                </Button>
-            ) : (
-                <Button variant="outline" onClick={() => setShowCancelModal(true)} className="border-red-500/50 text-red-500 hover:bg-red-500/10">
-                    <XCircle className="mr-2"/> Effacer
-                </Button>
-            )}
-          </div>
+    <div className="min-h-screen bg-[#0a0a0f] text-white p-4 pb-32">
+        <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-4 sticky top-0 bg-[#0a0a0f] z-10 pt-2">
+            <span className="font-mono text-3xl font-black text-[#00f5d4]">
+                {Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, '0')}
+            </span>
+            <Button variant="destructive" size="sm" onClick={() => setShowCancelModal(true)} className="h-8 text-xs font-bold">Abandonner</Button>
         </div>
 
-        {/* Liste des Exercices */}
         <div className="space-y-4">
-          {workout.exercises?.map((exo, idx) => {
-            const isExpanded = expandedExo === idx;
-            const isResting = activeRest.exoIdx === idx;
-
-            return (
-              <div 
-                key={idx} 
-                className={`transition-all duration-300 rounded-3xl overflow-hidden border ${
-                  isExpanded ? 'bg-[#14141c] border-[#7b2cbf] shadow-xl' : 'bg-[#1a1a20] border-gray-800'
-                }`}
-              >
-                {/* Header Exercice */}
-                <div 
-                  className="p-5 flex items-center justify-between cursor-pointer"
-                  onClick={() => setExpandedExo(isExpanded ? null : idx)}
-                >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="w-12 h-12 rounded-xl bg-black border border-gray-800 overflow-hidden flex-shrink-0">
-                      <img src={exo.imageUrl} alt={exo.name} className="w-full h-full object-cover opacity-80" onError={(e) => e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-lg truncate">{exo.name}</h3>
-                      <p className="text-xs text-gray-500 uppercase tracking-widest font-bold">
-                        {exo.sets || 3} {t('sets')} • {exo.reps || 10} Reps
-                      </p>
-                    </div>
-                  </div>
-                  <div className={`p-2 rounded-full transition-colors ${isExpanded ? 'bg-[#7b2cbf] text-white' : 'text-gray-500'}`}>
-                    {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                  </div>
-                </div>
-
-                {/* Détails Exercice */}
-                {isExpanded && (
-                  <div className="px-5 pb-6 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                    
-                    <div className="space-y-3">
-                      {Array.from({ length: parseInt(exo.sets || 3) }).map((_, i) => {
-                        const key = `${idx}-${i}`;
-                        const log = sessionLogs[key] || {};
-                        const isDone = log.done;
-
-                        return (
-                          <div 
-                            key={i} 
-                            className={`grid grid-cols-12 gap-3 items-center p-3 rounded-2xl transition-all border ${
-                              isDone ? 'bg-[#00f5d4]/10 border-[#00f5d4]/30' : 'bg-black/20 border-transparent'
-                            }`}
-                          >
-                            <div className="col-span-2 text-center">
-                              <span className={`text-sm font-black ${isDone ? 'text-[#00f5d4]' : 'text-gray-600'}`}>
-                                SET {i + 1}
-                              </span>
+            {workout?.exercises?.map((exo, idx) => {
+                const isExpanded = expandedExo === idx;
+                return (
+                    <div key={idx} className={`bg-[#1a1a20] border ${isExpanded ? 'border-[#7b2cbf]' : 'border-gray-800'} rounded-2xl overflow-hidden transition-all`}>
+                        <div className="p-4 flex justify-between items-center cursor-pointer" onClick={() => setExpandedExo(isExpanded ? null : idx)}>
+                            <div className="flex items-center gap-3">
+                                <span className="text-gray-500 font-bold text-sm w-6">#{idx+1}</span>
+                                <span className="font-bold">{exo.name}</span>
                             </div>
-                            
-                            <div className="col-span-4">
-                                <Input 
-                                  type="number"
-                                  placeholder={t('weight_kg')} 
-                                  className={`bg-black border-gray-800 text-center font-bold text-white h-12 rounded-xl ${isDone ? 'text-[#00f5d4]' : ''}`}
-                                  onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)}
-                                  value={log.weight || ''}
-                                />
-                            </div>
-
-                            <div className="col-span-4">
-                                <Input 
-                                  type="number"
-                                  placeholder="Reps" 
-                                  className={`bg-black border-gray-800 text-center font-bold text-white h-12 rounded-xl ${isDone ? 'text-[#00f5d4]' : ''}`}
-                                  onChange={(e) => handleSetChange(idx, i, 'reps', e.target.value)}
-                                  value={log.reps || ''}
-                                />
-                            </div>
-
-                            <div className="col-span-2 flex justify-center">
-                              <button 
-                                onClick={() => toggleSetComplete(idx, i)}
-                                className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
-                                  isDone 
-                                  ? 'bg-[#00f5d4] text-black shadow-[0_0_15px_rgba(0,245,212,0.4)]' 
-                                  : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
-                                }`}
-                              >
-                                <CheckCircle size={24} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-6 pt-4 border-t border-gray-800 flex justify-center">
-                      <Button 
-                        variant="outline" 
-                        disabled={isResting}
-                        onClick={() => startRest(idx, exo.rest)}
-                        className={`gap-2 w-full py-7 rounded-2xl text-lg font-bold transition-all ${
-                          isResting 
-                          ? 'border-[#00f5d4] text-[#00f5d4] bg-[#00f5d4]/10' 
-                          : 'border-[#7b2cbf] text-[#7b2cbf] hover:bg-[#7b2cbf] hover:text-white'
-                        }`}
-                      >
-                         <RotateCcw size={20} className={isResting ? 'animate-spin' : ''} /> 
-                         {isResting ? `${t('rest_active')} : ${activeRest.timeLeft}s` : `${t('start_rest')} (${exo.rest || 90}s)`}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* --- FOOTER FLOTTANT (FINIR / ANNULER) --- */}
-      {isSessionStarted && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#0a0a0f]/90 backdrop-blur-xl border-t border-gray-800 lg:left-64 z-50">
-          <div className="max-w-3xl mx-auto flex gap-4">
-            <Button 
-              variant="outline"
-              className="py-8 border-red-500/30 text-red-500 hover:bg-red-500/10 font-bold rounded-2xl flex-1"
-              onClick={() => setShowCancelModal(true)}
-            >
-              <XCircle className="mr-2"/> {t('cancel')}
-            </Button>
-
-            <Button 
-              className="py-8 bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf] text-black font-black text-xl rounded-2xl shadow-[0_0_30px_rgba(123,44,191,0.3)] hover:scale-[1.02] transition-transform italic flex-[2]"
-              onClick={handleOpenSummary}
-              disabled={isSaving}
-            >
-              {isSaving ? "Sauvegarde..." : <><Save className="mr-2"/> {t('end_session')}</>}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* --- MODALE 1: CONFIRMATION D'ANNULATION --- */}
-      <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
-        <DialogContent className="bg-[#1a1a20] border-red-500/30 text-white rounded-3xl max-w-sm">
-            <DialogHeader>
-                <DialogTitle className="text-2xl font-black text-red-500 italic uppercase flex items-center gap-2">
-                    <AlertCircle /> Attention
-                </DialogTitle>
-                <DialogDescription className="text-gray-400 text-lg">
-                    Voulez-vous vraiment abandonner ?<br/>
-                    <span className="text-xs text-gray-500">Aucune donnée ne sera sauvegardée.</span>
-                </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="grid grid-cols-2 gap-4 mt-4">
-                <Button variant="outline" onClick={() => setShowCancelModal(false)} className="h-12 rounded-xl border-gray-700">Retour</Button>
-                <Button onClick={confirmCancelSession} className="h-12 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold">Effacer</Button>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* --- MODALE 2: RÉSUMÉ DE SESSION & RAPPELS --- */}
-      <Dialog open={showSummaryModal} onOpenChange={setShowSummaryModal}>
-        <DialogContent className="bg-[#0a0a0f] border-[#7b2cbf]/50 text-white rounded-3xl max-w-md p-0 overflow-hidden">
-            <div className="bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] p-6 text-center">
-                <Trophy className="mx-auto text-black mb-2 w-12 h-12 drop-shadow-lg" />
-                <DialogTitle className="text-3xl font-black text-black italic uppercase">SESSION TERMINÉE !</DialogTitle>
-                <p className="text-black/70 font-bold text-sm">Beau travail, continue comme ça.</p>
-            </div>
-            
-            <div className="p-6 space-y-6">
-                {/* Stats Grid */}
-                <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-[#1a1a20] p-3 rounded-xl border border-gray-800 text-center">
-                        <Activity className="mx-auto text-[#00f5d4] w-5 h-5 mb-1" />
-                        <p className="text-lg font-black text-white">{sessionStats.sets}</p>
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">Séries</p>
-                    </div>
-                    <div className="bg-[#1a1a20] p-3 rounded-xl border border-gray-800 text-center">
-                        <Dumbbell className="mx-auto text-[#7b2cbf] w-5 h-5 mb-1" />
-                        <p className="text-lg font-black text-white">{(sessionStats.volume / 1000).toFixed(1)}T</p>
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">Volume</p>
-                    </div>
-                    <div className="bg-[#1a1a20] p-3 rounded-xl border border-gray-800 text-center">
-                        <Timer className="mx-auto text-white w-5 h-5 mb-1" />
-                        <p className="text-lg font-black text-white">{Math.floor(sessionStats.time / 60)}</p>
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">Minutes</p>
-                    </div>
-                </div>
-
-                {/* Rappels Visuels */}
-                <div className="space-y-3">
-                    <div className="bg-[#1a1a20] p-4 rounded-xl border border-gray-800 flex items-center gap-4">
-                        <div className="p-3 bg-[#00f5d4]/10 rounded-full text-[#00f5d4]"><Scale size={20}/></div>
-                        <div>
-                            <p className="font-bold text-sm text-white">Suivi du Poids</p>
-                            <p className="text-xs text-gray-500">N'oublie pas de te peser demain matin à jeun.</p>
+                            {isExpanded ? <ChevronUp/> : <ChevronDown/>}
                         </div>
+                        {isExpanded && (
+                            <div className="p-4 pt-0 space-y-3 bg-[#14141a]">
+                                {Array.from({ length: parseInt(exo.sets) }).map((_, i) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-500 w-12 font-bold">SET {i+1}</span>
+                                        <Input type="number" placeholder={exo.weight || "kg"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)} />
+                                        <Input type="number" placeholder={exo.reps || "reps"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" onChange={(e) => handleSetChange(idx, i, 'reps', e.target.value)} />
+                                        <button onClick={() => toggleSetComplete(idx, i)} className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors ${sessionLogs[`${idx}-${i}`]?.done ? 'bg-[#00f5d4] text-black' : 'bg-gray-800 text-gray-500'}`}><CheckCircle size={20}/></button>
+                                    </div>
+                                ))}
+                                <Button variant="outline" onClick={() => startRest(idx, exo.rest)} className={`w-full mt-2 font-bold ${activeRest.exoIdx === idx ? 'border-[#00f5d4] text-[#00f5d4]' : 'border-[#7b2cbf] text-[#7b2cbf]'}`}>
+                                    <RotateCcw className={`mr-2 ${activeRest.exoIdx === idx ? 'animate-spin' : ''}`} size={16}/> 
+                                    {activeRest.exoIdx === idx ? `${activeRest.timeLeft}s` : `Lancer Repos (${exo.rest}s)`}
+                                </Button>
+                            </div>
+                        )}
                     </div>
-                    <div className="bg-[#1a1a20] p-4 rounded-xl border border-gray-800 flex items-center gap-4">
-                        <div className="p-3 bg-[#7b2cbf]/10 rounded-full text-[#7b2cbf]"><Camera size={20}/></div>
-                        <div>
-                            <p className="font-bold text-sm text-white">Progression Visuelle</p>
-                            <p className="text-xs text-gray-500">Prends une photo pour voir tes progrès !</p>
-                        </div>
-                    </div>
-                </div>
+                );
+            })}
+        </div>
 
-                <Button onClick={confirmSaveSession} className="w-full h-14 text-lg font-black bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)]">
-                    {isSaving ? "Sauvegarde..." : "ENREGISTRER & QUITTER"}
+        <div className="fixed bottom-0 left-0 w-full p-4 bg-[#0a0a0f]/95 border-t border-gray-800 backdrop-blur-md">
+            <Button onClick={handleOpenSummary} className="w-full h-12 font-black bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf] text-black rounded-xl text-lg shadow-[0_0_20px_rgba(0,245,212,0.2)]">
+                TERMINER LA SÉANCE
+            </Button>
+        </div>
+
+        <Dialog open={showSummaryModal} onOpenChange={setShowSummaryModal}>
+            <DialogContent className="bg-[#1a1a20] border-[#00f5d4] text-white">
+                <DialogHeader><DialogTitle className="text-[#00f5d4] italic uppercase text-2xl text-center">SESSION TERMINÉE</DialogTitle></DialogHeader>
+                <div className="grid grid-cols-2 gap-4 py-6 text-center">
+                    <div className="bg-black/50 p-4 rounded-2xl border border-gray-800"><Activity className="mx-auto mb-2 text-gray-500"/><p className="text-gray-500 text-xs uppercase font-bold">Durée</p><p className="text-2xl font-black text-white">{Math.floor(sessionStats.time / 60)} min</p></div>
+                    <div className="bg-black/50 p-4 rounded-2xl border border-gray-800"><Trophy className="mx-auto mb-2 text-[#fdcb6e]"/><p className="text-gray-500 text-xs uppercase font-bold">Calories</p><p className="text-2xl font-black text-[#00f5d4]">{sessionStats.calories}</p></div>
+                </div>
+                <Button onClick={confirmSaveSession} disabled={isSaving} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black h-12 rounded-xl">
+                    {isSaving ? "SAUVEGARDE..." : "ENREGISTRER & QUITTER"}
                 </Button>
-            </div>
-        </DialogContent>
-      </Dialog>
-
+            </DialogContent>
+        </Dialog>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { db } from '@/lib/firebase';
 import { 
-  doc, getDoc, collection, addDoc, query, where, getDocs, orderBy, deleteDoc, updateDoc, arrayUnion 
+  doc, getDoc, collection, addDoc, query, where, getDocs, orderBy, deleteDoc, updateDoc, arrayUnion, increment, setDoc
 } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,16 +13,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { 
   Dumbbell, Flame, Trophy, TrendingUp, Calendar, 
-  ArrowRight, Plus, Zap, Target, Clock, Users, Edit3, MapPin, UserPlus, Trash2, ChefHat, Activity, AlertTriangle, CreditCard
+  ArrowRight, Plus, Zap, Target, Clock, Users, Edit3, MapPin, UserPlus, Trash2, ChefHat, Activity, AlertTriangle, CreditCard, RefreshCw, CheckCircle, Utensils, HeartPulse, Footprints, Droplets, Minus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from 'react-i18next';
-import HealthTracker from '@/components/HealthTracker';
 import SmartCalorieWidget from '@/components/SmartCalorieWidget';
-import { Capacitor } from '@capacitor/core';
-// IMPORT MOTION (Pour le fallback accéléromètre si besoin)
+
+// --- IMPORTS NATIFS & PLUGINS ---
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Motion } from '@capacitor/motion';
+
+// ENREGISTREMENT DU PLUGIN MONTRE (Pont Java)
+const WearConnectivity = registerPlugin('WearConnectivity');
 
 // --- FONCTION DE SÉCURITÉ POUR LES DATES ---
 const safeDate = (dateVal) => {
@@ -50,7 +53,15 @@ export default function Dashboard() {
   const [isCoach, setIsCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false); // État pour l'animation Sync
   
+  // États Montre / Health Services
+  const [watchHeartRate, setWatchHeartRate] = useState(0);
+
+  // Nouveaux États pour les Points 7 & 8
+  const [todayWorkout, setTodayWorkout] = useState(null);
+  const [todayMeals, setTodayMeals] = useState([]);
+
   // États Coach
   const [isRdvOpen, setIsRdvOpen] = useState(false);
   const [rdvData, setRdvData] = useState({ clientName: '', date: '', location: '', workoutId: 'none' });
@@ -63,8 +74,89 @@ export default function Dashboard() {
   // État Calendrier
   const [currentDate, setCurrentDate] = useState(new Date());
 
+  // Modale Ajout Pas Manuel
+  const [isAddStepsOpen, setIsAddStepsOpen] = useState(false);
+  const [manualSteps, setManualSteps] = useState(0);
+
   const weekDaysShort = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   const todayName = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][new Date().getDay()];
+
+  // --- ÉCOUTEUR DE LA MONTRE ---
+  useEffect(() => {
+    if (!currentUser || isCoachView || !Capacitor.isNativePlatform()) return;
+
+    let healthListener;
+    const setupListener = async () => {
+        try {
+            healthListener = await WearConnectivity.addListener('onHealthUpdate', (data) => {
+                console.log("⌚ Données Montre reçues:", data);
+                if (data.type === 'heart_rate') {
+                    setWatchHeartRate(parseInt(data.value));
+                } else if (data.type === 'passive_update') {
+                    setUserProfile(prev => {
+                        const newSteps = data.steps || prev?.dailySteps || 0;
+                        const newBurned = data.calories || prev?.dailyBurnedCalories || 0;
+                        updateDoc(doc(db, "users", currentUser.uid), {
+                            dailySteps: newSteps,
+                            dailyBurnedCalories: newBurned
+                        });
+                        return { ...prev, dailySteps: newSteps, dailyBurnedCalories: newBurned };
+                    });
+                }
+            });
+        } catch (e) {
+            console.warn("WearConnectivity non disponible");
+        }
+    };
+
+    setupListener();
+
+    return () => {
+        if (healthListener) {
+            healthListener.remove();
+        }
+    };
+  }, [currentUser, isCoachView]);
+
+  // --- FONCTION SYNCHRO MONTRE (CALENDRIER ET SANTÉ) ---
+  const syncCalendarToWatch = async (profileData) => {
+    if (!Capacitor.isNativePlatform()) return;
+    setIsSyncing(true);
+
+    const workouts = profileData?.workouts || [];
+    const weekDaysFull = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+    // On prépare un calendrier enrichi avec sessions et repas
+    const complexCalendar = weekDaysFull.map(day => {
+        const workout = workouts.find(w => w.scheduledDays?.includes(day));
+        const mealPlan = profileData?.nutritionalPlans?.find(p => p.scheduledDays?.includes(day));
+
+        return {
+            day: day,
+            workout: workout ? workout.name : "Repos",
+            meals: mealPlan ? mealPlan.meals.map(m => m.name).join(', ') : "Standard"
+        };
+    });
+
+    // Données santé actuelles
+    const healthStats = {
+        steps: profileData?.dailySteps || 0,
+        goal: profileData?.stepGoal || 10000,
+        burned: profileData?.dailyBurnedCalories || 0,
+        points: profileData?.points || 0
+    };
+
+    try {
+        await WearConnectivity.sendDataToWatch({
+            path: "/update-complex-data",
+            data: JSON.stringify({ calendar: complexCalendar, health: healthStats })
+        });
+        console.log("📅 Données complexes envoyées à la montre !");
+    } catch (e) {
+        console.warn("Montre non connectée");
+    }
+    setTimeout(() => setIsSyncing(false), 1000);
+  };
 
   // 1. INITIALISATION DES DONNÉES & LOGIQUE RESET MINUIT
   useEffect(() => {
@@ -94,50 +186,43 @@ export default function Dashboard() {
                 
                 if (profileSnap.exists()) {
                     let data = profileSnap.data();
-                    
-                    // --- LOGIQUE RESET MINUIT (Hydratation, Pas & CALORIES) ---
                     const todayStr = getTodayString();
                     
-                    // Si la date enregistrée n'est pas celle d'aujourd'hui, on reset tout
+                    // --- LOGIQUE RESET MINUIT ---
                     if (data.lastActiveDate !== todayStr && !isCoachView) {
-                        console.log("🌙 Nouveau jour détecté : Reset complet (Eau, Pas, Calories)...");
-                        
-                        // 1. Archiver la journée d'hier dans l'historique santé
+                        console.log("🌙 Nouveau jour détecté : Reset...");
                         const yesterdayStats = {
                             date: data.lastActiveDate || new Date().toISOString(),
                             water: data.dailyWater || 0,
                             steps: data.dailySteps || 0,
-                            calories: data.dailyCalories || 0, // Calories mangées
-                            burned: data.dailyBurnedCalories || 0, // Calories brûlées
+                            calories: data.dailyCalories || 0,
+                            burned: data.dailyBurnedCalories || 0,
                             type: 'daily_summary'
                         };
 
-                        // 2. Mise à jour Database (Reset + Archive)
                         await updateDoc(profileRef, {
                             dailyWater: 0,
                             dailySteps: 0,
-                            dailyCalories: 0, // RESET DES CALORIES CONSOMMÉES
-                            // dailyBurnedCalories se resettera tout seul via HealthConnect qui lit "depuis minuit"
+                            dailyCalories: 0, 
                             lastActiveDate: todayStr,
                             history: arrayUnion(yesterdayStats) 
                         });
-                        
-                        // Mise à jour locale immédiate pour l'UI
-                        data.dailyWater = 0;
-                        data.dailySteps = 0;
-                        data.dailyCalories = 0;
-                        data.lastActiveDate = todayStr;
+                        data.dailyWater = 0; data.dailySteps = 0; data.dailyCalories = 0; data.lastActiveDate = todayStr;
                     }
 
+                    // --- PRÉPARATION SÉANCE & REPAS DU JOUR ---
+                    const workout = data.workouts?.find(w => w.scheduledDays?.includes(todayName));
+                    if(workout) setTodayWorkout(workout);
+
+                    const plan = data.nutritionalPlans?.find(p => p.scheduledDays?.includes(todayName));
+                    if(plan) setTodayMeals(plan.meals || []);
+
+                    if (!isCoachView && Capacitor.isNativePlatform()) syncCalendarToWatch(data);
                     if (isMounted) setUserProfile(data);
                 }
 
                 if (!isCoachView) {
-                    const invQ = query(
-                        collection(db, "invoices"), 
-                        where("clientId", "==", targetId), 
-                        where("status", "==", "pending")
-                    );
+                    const invQ = query(collection(db, "invoices"), where("clientId", "==", targetId), where("status", "==", "pending"));
                     const invSnap = await getDocs(invQ);
                     if(isMounted) setHasPendingInvoices(!invSnap.empty);
                 }
@@ -154,201 +239,137 @@ export default function Dashboard() {
     return () => { isMounted = false; };
   }, [currentUser, targetUserId, isCoachView]);
 
-  // 2. INTEGRATION HEALTH CONNECT (PAS & CALORIES BRÛLÉES)
+  // 2. ACCÉLÉROMÈTRE MOBILE (FALLBACK SI PAS DE MONTRE)
   useEffect(() => {
-    // Ne s'exécute que sur mobile et pas en mode vue coach
     if (!Capacitor.isNativePlatform() || isCoachView || !currentUser) return;
+    
+    let accX = 0, accY = 0, accZ = 0;
+    const kcalPerStep = (parseFloat(userProfile?.weight) || 75) * 0.00075;
 
-    const fetchHealthData = async () => {
+    const startCounting = async () => {
         try {
-            const isAvailable = await HealthConnect.isAvailable();
-            if (isAvailable) {
-                // Vérifier/Demander permissions
-                const permissions = await HealthConnect.checkPermissions({
-                    read: ['Steps', 'TotalCaloriesBurned']
-                });
+            await Motion.addListener('accel', event => {
+                const { x, y, z } = event.accelerationIncludingGravity;
+                const delta = Math.abs(x - accX) + Math.abs(y - accY) + Math.abs(z - accZ);
                 
-                if (permissions.granted.length === 0) {
-                     await HealthConnect.requestPermissions({
-                        read: ['Steps', 'TotalCaloriesBurned']
+                if (delta > 15) {
+                    setUserProfile(prev => {
+                        const newSteps = (prev?.dailySteps || 0) + 1;
+                        const addedBurn = kcalPerStep;
+                        if (newSteps % 50 === 0) {
+                            updateDoc(doc(db, "users", currentUser.uid), { 
+                                dailySteps: newSteps,
+                                dailyBurnedCalories: increment(addedBurn * 50)
+                            });
+                        }
+                        return { ...prev, dailySteps: newSteps, dailyBurnedCalories: (prev?.dailyBurnedCalories || 0) + addedBurn };
                     });
                 }
-
-                // Lire les données d'aujourd'hui (Depuis Minuit)
-                const now = new Date();
-                const startOfDay = new Date(now);
-                startOfDay.setHours(0, 0, 0, 0);
-
-                const result = await HealthConnect.queryAggregate({
-                    startTime: startOfDay,
-                    endTime: now,
-                    aggregate: {
-                        stepCount: 'count',
-                        caloriesBurned: 'total'
-                    }
-                });
-
-                // Mise à jour si nouvelles données
-                if (result) {
-                    const steps = result.stepCount || 0;
-                    const burned = result.caloriesBurned?.kilocalories || result.caloriesBurned || 0;
-
-                    // On ne met à jour Firebase que si ça a changé significativement
-                    if (userProfile && (steps !== userProfile.dailySteps || burned !== userProfile.dailyBurnedCalories)) {
-                        const userRef = doc(db, "users", currentUser.uid);
-                        await updateDoc(userRef, {
-                            dailySteps: steps,
-                            dailyBurnedCalories: Math.floor(burned) // Sauvegarde des calories brûlées
-                        });
-                        setUserProfile(prev => ({ 
-                            ...prev, 
-                            dailySteps: steps,
-                            dailyBurnedCalories: Math.floor(burned)
-                        }));
-                    }
-                }
-            }
-        } catch (e) {
-            console.error("Erreur Sync Health Connect:", e);
-        }
+                accX = x; accY = y; accZ = z;
+            });
+        } catch (e) { console.error("Erreur Motion", e); }
     };
+    startCounting();
+    return () => {
+        try {
+            Motion.removeAllListeners();
+        } catch (e) {}
+    };
+  }, [currentUser, isCoachView, userProfile?.weight]);
 
-    // Lancer la synchro
-    fetchHealthData();
-    // Rafraîchir toutes les 5 min
-    const interval = setInterval(fetchHealthData, 300000); 
-
-    return () => clearInterval(interval);
-  }, [currentUser, isCoachView, userProfile]);
-
-  // 3. FONCTION AJOUT EAU (Passée au HealthTracker)
+  // 3. FONCTION AJOUT EAU
   const handleAddWater = async (amountML) => {
     if (!currentUser || isCoachView) return;
-    
     try {
         const currentWater = userProfile?.dailyWater || 0;
         const newTotal = currentWater + amountML;
-        
-        // Mise à jour Optimiste UI
         setUserProfile(prev => ({ ...prev, dailyWater: newTotal }));
-
-        // Sauvegarde DB
         const userRef = doc(db, "users", currentUser.uid);
-        await updateDoc(userRef, {
-            dailyWater: newTotal,
-            lastActiveDate: getTodayString() // Confirme l'activité du jour
-        });
-    } catch (e) {
-        console.error("Erreur ajout eau:", e);
-    }
+        await updateDoc(userRef, { dailyWater: newTotal, lastActiveDate: getTodayString() });
+    } catch (e) { console.error("Erreur ajout eau:", e); }
   };
 
-  // 4. LOGIQUE COACH (Existante - inchangée)
+  // 4. FONCTION AJOUT PAS MANUEL
+  const handleManualSteps = async () => {
+    if (!currentUser || manualSteps <= 0) return;
+    const kcalPerStep = (parseFloat(userProfile?.weight) || 75) * 0.00075;
+    const addedBurn = manualSteps * kcalPerStep;
+
+    const userRef = doc(db, "users", currentUser.uid);
+    await updateDoc(userRef, {
+        dailySteps: increment(manualSteps),
+        dailyBurnedCalories: increment(addedBurn)
+    });
+
+    setUserProfile(prev => ({
+        ...prev,
+        dailySteps: (prev.dailySteps || 0) + parseInt(manualSteps),
+        dailyBurnedCalories: (prev.dailyBurnedCalories || 0) + addedBurn
+    }));
+
+    setIsAddStepsOpen(false);
+    setManualSteps(0);
+  };
+
+  // 5. GESTION REPAS
+  const handleEatMeal = async (meal) => {
+      if(!meal.calories) return;
+      const cal = parseInt(meal.calories);
+      const userRef = doc(db, "users", currentUser.uid);
+      await updateDoc(userRef, { dailyCalories: increment(cal) });
+      setUserProfile(prev => ({ ...prev, dailyCalories: (prev.dailyCalories || 0) + cal }));
+  };
+
+  // --- LOGIQUE COACH ---
   const loadCoachTemplates = async (uid) => {
       try {
           const q = query(collection(db, "users", uid, "templates"), orderBy("createdAt", "desc"));
           const snap = await getDocs(q);
           setCoachTemplates(snap.docs.map(d => ({id: d.id, ...d.data()})));
-      } catch(e) { console.error("Templates error", e); }
+      } catch(e) {}
   };
 
   const loadAppointments = async (uid) => {
       try {
           const q = query(collection(db, "appointments"), where("coachId", "==", uid));
           const snap = await getDocs(q);
-          const rdvList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-          rdvList.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-          setAppointments(rdvList);
-      } catch(e) { console.error("RDV error", e); }
+          setAppointments(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      } catch(e) {}
   };
 
   const handleSaveRdv = async () => {
       if(!rdvData.clientName || !rdvData.date) return alert(t('error'));
       try {
-          const workoutName = rdvData.workoutId !== 'none' 
-            ? coachTemplates.find(t => t.id === rdvData.workoutId)?.name 
-            : null;
-
+          const workoutName = rdvData.workoutId !== 'none' ? coachTemplates.find(t => t.id === rdvData.workoutId)?.name : null;
           const newRdv = {
-              coachId: currentUser?.uid,
-              clientName: rdvData.clientName,
-              date: rdvData.date,
-              location: rdvData.location || "Gym",
-              workoutId: rdvData.workoutId !== 'none' ? rdvData.workoutId : null,
-              workoutName: workoutName,
-              status: 'upcoming',
-              createdAt: new Date().toISOString()
+              coachId: currentUser?.uid, clientName: rdvData.clientName, date: rdvData.date,
+              location: rdvData.location || "Gym", workoutId: rdvData.workoutId !== 'none' ? rdvData.workoutId : null,
+              workoutName: workoutName, status: 'upcoming', createdAt: new Date().toISOString()
           };
-
           const docRef = await addDoc(collection(db, "appointments"), newRdv);
-          const updated = [...appointments, { id: docRef.id, ...newRdv }];
-          updated.sort((a, b) => new Date(a.date) - new Date(b.date));
-          
-          setAppointments(updated);
-          setIsRdvOpen(false);
-          setRdvData({ clientName: '', date: '', location: '', workoutId: 'none' });
+          setAppointments([...appointments, { id: docRef.id, ...newRdv }]);
+          setIsRdvOpen(false); setRdvData({ clientName: '', date: '', location: '', workoutId: 'none' });
       } catch(e) { alert(t('error')); }
   };
 
-  // --- CALENDRIER UI ---
-  const renderCalendarDays = () => {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth();
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      const firstDay = new Date(year, month, 1).getDay();
-      const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1;
-
-      const days = [];
-      for (let i = 0; i < adjustedFirstDay; i++) days.push(<div key={`empty-${i}`} className="h-8 w-8"></div>);
-
-      for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = `${year}-${String(month+1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          const isToday = new Date().toISOString().split('T')[0] === dateStr;
-          const hasRdv = appointments.some(a => a.date && a.date.startsWith(dateStr));
-
-          days.push(
-              <div key={d} className={`h-8 w-8 flex items-center justify-center rounded-full text-xs font-medium relative cursor-default
-                  ${isToday ? 'bg-[#9d4edd] text-white font-bold' : 'text-gray-400 hover:bg-white/10'}
-                  ${hasRdv && !isToday ? 'border border-[#9d4edd] text-[#9d4edd]' : ''}
-              `}>
-                  {d}
-                  {hasRdv && <div className="absolute bottom-1 w-1 h-1 bg-[#00f5d4] rounded-full"></div>}
-              </div>
-          );
-      }
-      return days;
-  };
-
-  // --- UI HELPERS ---
-  const getFirstName = () => {
-    if (userProfile?.firstName) return userProfile.firstName;
-    if (userProfile?.first_name) return userProfile.first_name;
-    if (userProfile?.full_name) return userProfile.full_name.split(' ')[0];
-    return "Athlète";
-  };
-
-  const currentWeight = parseFloat(userProfile?.weight || 0);
+  const getFirstName = () => userProfile?.firstName || userProfile?.first_name || "Athlète";
+  
+  // --- VARIABLES D'AFFICHAGE & CALCULS ---
+  const currentWeight = userProfile?.weight ? parseFloat(userProfile.weight) : 0;
   const targetWeight = parseFloat(userProfile?.targetWeight || 0);
   const weightDiff = targetWeight - currentWeight;
   const isWeightLoss = weightDiff < 0;
-  
-  const activePlan = userProfile?.nutritionalPlans?.find(p => p?.scheduledDays?.includes(todayName));
-  const dailyCalories = activePlan?.totalMacros?.cal || 0;
 
-  let daysLeft = null;
-  if (userProfile?.targetDate) {
-    try {
-        const diff = new Date(userProfile.targetDate) - new Date();
-        daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    } catch(e) {}
-  }
+  const currentSteps = userProfile?.dailySteps || 0;
+  const burnedCalories = userProfile?.dailyBurnedCalories || 0;
+  const stepGoal = userProfile?.stepGoal || 10000;
 
-  const recentActivity = userProfile?.history?.slice(-3).reverse() || [];
-  
   const getWorkoutForDay = (dayIndex) => {
     const dayNamesFull = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     return userProfile?.workouts?.find(w => w?.scheduledDays?.includes(dayNamesFull[dayIndex]));
   };
+
+  const recentActivity = userProfile?.history?.slice(-3).reverse() || [];
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] text-[#9d4edd]">{t('loading')}</div>;
   if (error) return <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] text-red-500 gap-2"><AlertTriangle/> {error}</div>;
@@ -356,23 +377,6 @@ export default function Dashboard() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
       
-      {/* BANNIÈRE COACH */}
-      {isCoachView && (
-        <div className="bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white p-4 rounded-xl flex flex-col md:flex-row items-center justify-between shadow-lg border border-white/10">
-             <div className="flex items-center gap-4 mb-3 md:mb-0">
-                <div className="bg-white/20 p-2 rounded-full"><Users className="text-white h-6 w-6"/></div>
-                <div>
-                    <p className="text-xs uppercase font-bold opacity-80 tracking-wider">Supervision Active</p>
-                    <p className="font-black text-xl">Client : {userProfile?.full_name || "Inconnu"}</p>
-                </div>
-             </div>
-             <div className="flex gap-2">
-                 <Link to="/messages"><Button variant="secondary" className="text-[#7b2cbf] font-bold text-xs h-9">{t('messages')}</Button></Link>
-                 <Link to="/coach/payments"><Button variant="outline" className="border-white text-white hover:bg-white/20 font-bold text-xs h-9">Paiements</Button></Link>
-             </div>
-        </div>
-      )}
-
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-6 bg-gradient-to-r from-[#7b2cbf]/10 to-transparent p-8 rounded-3xl border border-[#7b2cbf]/20 relative overflow-hidden">
         <div className="relative z-10">
@@ -386,19 +390,10 @@ export default function Dashboard() {
         
         <div className="flex gap-2 relative z-10">
             {hasPendingInvoices && !isCoachView && (
-                <Link to="/my-coach">
-                    <Button className="bg-orange-500 hover:bg-orange-600 text-white font-bold animate-pulse shadow-[0_0_15px_rgba(249,115,22,0.5)]">
-                        <CreditCard className="mr-2 h-4 w-4"/> {t('pending_payments')}
-                    </Button>
-                </Link>
+                <Link to="/my-coach"><Button className="bg-orange-500 hover:bg-orange-600 text-white font-bold animate-pulse shadow-[0_0_15px_rgba(249,115,22,0.5)]"><CreditCard className="mr-2 h-4 w-4"/> {t('pending_payments')}</Button></Link>
             )}
-
             {!isCoachView && (
-                <Link to="/session">
-                    <Button className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 px-8 rounded-xl shadow-[0_0_20px_rgba(0,245,212,0.3)] transition-transform hover:scale-105">
-                        <Zap className="mr-2 h-5 w-5 fill-black" /> {t('start_session')}
-                    </Button>
-                </Link>
+                <Link to="/session"><Button className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 px-8 rounded-xl shadow-[0_0_20px_rgba(0,245,212,0.3)] transition-transform hover:scale-105"><Zap className="mr-2 h-5 w-5 fill-black" /> {t('start_session')}</Button></Link>
             )}
         </div>
         <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-[#7b2cbf]/10 to-transparent pointer-events-none"></div>
@@ -407,273 +402,242 @@ export default function Dashboard() {
       {/* GRILLE PRINCIPALE */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* COLONNE GAUCHE (WIDGETS POIDS/NUTRITION + TRACKER) */}
         <div className="lg:col-span-2 space-y-6">
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Widget Poids */}
+                {/* Poids */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#00f5d4] relative overflow-hidden group flex flex-col justify-between">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-[#7b2cbf]/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 pointer-events-none" />
                     <div className="relative z-10">
                         <div className="flex justify-between items-start mb-4">
                             <div className="flex items-center gap-2"><Target className="text-[#00f5d4]" size={20}/><h3 className="font-bold text-gray-200">{t('weight')}</h3></div>
                             {userProfile?.targetWeight && (
-                                <Badge className={`border-none ${isWeightLoss ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                                    {isWeightLoss ? '-' : '+'}{Math.abs(weightDiff).toFixed(1)} {userProfile?.weightUnit || 'kg'}
-                                </Badge>
+                                <Badge className={`border-none ${isWeightLoss ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{isWeightLoss ? '-' : '+'}{Math.abs(weightDiff).toFixed(1)} {userProfile?.weightUnit || 'kg'}</Badge>
                             )}
                         </div>
-                        
                         {userProfile?.targetWeight ? (
-                            <>
-                                <div className="flex items-end justify-between mb-2">
-                                    <div><p className="text-4xl font-black text-white">{currentWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{t('current')}</span></div>
-                                    <div className="h-1 flex-1 mx-4 bg-gray-800 rounded-full overflow-hidden self-center mb-4"><div className="h-full bg-[#00f5d4] w-1/2"></div></div>
-                                    <div className="text-right"><p className="text-4xl font-black text-[#00f5d4]">{targetWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{t('target')}</span></div>
-                                </div>
-                                {daysLeft && <p className="text-xs text-gray-500 flex items-center mt-2 border-t border-gray-800 pt-2"><Clock size={10} className="mr-1"/> Objectif dans {daysLeft} jours</p>}
-                            </>
-                        ) : (
-                            <div className="text-center py-4">
-                                <p className="text-gray-500 text-sm mb-2">Pas d'objectif défini.</p>
-                                <Link to="/profile"><Button variant="outline" size="sm" className="text-[#00f5d4] border-[#00f5d4] hover:bg-[#00f5d4]/10">Définir</Button></Link>
+                            <div className="flex items-end justify-between mb-2">
+                                <div><p className="text-4xl font-black text-white">{currentWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{t('current')}</span></div>
+                                <div className="text-right"><p className="text-4xl font-black text-[#00f5d4]">{targetWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{t('target')}</span></div>
                             </div>
+                        ) : (
+                            <div className="text-center py-4"><Link to="/profile"><Button variant="outline" size="sm" className="text-[#00f5d4] border-[#00f5d4]">Définir</Button></Link></div>
                         )}
                     </div>
                 </div>
 
-                {/* Widget Nutrition */}
-                <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#7b2cbf] flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                        <div className="flex items-center gap-2"><Flame className="text-[#7b2cbf]" size={20}/><h3 className="font-bold text-gray-200">{t('meals')}</h3></div>
+                {/* Nutrition DU JOUR */}
+                <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#7b2cbf] flex flex-col justify-between shadow-xl">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-2"><Utensils className="text-[#7b2cbf]" size={20}/><h3 className="font-bold text-gray-200">Repas du Jour</h3></div>
                         {isCoachView && <Link to="/meals"><Button size="icon" variant="ghost" className="h-6 w-6"><Edit3 size={14}/></Button></Link>}
                     </div>
                     
-                    {activePlan ? (
-                        <>
-                            <div className="flex items-center justify-center py-4">
-                                <div className="text-center">
-                                    <span className="text-4xl font-black text-white">{dailyCalories}</span>
-                                    <p className="text-[10px] text-gray-500 uppercase font-bold mt-1">Kcal / Jour</p>
+                    <div className="space-y-2 max-h-[150px] overflow-y-auto custom-scrollbar">
+                        {todayMeals.length > 0 ? todayMeals.map((meal, idx) => (
+                            <div key={idx} className="flex justify-between items-center bg-black/30 p-2 rounded-lg border border-white/5">
+                                <div>
+                                    <p className="text-xs font-bold text-white truncate">{meal.name}</p>
+                                    <p className="text-[10px] text-gray-500">{meal.calories} kcal</p>
                                 </div>
+                                <Button size="sm" variant="ghost" onClick={() => handleEatMeal(meal)} className="h-6 w-6 text-[#00f5d4] hover:bg-[#00f5d4]/10"><CheckCircle size={14}/></Button>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                                <div className="bg-black/30 p-2 rounded"><p className="font-bold text-white">{activePlan?.totalMacros?.pro || 0}g</p><p className="text-gray-500">Prot</p></div>
-                                <div className="bg-black/30 p-2 rounded"><p className="font-bold text-white">{activePlan?.totalMacros?.carb || 0}g</p><p className="text-gray-500">Gluc</p></div>
-                                <div className="bg-black/30 p-2 rounded"><p className="font-bold text-white">{activePlan?.totalMacros?.fat || 0}g</p><p className="text-gray-500">Lip</p></div>
+                        )) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center">
+                                <p className="text-gray-500 text-sm italic mb-3">Aucun repas planifié.</p>
+                                <Link to="/meals"><Button size="sm" className="bg-[#7b2cbf] text-white">Gérer</Button></Link>
                             </div>
-                        </>
-                    ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center">
-                            <p className="text-gray-500 text-sm italic mb-3">Aucun plan pour aujourd'hui.</p>
-                            <Link to="/meals"><Button size="sm" className="bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold">Gérer la diète</Button></Link>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* TRACKER SANTÉ (PAS & EAU) */}
-            {/* J'ai ajouté la prop onAddWater pour permettre au composant d'appeler notre fonction de sauvegarde */}
-            <HealthTracker 
-                userProfile={userProfile} 
-                onAddWater={handleAddWater} 
-            />
+            {/* SÉANCE DU JOUR DÉTAILLÉE */}
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden shadow-2xl">
+                <CardHeader className="border-b border-white/5 bg-white/5 flex flex-row items-center justify-between">
+                    <CardTitle className="text-xl font-black italic uppercase text-white flex items-center gap-2"><Dumbbell className="text-[#7b2cbf]"/> Séance : {todayWorkout?.name || "Repos"}</CardTitle>
+                    {todayWorkout && <Link to="/session"><Button size="sm" className="bg-[#00f5d4] text-black font-black text-xs h-8">LANCER</Button></Link>}
+                </CardHeader>
+                <CardContent className="p-4">
+                    {todayWorkout ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {todayWorkout.exercises?.slice(0, 4).map((exo, i) => (
+                                <div key={i} className="flex items-center gap-4 p-3 bg-black/40 rounded-2xl border border-white/5">
+                                    <div className="w-14 h-14 rounded-xl bg-gray-800 overflow-hidden"><img src={exo.imageUrl} alt="" className="w-full h-full object-cover opacity-70" style={{ objectFit: 'cover' }}/></div>
+                                    <div className="flex-1">
+                                        <p className="font-bold text-sm text-white truncate">{exo.name}</p>
+                                        <div className="flex gap-2 mt-1">
+                                            <Badge variant="outline" className="text-[9px] h-4 border-white/10 text-gray-400">{exo.sets} Sets</Badge>
+                                            <Badge variant="outline" className="text-[9px] h-4 border-white/10 text-gray-400">{exo.reps} Reps</Badge>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : <div className="py-8 text-center text-gray-500 italic">Profite de ton jour de repos !</div>}
+                </CardContent>
+            </Card>
 
+            {/* #1 : PAS ET JAUGE + HYDRATATION */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* CARTE PAS */}
+                <Card className="bg-[#1a1a20] border-gray-800">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-white flex justify-between items-center text-sm font-bold uppercase tracking-wider">
+                            <span className="flex items-center gap-2"><Footprints className="text-[#7b2cbf]"/> {t('steps')}</span>
+                            <Button size="sm" variant="ghost" onClick={() => setIsAddStepsOpen(true)} className="h-6 text-[10px] text-[#7b2cbf] border border-[#7b2cbf]/30">AJOUTER</Button>
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-end justify-between mb-2">
+                            <span className="text-3xl font-black text-white">{currentSteps.toLocaleString()}</span>
+                            <span className="text-sm text-gray-500 mb-1">/ {stepGoal.toLocaleString()}</span>
+                        </div>
+                        <Progress value={(currentSteps / stepGoal) * 100} className="h-2 bg-gray-800 [&>div]:bg-[#7b2cbf]" />
+                    </CardContent>
+                </Card>
+
+                {/* CARTE HYDRATATION */}
+                <Card className="bg-[#1a1a20] border-gray-800">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-white flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                            <Droplets className="text-blue-400"/> {t('hydration')}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center justify-between">
+                            <Button size="icon" variant="outline" onClick={() => handleAddWater(-0.25)} className="h-8 w-8 border-gray-700 bg-gray-800 text-white"><Minus size={16}/></Button>
+                            <div className="text-center">
+                                <span className="text-3xl font-black text-white">{(userProfile?.dailyWater || 0).toFixed(2)}</span>
+                                <span className="text-sm text-gray-500 ml-1">L</span>
+                            </div>
+                            <Button size="icon" variant="outline" onClick={() => handleAddWater(0.25)} className="h-8 w-8 border-gray-700 bg-gray-800 text-white"><Plus size={16}/></Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* RECTANGLES BRULÉES ET POULS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Rectangle Jaune : Calories Brûlées */}
+                <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-yellow-500 flex items-center justify-between shadow-xl">
+                    <div>
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">CALORIES BRÛLÉES</p>
+                        <h3 className="text-3xl font-black text-white">{Math.floor(burnedCalories)} <span className="text-sm font-normal text-gray-500">KCAL</span></h3>
+                    </div>
+                    <Flame className="text-yellow-500 w-10 h-10 opacity-50" />
+                </div>
+
+                {/* Rectangle Bleu : Pouls */}
+                <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-blue-500 flex items-center justify-between shadow-xl">
+                    <div>
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">POULS (⌚)</p>
+                        <h3 className="text-3xl font-black text-white">{watchHeartRate > 0 ? watchHeartRate : "--"} <span className="text-sm font-normal text-gray-500">BPM</span></h3>
+                    </div>
+                    <HeartPulse className={`text-blue-500 w-10 h-10 opacity-50 ${watchHeartRate > 0 ? 'animate-pulse' : ''}`} />
+                </div>
+            </div>
         </div>
 
-        {/* --- COLONNE DROITE : AGENDA/SEMAINE --- */}
         <div className="lg:col-span-1 h-full space-y-6">
             
-            {/* WIDGET CALORIES IA */}
-            <SmartCalorieWidget userProfile={userProfile} />
+            {/* WIDGET BALANCE ÉNERGÉTIQUE */}
+            <SmartCalorieWidget 
+                userProfile={userProfile} 
+                consumed={userProfile?.dailyCalories || 0}
+                burned={burnedCalories}
+            />
 
-            {isCoach && !isCoachView ? (
-                // AGENDA COACH
-                <div className="bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 h-full shadow-xl flex flex-col min-h-[300px]">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xl font-bold text-white flex items-center gap-2"><Calendar className="text-[#9d4edd]"/> {t('agenda')}</h3>
-                        <Button size="sm" onClick={() => setIsRdvOpen(true)} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white text-xs font-bold h-8 shadow-[0_0_10px_rgba(157,78,221,0.3)]">
-                            <Plus size={14} className="mr-1"/> {t('add')}
-                        </Button>
-                    </div>
-                     <div className="grid grid-cols-7 gap-1 text-center mb-2">
-                        {weekDaysShort.map(d => <span key={d} className="text-[10px] text-gray-500 uppercase">{d}</span>)}
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 mb-6">
-                        {renderCalendarDays()}
-                    </div>
+            {/* AGENDA */}
+            <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 h-fit max-h-[500px] shadow-xl flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2"><Calendar className="text-[#00f5d4]"/> {t('week')}</h3>
+                    <Button size="icon" variant="ghost" onClick={() => syncCalendarToWatch(userProfile)} className={`h-7 w-7 ${isSyncing ? 'animate-spin text-[#00f5d4]' : 'text-gray-400'}`}><RefreshCw size={14}/></Button>
                 </div>
-            ) : (
-                // SEMAINE CLIENT
-                <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 h-fit max-h-[500px] shadow-xl flex flex-col">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2"><Calendar className="text-[#00f5d4]"/> {t('week')}</h3>
-                        <Badge variant="outline" className="border-[#00f5d4] text-[#00f5d4] bg-[#00f5d4]/10 text-[10px]">{todayName}</Badge>
-                    </div>
-                    <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar">
-                        {weekDaysShort.map((d, index) => {
-                            const isToday = index === new Date().getDay() - 1;
-                            const workout = getWorkoutForDay(index);
-                            return (
-                                <div key={d} className={`flex items-center p-2 rounded-lg border transition-all ${isToday ? 'bg-[#7b2cbf]/10 border-[#7b2cbf]' : 'bg-black/20 border-gray-800'}`}>
-                                    <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black mr-2 ${isToday ? 'bg-[#7b2cbf] text-white' : 'bg-gray-800 text-gray-500'}`}>{d.substring(0, 1)}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className={`text-xs font-bold truncate ${isToday ? 'text-white' : 'text-gray-400'}`}>{workout ? workout.name : "Repos"}</p>
-                                    </div>
-                                    {workout && <div className={`w-1.5 h-1.5 rounded-full ${isToday ? 'bg-[#00f5d4] animate-pulse' : 'bg-gray-600'}`}></div>}
-                                </div>
-                            )
-                        })}
-                    </div>
+                <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar">
+                    {weekDaysShort.map((d, index) => {
+                        const workout = getWorkoutForDay(index);
+                        const isToday = index === new Date().getDay() - 1;
+                        return (
+                            <div key={d} className={`flex items-center p-2 rounded-lg border transition-all ${isToday ? 'bg-[#7b2cbf]/10 border-[#7b2cbf]' : 'bg-black/20 border-gray-800'}`}>
+                                <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black mr-2 ${isToday ? 'bg-[#7b2cbf] text-white' : 'bg-gray-800 text-gray-500'}`}>{d.substring(0, 1)}</div>
+                                <div className="flex-1 min-w-0"><p className={`text-xs font-bold truncate ${isToday ? 'text-white' : 'text-gray-400'}`}>{workout ? workout.name : "Repos"}</p></div>
+                                {workout && <div className={`w-1.5 h-1.5 rounded-full ${isToday ? 'bg-[#00f5d4] animate-pulse' : 'bg-gray-600'}`}></div>}
+                            </div>
+                        )
+                    })}
                 </div>
-            )}
+            </div>
+
+            {/* STATS INFÉRIEURES DROITE */}
+            <div className="grid grid-cols-2 gap-4">
+                <div className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-4 flex flex-col justify-between h-32 relative overflow-hidden group">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest z-10">POINTS</p>
+                    <h3 className="text-3xl font-black text-white z-10">{userProfile?.points || 0}</h3>
+                    <div className="h-1.5 w-12 bg-red-500 rounded mt-auto z-10"></div>
+                    <TrendingUp className="absolute right-[-10px] bottom-[-10px] text-red-500/10 w-24 h-24" />
+                </div>
+
+                <div className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-4 flex flex-col justify-between h-32 relative overflow-hidden group">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest z-10">SÉANCES</p>
+                    <h3 className="text-3xl font-black text-white z-10">{userProfile?.history?.filter(h => h.type === 'workout').length || 0}</h3>
+                    <div className="h-1.5 w-12 bg-[#7b2cbf] rounded mt-auto z-10"></div>
+                    <Dumbbell className="absolute right-[-10px] bottom-[-10px] text-[#7b2cbf]/10 w-24 h-24" />
+                </div>
+
+                <div className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-4 flex flex-col justify-between h-32 relative overflow-hidden group">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest z-10">DÉFIS</p>
+                    <h3 className="text-3xl font-black text-white z-10">{userProfile?.challengesCompleted?.length || 0}</h3>
+                    <div className="h-1.5 w-12 bg-[#00f5d4] rounded mt-auto z-10"></div>
+                    <Trophy className="absolute right-[-10px] bottom-[-10px] text-[#00f5d4]/10 w-24 h-24" />
+                </div>
+
+                <div className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-4 flex flex-col justify-between h-32 relative overflow-hidden group">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest z-10">OBJECTIF</p>
+                    <h3 className="text-xl font-black text-white z-10">{targetWeight} kg</h3>
+                    <div className="h-1.5 w-12 bg-orange-500 rounded mt-auto z-10"></div>
+                    <Target className="absolute right-[-10px] bottom-[-10px] text-orange-500/10 w-24 h-24" />
+                </div>
+            </div>
         </div>
       </div>
 
-      {/* ZONE 4 : STATS RAPIDES */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={TrendingUp} title={t('points')} value={userProfile?.points || 0} color="#7b2cbf" />
-        <StatCard icon={Trophy} title={t('challenges')} value={userProfile?.challengesCompleted?.length || 0} color="#9d4edd" />
-        <StatCard icon={Dumbbell} title={t('workouts')} value={userProfile?.history?.length || 0} color="#00f5d4" />
-        <StatCard icon={Flame} title={t('calories')} value={dailyCalories} color="#fdcb6e" />
-      </div>
-
-      {/* ZONE 5 : PROGRAMME */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <Card className="bg-[#1a1a20] rounded-2xl border-l-4 border-l-[#7b2cbf] border-gray-800 lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center text-xl text-white">
-              <Zap className="mr-3 text-[#00f5d4]" />
-              {userProfile?.activeProgram?.name || t('active_program')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {userProfile?.activeProgram ? (
-              <div className="space-y-4">
-                <div className="flex justify-between text-xs text-gray-400"><span>{t('progress')}</span><span className="text-[#00f5d4] font-bold">{userProfile.activeProgram.progress || 0}%</span></div>
-                <Progress value={userProfile.activeProgram.progress || 0} className="h-2 bg-gray-800 [&>div]:bg-gradient-to-r [&>div]:from-[#7b2cbf] [&>div]:to-[#00f5d4]" />
-                <Link to="/exercises"><Button className="w-full bg-[#7b2cbf] text-white hover:bg-[#9d4edd] font-bold mt-2">{t('continue')}</Button></Link>
-              </div>
-            ) : (
-              <div className="py-6 text-center">
-                  <p className="text-gray-500 mb-4">Aucun programme actif.</p>
-                  <Link to="/exercises">
-                    <Button className="bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold px-8 py-2 rounded-xl shadow-lg border-none">
-                        {t('find_program')}
-                    </Button>
-                  </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="bg-[#1a1a20] rounded-2xl border border-gray-800">
-          <CardHeader><CardTitle className="text-xl text-white">{t('history')}</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            {recentActivity.length > 0 ? (
-              recentActivity.map((activity, idx) => (
-                <ActivityItem 
-                  key={idx}
-                  icon={activity.type === 'workout' ? Dumbbell : Trophy} 
-                  title={activity.name} 
-                  date={safeDate(activity.date)} 
-                  color={activity.type === 'workout' ? "#00f5d4" : "#fdcb6e"} 
-                />
-              ))
-            ) : (
-              <div className="text-center py-12 flex flex-col items-center">
-                  <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3">
-                    <Activity className="text-gray-500"/>
-                  </div>
-                  <p className="text-gray-500 text-sm font-bold">{t('no_content')}</p>
-              </div>
-            )}
-            {recentActivity.length > 0 && (
-                <Link to="/performance">
-                    <Button variant="ghost" className="w-full text-gray-400 hover:text-[#00f5d4] hover:bg-transparent mt-2">
-                        {t('see_all_history')} <ArrowRight size={14} className="ml-1"/>
-                    </Button>
-                </Link>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* MODAL RDV */}
-      <Dialog open={isRdvOpen} onOpenChange={setIsRdvOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl">
-            <DialogHeader>
-                <DialogTitle className="text-2xl font-black italic">{t('schedule_appointment')}</DialogTitle>
-                <DialogDescription>Ajoutez un client et assignez une séance.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nom du Client</label>
-                    <div className="relative">
-                        <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16}/>
-                        <Input value={rdvData.clientName} onChange={(e) => setRdvData({...rdvData, clientName: e.target.value})} placeholder="Ex: Jean Dupont" className="pl-10 bg-black border-gray-700 text-white"/>
-                    </div>
-                </div>
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Date & Heure</label>
-                    <Input type="datetime-local" value={rdvData.date} onChange={(e) => setRdvData({...rdvData, date: e.target.value})} className="bg-black border-gray-700 text-white [color-scheme:dark]"/>
-                </div>
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Lieu</label>
-                    <div className="relative">
-                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16}/>
-                        <Input value={rdvData.location} onChange={(e) => setRdvData({...rdvData, location: e.target.value})} placeholder="Ex: Gym Centre-Ville" className="pl-10 bg-black border-gray-700 text-white"/>
-                    </div>
-                </div>
-                <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Assigner un Entraînement (Optionnel)</label>
-                    <Select value={rdvData.workoutId} onValueChange={(val) => setRdvData({...rdvData, workoutId: val})}>
-                        <SelectTrigger className="bg-black border-gray-700 text-white"><SelectValue placeholder="Choisir un template..."/></SelectTrigger>
-                        <SelectContent className="bg-[#1a1a20] border-gray-700 text-white">
-                            <SelectItem value="none">Aucun</SelectItem>
-                            {coachTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-            </div>
-            <DialogFooter>
-                <Button onClick={handleSaveRdv} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold w-full h-12 rounded-xl">{t('confirm_appointment')}</Button>
-            </DialogFooter>
+      {/* DIALOG AJOUT PAS MANUEL */}
+      <Dialog open={isAddStepsOpen} onOpenChange={setIsAddStepsOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
+          <DialogHeader><DialogTitle>{t('add_steps')}</DialogTitle></DialogHeader>
+          <div className="py-4 space-y-4">
+            <Input
+                type="number"
+                placeholder="Ex: 5000"
+                className="bg-black border-gray-700 text-white"
+                value={manualSteps}
+                onChange={(e) => setManualSteps(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button onClick={handleManualSteps} className="w-full bg-[#7b2cbf] text-white font-bold">{t('validate')}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* HISTORY */}
+      <Card className="bg-[#1a1a20] rounded-2xl border border-gray-800">
+        <CardHeader><CardTitle className="text-xl text-white">{t('history')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          {recentActivity.length > 0 ? recentActivity.map((activity, idx) => (
+            <ActivityItem key={idx} icon={activity.type === 'workout' ? Dumbbell : Trophy} title={activity.name} date={safeDate(activity.date)} color={activity.type === 'workout' ? "#00f5d4" : "#fdcb6e"} />
+          )) : <p className="text-center text-gray-500 text-sm">{t('no_content')}</p>}
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-// STYLE COMPONENTS
-function StatCard({ icon: Icon, title, value, color }) {
-  return (
-    <Card className="bg-[#1a1a20] rounded-2xl border border-gray-800 relative group overflow-hidden hover:scale-[1.02] transition-transform duration-300">
-      <div className="absolute -right-4 -top-4 opacity-10 scale-150 rotate-12 transition-transform group-hover:rotate-45" style={{ color }}>
-        <Icon className="w-24 h-24" />
-      </div>
-      <CardHeader className="pb-2 relative z-10">
-        <CardTitle className="text-xs font-bold text-gray-400 uppercase tracking-widest">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="relative z-10">
-        <div className="text-3xl font-black text-white">{value}</div>
-        <div className="w-8 h-1 mt-2 rounded-full transition-all group-hover:w-16" style={{ backgroundColor: color }}></div>
-      </CardContent>
-    </Card>
   );
 }
 
 function ActivityItem({ icon: Icon, title, date, color }) {
   return (
     <div className="flex items-center space-x-3 p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-gray-800 transition-all cursor-default group">
-      <div className="p-2.5 rounded-lg bg-[#0a0a0f] border border-gray-800 group-hover:border-[#7b2cbf]/50 transition-colors">
-        <Icon className="h-4 w-4" style={{ color }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-white truncate group-hover:text-[#00f5d4] transition-colors">{title}</p>
-        <p className="text-xs text-gray-500">{date}</p>
-      </div>
+      <div className="p-2.5 rounded-lg bg-[#0a0a0f] border border-gray-800 group-hover:border-[#7b2cbf]/50 transition-colors"><Icon className="h-4 w-4" style={{ color }} /></div>
+      <div className="flex-1 min-w-0"><p className="text-sm font-bold text-white truncate group-hover:text-[#00f5d4] transition-colors">{title}</p><p className="text-xs text-gray-500">{date}</p></div>
     </div>
   );
 }

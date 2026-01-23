@@ -23,7 +23,7 @@ android {
 
 repositories {
     flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+        dirs 'libs'
     }
 }
 
@@ -34,7 +34,7 @@ dependencies {
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
-    implementation project(':capacitor-cordova-android-plugins')
+    implementation 'com.google.android.gms:play-services-wearable:18.1.0'
 }
 
 apply from: 'capacitor.build.gradle'
@@ -46,14 +46,11 @@ try {
     }
 } catch(Exception e) {
     logger.warn("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
 
-    // ... (Laissez tout le code existant au-dessus)
-
-// AJOUTEZ CE BLOC À LA TOUTE FIN DU FICHIER :
 configurations.all {
     resolutionStrategy {
         force 'androidx.activity:activity:1.9.0'
         force 'androidx.activity:activity-ktx:1.9.0'
     }
-}
 }

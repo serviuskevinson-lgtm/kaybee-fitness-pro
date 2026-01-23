@@ -32,7 +32,8 @@ export default function Challenges() {
   const [pendingProofs, setPendingProofs] = useState([]); 
   const [leaderboard, setLeaderboard] = useState([]); 
   const [friendIds, setFriendIds] = useState([]); 
-  
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newTarget, setNewTarget] = useState(''); 
@@ -78,7 +79,41 @@ export default function Challenges() {
     return () => { unsubChallenges(); unsubProofs(); };
   }, [currentUser]);
 
-  // --- 2. CLASSEMENT ---
+  // --- 2. TIMER TICK ---
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // Mise à jour toutes les minutes
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // --- 3. AUTO-DELETE EXPIRED CHALLENGES ---
+  useEffect(() => {
+    const checkExpirations = async () => {
+      const expired = challenges.filter(c => {
+        if (!c.createdAt) return false;
+        const createdAt = new Date(c.createdAt.seconds * 1000);
+        const expiresAt = new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        return Date.now() > expiresAt.getTime();
+      });
+
+      for (const chall of expired) {
+        try {
+          await deleteDoc(doc(db, "challenges", chall.id));
+          console.log(`Challenge ${chall.id} supprimé car expiré.`);
+        } catch (e) {
+          console.error("Erreur suppression challenge expiré:", e);
+        }
+      }
+    };
+
+    if (challenges.length > 0) {
+      checkExpirations();
+    }
+  }, [challenges, currentTime]);
+
+  // --- 4. CLASSEMENT ---
   useEffect(() => {
       if (friendIds.length === 0) {
           setLeaderboard([]);
@@ -109,15 +144,22 @@ export default function Challenges() {
   };
 
   const getRemainingTime = (timestamp) => {
-      if (!timestamp) return "Infini";
-      const end = new Date(timestamp.seconds * 1000);
-      const now = new Date();
-      const diff = end - now;
+      if (!timestamp) return "7j 0h";
+      const createdAt = new Date(timestamp.seconds * 1000);
+      const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+      const expiresAt = new Date(createdAt.getTime() + oneWeekInMs);
+      const now = new Date(currentTime);
+      const diff = expiresAt - now;
+
       if (diff <= 0) return "Terminé";
+
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
       if (days > 0) return `${days}j ${hours}h`;
-      return `${hours}h rest.`;
+      if (hours > 0) return `${hours}h ${minutes}m`;
+      return `${minutes} min`;
   };
 
   const filteredChallenges = challenges.filter(c => {
@@ -134,14 +176,12 @@ export default function Challenges() {
   const handleCreateChallenge = async () => {
     if (!newTitle || !newTarget) return;
     const realName = await getUserIdentity();
-    const expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + 7);
 
     await addDoc(collection(db, "challenges"), {
       title: newTitle, target: newTarget, points: parseInt(newPoints),
       creatorId: currentUser.uid, creatorName: realName, 
       participants: [currentUser.uid], completions: [], type: "user_generated",
-      scope: newScope, expiresAt: expirationDate, createdAt: serverTimestamp(), status: 'active'
+      scope: newScope, createdAt: serverTimestamp(), status: 'active'
     });
     setIsCreateOpen(false); setNewTitle(''); setNewTarget('');
   };
@@ -190,19 +230,15 @@ export default function Challenges() {
       voters: arrayUnion(currentUser.uid)
     });
     
-    // --- MODIFICATION ICI ---
-    // ANCIEN : Points au juge (currentUser) -> SUPPRIMÉ
-    // NOUVEAU : Points à la personne jugée (proof.userId) si le vote est positif
     if (verdict === 'valid') {
-        await updateDoc(doc(db, "users", proof.userId), { points: increment(5) }); // +5 XP encouragement pour la personne jugée
+        await updateDoc(doc(db, "users", proof.userId), { points: increment(5) });
     }
 
-    // ENVOI NOTIFICATION DE VOTE
     await sendNotification(proof.userId, currentUser.uid, "Juge", t('notif_vote_received'), t('notif_vote_desc'), "vote");
 
     if (verdict === 'valid' && (proof.votes_valid + 1) >= 3) {
       await updateDoc(proofRef, { status: 'validated' });
-      await updateDoc(doc(db, "users", proof.userId), { points: increment(proof.challengePoints) }); // + GROS BONUS
+      await updateDoc(doc(db, "users", proof.userId), { points: increment(proof.challengePoints) });
       await updateDoc(doc(db, "challenges", proof.challengeId), { completions: arrayUnion(proof.userId) });
       
       await sendNotification(proof.userId, "system", "Système", t('notif_challenge_validated'), `Victoire ! +${proof.challengePoints} XP.`, "achievement");
@@ -254,7 +290,7 @@ export default function Challenges() {
                       <CardHeader className="pb-2">
                         <div className="flex justify-between items-start">
                           <Badge className="bg-[#7b2cbf] text-white border-none">{challenge.points} XP</Badge>
-                          <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30 bg-yellow-500/10 flex items-center gap-1"><Clock size={10}/> {getRemainingTime(challenge.expiresAt)}</Badge>
+                          <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30 bg-yellow-500/10 flex items-center gap-1"><Clock size={10}/> {getRemainingTime(challenge.createdAt)}</Badge>
                         </div>
                         <CardTitle className="text-lg font-black text-white uppercase italic leading-tight mt-2">{challenge.title}</CardTitle>
                         <p className="text-xs text-gray-400">{t('target')} : <span className="text-white font-bold">{challenge.target}</span></p>
@@ -296,7 +332,7 @@ export default function Challenges() {
                             <button onClick={() => deleteProof(proof.id)} className="absolute top-2 right-2 z-20 bg-red-600/80 p-1.5 rounded-full text-white hover:bg-red-500 transition opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
                         )}
                         <div className="aspect-video bg-black relative flex items-center justify-center">
-                          {proof.type === 'video' ? <video src={proof.mediaUrl} controls className="w-full h-full object-contain"/> : <img src={proof.mediaUrl} className="w-full h-full object-contain"/>}
+                          {proof.type === 'video' ? <video src={proof.mediaUrl} controls className="w-full h-full object-contain"/> : <img src={proof.mediaUrl} className="w-full h-full object-contain" style={{ objectFit: 'cover' }}/>}
                         </div>
                         <CardContent className="p-3">
                           <div className="flex justify-between items-start mb-2">
@@ -334,7 +370,7 @@ export default function Challenges() {
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${index === 0 ? 'bg-[#ffd700] text-black' : index === 1 ? 'bg-gray-300 text-black' : index === 2 ? 'bg-[#cd7f32] text-white' : 'text-gray-500 font-mono'}`}>{user.rank}</div>
                             <div className="flex items-center gap-2">
-                              <Avatar className="w-8 h-8 border border-gray-700"><AvatarImage src={user.avatar} objectFit="cover"/><AvatarFallback className="text-xs bg-gray-900 text-gray-400">{initial}</AvatarFallback></Avatar>
+                              <Avatar className="w-8 h-8 border border-gray-700"><AvatarImage src={user.avatar} style={{ objectFit: 'cover' }}/><AvatarFallback className="text-xs bg-gray-900 text-gray-400">{initial}</AvatarFallback></Avatar>
                               <div className="overflow-hidden"><p className={`font-bold text-sm truncate w-24 ${index === 0 ? 'text-[#ffd700]' : 'text-white'}`}>{userFirstName}</p><p className="text-[10px] text-gray-500">Lvl {Math.floor((user.points || 0) / 1000) + 1}</p></div>
                             </div>
                           </div>
