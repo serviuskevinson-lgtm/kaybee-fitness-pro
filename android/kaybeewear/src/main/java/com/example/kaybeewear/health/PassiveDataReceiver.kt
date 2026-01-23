@@ -26,9 +26,9 @@ class PassiveDataReceiver : BroadcastReceiver() {
 
     private fun processDataPoints(context: Context, dataPoints: DataPointContainer) {
         // Extraction des différentes métriques
-        val steps = dataPoints.getDataPoints(DataType.STEPS_DAILY).lastOrNull()?.value
-        val calories = dataPoints.getDataPoints(DataType.CALORIES_TOTAL).lastOrNull()?.value
-        val distance = dataPoints.getDataPoints(DataType.DISTANCE_TOTAL).lastOrNull()?.value
+        val steps = dataPoints.getData(DataType.STEPS_DAILY).lastOrNull()?.value
+        val calories = dataPoints.getData(DataType.CALORIES_TOTAL).lastOrNull()?.value
+        val distance = dataPoints.getData(DataType.DISTANCE_TOTAL).lastOrNull()?.value
 
         if (steps != null || calories != null || distance != null) {
             sendUpdateToPhone(context, steps, calories, distance)

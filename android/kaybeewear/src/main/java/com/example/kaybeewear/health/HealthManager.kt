@@ -9,7 +9,9 @@ import androidx.health.services.client.MeasureCallback
 import androidx.health.services.client.data.Availability
 import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
+import androidx.health.services.client.data.DeltaDataType
 import androidx.health.services.client.data.PassiveListenerConfig
+import androidx.health.services.client.data.SampleDataPoint
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.CoroutineScope
@@ -24,12 +26,13 @@ class HealthManager(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private val heartRateCallback = object : MeasureCallback {
-        override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) {
+        override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {
             Log.d("HealthManager", "Availability changed: ${dataType.name} -> $availability")
         }
 
         override fun onDataReceived(data: DataPointContainer) {
-            val heartRate = data.getDataPoints(DataType.HEART_RATE_BPM).lastOrNull()
+            val heartRateDataPoints = data.getData(DataType.HEART_RATE_BPM)
+            val heartRate = heartRateDataPoints.lastOrNull() as? SampleDataPoint<Double>
             if (heartRate != null) {
                 sendHealthData("heart_rate", heartRate.value.toString())
             }
@@ -41,7 +44,7 @@ class HealthManager(private val context: Context) {
     }
 
     fun stopHeartRateMonitoring() {
-        measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, heartRateCallback)
+        measureClient.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, heartRateCallback)
     }
 
     fun startPassiveMonitoring() {
@@ -58,9 +61,9 @@ class HealthManager(private val context: Context) {
             context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
         
-        passiveMonitoringClient.setPassiveListenerService(config, pendingIntent)
+        passiveMonitoringClient.setPassiveListenerServiceAsync(config, pendingIntent)
             .addOnSuccessListener { Log.d("HealthManager", "Passive monitoring started") }
-            .addOnFailureListener { e -> Log.e("HealthManager", "Failed to start passive monitoring", e) }
+            .addOnFailureListener { e: Exception -> Log.e("HealthManager", "Failed to start passive monitoring", e) }
     }
 
     private fun sendHealthData(type: String, value: String) {
