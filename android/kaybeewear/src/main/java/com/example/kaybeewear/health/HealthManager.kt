@@ -13,6 +13,8 @@ import androidx.health.services.client.data.PassiveListenerConfig
 import androidx.health.services.client.data.SampleDataPoint
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.Wearable
+import com.google.firebase.FirebaseApp
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +28,21 @@ class HealthManager(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO)
     
     // Firebase RTDB Reference
-    private val database = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/").reference
+    private var database: DatabaseReference? = null
     private var userId: String? = null
+
+    init {
+        try {
+            // Check if Firebase is initialized before getting instance
+            if (FirebaseApp.getApps(context).isNotEmpty()) {
+                database = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/").reference
+            } else {
+                Log.w("HealthManager", "Firebase not initialized. Realtime Database sync disabled.")
+            }
+        } catch (e: Exception) {
+            Log.e("HealthManager", "Failed to initialize Firebase Database", e)
+        }
+    }
 
     fun setUserId(id: String) {
         this.userId = id
@@ -52,7 +67,8 @@ class HealthManager(private val context: Context) {
 
     fun syncToFirebase(key: String, value: Any) {
         val uid = userId ?: return
-        database.child("users").child(uid).child("live_data").child(key).setValue(value)
+        val db = database ?: return
+        db.child("users").child(uid).child("live_data").child(key).setValue(value)
             .addOnFailureListener { e -> Log.e("HealthManager", "Firebase sync failed", e) }
     }
 
