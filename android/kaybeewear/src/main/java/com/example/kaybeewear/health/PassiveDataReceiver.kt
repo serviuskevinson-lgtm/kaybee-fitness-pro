@@ -1,44 +1,56 @@
 package com.example.kaybeewear.health
 
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
 import android.util.Log
+import androidx.health.services.client.PassiveListenerService
 import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
-import androidx.health.services.client.data.PassiveMonitoringUpdate
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.Wearable
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-class PassiveDataReceiver : BroadcastReceiver() {
+class PassiveDataReceiver : PassiveListenerService() {
     private val scope = CoroutineScope(Dispatchers.IO)
+    private val database = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/").reference
 
-    override fun onReceive(context: Context, intent: Intent) {
-        val update = PassiveMonitoringUpdate.fromIntent(intent) ?: return
-        
-        val dataPoints = update.dataPoints
-        processDataPoints(context, dataPoints)
+    override fun onNewDataPointsReceived(dataPoints: DataPointContainer) {
+        processDataPoints(dataPoints)
     }
 
-    private fun processDataPoints(context: Context, dataPoints: DataPointContainer) {
-        // Extraction des différentes métriques
+    private fun processDataPoints(dataPoints: DataPointContainer) {
         val steps = dataPoints.getData(DataType.STEPS_DAILY).lastOrNull()?.value
-        val calories = dataPoints.getData(DataType.CALORIES_TOTAL).lastOrNull()?.value
-        val distance = dataPoints.getData(DataType.DISTANCE_TOTAL).lastOrNull()?.value
+        val calories = dataPoints.getData(DataType.CALORIES_TOTAL)?.total
+        val distance = dataPoints.getData(DataType.DISTANCE_TOTAL)?.total
 
         if (steps != null || calories != null || distance != null) {
-            sendUpdateToPhone(context, steps, calories, distance)
+            sendUpdateToPhone(steps, calories, distance)
+            syncToFirebase(steps, calories, distance)
         }
     }
 
-    private fun sendUpdateToPhone(context: Context, steps: Long?, calories: Double?, distance: Double?) {
+    private fun syncToFirebase(steps: Long?, calories: Double?, distance: Double?) {
+        // We get the UID from SharedPreferences (it should be saved there when received from phone)
+        val prefs = getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE)
+        val userId = prefs.getString("userId", null) ?: return
+
+        val updates = mutableMapOf<String, Any>()
+        steps?.let { updates["steps"] = it }
+        calories?.let { updates["calories"] = it }
+        distance?.let { updates["distance"] = it }
+        updates["last_update"] = System.currentTimeMillis()
+
+        database.child("users").child(userId).child("live_data").updateChildren(updates)
+            .addOnFailureListener { e -> Log.e("PassiveDataReceiver", "Firebase sync failed", e) }
+    }
+
+    private fun sendUpdateToPhone(steps: Long?, calories: Double?, distance: Double?) {
         scope.launch {
             try {
-                val nodes = Tasks.await(Wearable.getNodeClient(context).connectedNodes)
+                val nodes = Tasks.await(Wearable.getNodeClient(this@PassiveDataReceiver).connectedNodes)
                 val json = JSONObject().apply {
                     put("type", "passive_update")
                     steps?.let { put("steps", it) }
@@ -50,7 +62,7 @@ class PassiveDataReceiver : BroadcastReceiver() {
 
                 for (node in nodes) {
                     Tasks.await(
-                        Wearable.getMessageClient(context)
+                        Wearable.getMessageClient(this@PassiveDataReceiver)
                             .sendMessage(node.id, "/health-data", data)
                     )
                 }

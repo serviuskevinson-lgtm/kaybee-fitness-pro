@@ -32,6 +32,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -44,7 +45,7 @@ val GreenAccent = Color(0xFF00f5d4)
 
 class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener, SensorEventListener {
 
-    // --- ÉTATS GLOBAUX (Accessibles par l'UI) ---
+    // --- ÉTATS GLOBAUX ---
     var heartRate by mutableIntStateOf(0)
     var stepCount by mutableIntStateOf(0)
     
@@ -109,7 +110,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         super.onResume()
         Wearable.getMessageClient(this).addListener(this)
         
-        // Activer les capteurs pour l'affichage local
         val hrSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         
@@ -128,7 +128,17 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         val jsonString = String(messageEvent.data)
         val gson = Gson()
 
+        Log.d("MainActivity", "Message received: ${messageEvent.path}")
+
         when (messageEvent.path) {
+            "/set-user-id" -> {
+                val userId = jsonString
+                healthManager.setUserId(userId)
+                // Save to shared prefs for the PassiveDataReceiver
+                getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit()
+                    .putString("userId", userId)
+                    .apply()
+            }
             "/update-calendar" -> {
                 val listType = object : TypeToken<List<String>>() {}.type
                 calendarData = gson.fromJson(jsonString, listType)
@@ -167,7 +177,7 @@ data class ExerciseData(
     val weight: Float
 )
 
-// --- UI PRINCIPALE (SWIPE) ---
+// --- UI PRINCIPALE ---
 @Composable
 fun WearApp(
     heartRate: Int, 
