@@ -1,0 +1,69 @@
+{
+  "project_info": {
+    "project_number": "194256924870",
+    "firebase_url": "https://kaybee-fitness-default-rtdb.firebaseio.com",
+    "project_id": "kaybee-fitness",
+    "storage_bucket": "kaybee-fitness.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:194256924870:android:87070cd82f55283d7767c7",
+        "android_client_info": {
+          "package_name": "com.kaybeefitness.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "194256924870-bu1a5rpe9q7dpuffoja9uj1d0qjsm004.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSdGQLQTGMT5rQuW6M4EaPzA7qJ9r5774"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "194256924870-5to159c2u1t9bevlglk3v5j9ndsobafn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:194256924870:android:98b833aabb0638557767c7",
+        "android_client_info": {
+          "package_name": "com.kaybeefitness.kaybeewear"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "194256924870-bu1a5rpe9q7dpuffoja9uj1d0qjsm004.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSdGQLQTGMT5rQuW6M4EaPzA7qJ9r5774"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "194256924870-5to159c2u1t9bevlglk3v5j9ndsobafn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
