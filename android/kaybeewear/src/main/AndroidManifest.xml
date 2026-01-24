@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.BODY_SENSORS" />
     <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
@@ -15,10 +16,17 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
 
-        <receiver android:name=".health.PassiveDataReceiver" android:exported="true" />
+        <service
+            android:name="com.example.kaybeewear.health.PassiveDataReceiver"
+            android:exported="true"
+            android:permission="com.google.android.gms.permission.BIND_HEALTH_SERVICES">
+            <intent-filter>
+                <action android:name="androidx.health.services.passive.PassiveListenerService" />
+            </intent-filter>
+        </service>
 
         <service
-            android:name=".complication.MainComplicationService"
+            android:name="com.example.kaybeewear.complication.MainComplicationService"
             android:exported="true"
             android:label="@string/complication_label"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
@@ -34,7 +42,7 @@
                 android:value="0" />
         </service>
         <service
-            android:name=".tile.MainTileService"
+            android:name="com.example.kaybeewear.tile.MainTileService"
             android:exported="true"
             android:label="@string/tile_label"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
@@ -59,7 +67,7 @@
             android:value="true" />
 
         <activity
-            android:name=".presentation.MainActivity"
+            android:name="com.example.kaybeewear.presentation.MainActivity"
             android:exported="true"
             android:taskAffinity=""
             android:theme="@style/MainActivityTheme.Starting">

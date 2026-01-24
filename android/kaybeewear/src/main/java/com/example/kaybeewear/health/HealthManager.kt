@@ -14,8 +14,11 @@ import androidx.health.services.client.data.SampleDataPoint
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.Wearable
 import com.google.firebase.FirebaseApp
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,13 +30,11 @@ class HealthManager(private val context: Context) {
     private val passiveMonitoringClient = healthClient.passiveMonitoringClient
     private val scope = CoroutineScope(Dispatchers.IO)
     
-    // Firebase RTDB Reference
     private var database: DatabaseReference? = null
     private var userId: String? = null
 
     init {
         try {
-            // Check if Firebase is initialized before getting instance
             if (FirebaseApp.getApps(context).isNotEmpty()) {
                 database = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/").reference
             } else {
@@ -72,6 +73,17 @@ class HealthManager(private val context: Context) {
             .addOnFailureListener { e -> Log.e("HealthManager", "Firebase sync failed", e) }
     }
 
+    fun resetStats() {
+        val uid = userId ?: return
+        val db = database ?: return
+        val updates = mapOf(
+            "steps" to 0,
+            "calories" to 0,
+            "distance" to 0
+        )
+        db.child("users").child(uid).child("live_data").updateChildren(updates)
+    }
+
     fun startHeartRateMonitoring() {
         measureClient.registerMeasureCallback(DataType.HEART_RATE_BPM, heartRateCallback)
     }
@@ -97,6 +109,19 @@ class HealthManager(private val context: Context) {
                 Log.e("HealthManager", "Failed to start passive monitoring", e)
             }
         }
+    }
+
+    fun listenToUserData(onDataChange: (DataSnapshot) -> Unit) {
+        val uid = userId ?: return
+        val db = database ?: return
+        db.child("users").child(uid).addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                onDataChange(snapshot)
+            }
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("HealthManager", "Database error: ${error.message}")
+            }
+        })
     }
 
     private fun sendHealthData(type: String, value: String) {

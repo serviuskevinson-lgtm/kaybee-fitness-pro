@@ -8,9 +8,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:194256924870:android:87070cd82f55283d7767c7",
+        "mobilesdk_app_id": "1:194256924870:android:8dfff241302738f37767c7",
         "android_client_info": {
-          "package_name": "com.kaybeefitness.app"
+          "package_name": "com.example.kaybeewear"
         }
       },
       "oauth_client": [
@@ -37,9 +37,9 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:194256924870:android:98b833aabb0638557767c7",
+        "mobilesdk_app_id": "1:194256924870:android:87070cd82f55283d7767c7",
         "android_client_info": {
-          "package_name": "com.kaybeefitness.kaybeewear"
+          "package_name": "com.kaybeefitness.app"
         }
       },
       "oauth_client": [

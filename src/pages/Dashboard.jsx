@@ -94,21 +94,34 @@ export default function Dashboard() {
 
   // --- 1. SYNC & RESET LOGIC ---
   useEffect(() => {
-    if (!currentUser || isCoachView) return;
+    if (!currentUser) return;
+
+    const targetId = targetUserId || currentUser.uid;
 
     // Handshake avec la montre (UID pour RTDB)
     const setupWatch = async () => {
-        if (Capacitor.isNativePlatform()) {
+        if (Capacitor.isNativePlatform() && !isCoachView) {
             try {
+                // On envoie le UID immédiatement
                 await WearConnectivity.sendDataToWatch({ path: "/set-user-id", data: currentUser.uid });
             } catch (e) {}
         }
     };
     setupWatch();
 
+    // Listener pour les demandes de sync venant de la montre
+    const syncListener = WearConnectivity.addListener('onRequestSync', async () => {
+        if (currentUser && !isCoachView) {
+            console.log("⌚ Sync demandée par la montre...");
+            await WearConnectivity.sendDataToWatch({ path: "/set-user-id", data: currentUser.uid });
+            if (userProfile) {
+                syncEverythingToRTDB(userProfile, todayWorkout, { meals: todayMeals });
+            }
+        }
+    });
+
     const initData = async () => {
         try {
-            const targetId = targetUserId || currentUser.uid;
             const profileRef = doc(db, "users", targetId);
             const profileSnap = await getDoc(profileRef);
 
@@ -116,23 +129,25 @@ export default function Dashboard() {
                 const data = profileSnap.data();
                 const todayStr = getTodayString();
 
-                // --- LOGIQUE RESET MINUIT ---
-                if (data.lastActiveDate && data.lastActiveDate !== todayStr) {
-                    console.log("🌙 Nouveau jour : Reset...");
+                // --- LOGIQUE RESET MINUIT (Uniquement pour le client lui-même) ---
+                if (!isCoachView && data.lastActiveDate && data.lastActiveDate !== todayStr) {
+                    console.log("🌙 Nouveau jour : Archivage et Reset...");
 
                     const dailyLog = {
-                        id: `summary-${data.lastActiveDate}`,
-                        type: 'daily_summary',
-                        name: 'Résumé Quotidien',
                         date: data.lastActiveDate,
                         steps: data.dailySteps || 0,
-                        calories: data.dailyBurnedCalories || 0,
+                        caloriesBurned: data.dailyBurnedCalories || 0,
+                        caloriesConsumed: data.dailyCalories || 0,
                         water: data.dailyWater || 0,
-                        weight: data.weight || 0
+                        weight: data.weight || 0,
+                        timestamp: Date.now()
                     };
 
+                    const perfRef = collection(db, "users", targetId, "performance");
+                    await addDoc(perfRef, dailyLog);
+
                     await updateDoc(profileRef, {
-                        history: arrayUnion(dailyLog),
+                        history: arrayUnion({ ...dailyLog, type: 'daily_summary', name: 'Résumé Quotidien' }),
                         dailySteps: 0,
                         dailyBurnedCalories: 0,
                         dailyWater: 0,
@@ -140,8 +155,7 @@ export default function Dashboard() {
                         lastActiveDate: todayStr
                     });
 
-                    // Reset RTDB
-                    set(ref(rtdb, `users/${currentUser.uid}/live_data`), {
+                    set(ref(rtdb, `users/${targetId}/live_data`), {
                         steps: 0,
                         calories_burned: 0,
                         calories_consumed: 0,
@@ -153,7 +167,6 @@ export default function Dashboard() {
 
                 setUserProfile(data);
 
-                // Init Live Stats localement avec Firestore avant que RTDB ne prenne le relais
                 setLiveStats(prev => ({
                     ...prev,
                     steps: data.dailySteps || 0,
@@ -175,8 +188,9 @@ export default function Dashboard() {
                 setTodayWorkout(workout);
                 setTodayMeals(plan?.meals || []);
 
-                // Sync Calendar to RTDB
-                syncEverythingToRTDB(data, workout, plan);
+                if (!isCoachView) {
+                    syncEverythingToRTDB(data, workout, plan);
+                }
             }
 
             if (!isCoachView) {
@@ -190,12 +204,11 @@ export default function Dashboard() {
 
     initData();
 
-    // Setup Live Listeners (Firebase Realtime Database)
-    const liveDataRef = ref(rtdb, `users/${currentUser.uid}/live_data`);
+    // Setup Live Listeners (RTDB) - On écoute le targetId (Client ou Soi-même)
+    const liveDataRef = ref(rtdb, `users/${targetId}/live_data`);
     const unsubscribe = onValue(liveDataRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
-            console.log("⌚ Sync RTDB:", data);
             setLiveStats(prev => ({
                 ...prev,
                 steps: Math.max(prev.steps, data.steps || 0),
@@ -209,10 +222,13 @@ export default function Dashboard() {
         }
     });
 
-    return () => unsubscribe();
-  }, [currentUser, isCoachView, targetUserId]);
+    return () => {
+        unsubscribe();
+        syncListener.remove();
+    };
+  }, [currentUser, isCoachView, targetUserId, userProfile, todayWorkout, todayMeals]);
 
-  // --- 2. ACCÉLÉROMÈTRE DU TÉLÉPHONE (COMPTEUR FALLBACK) ---
+  // --- COMPTEUR ACCÉLÉROMÈTRE (Fallback) ---
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || isCoachView || !currentUser) return;
 
@@ -230,7 +246,6 @@ export default function Dashboard() {
                         const nextSteps = prev.steps + 1;
                         const nextCals = prev.caloriesBurned + kcalPerStep;
 
-                        // On sync vers RTDB (Throttle)
                         if (nextSteps % 20 === 0) {
                             update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
                                 steps: nextSteps,
@@ -256,7 +271,6 @@ export default function Dashboard() {
     return () => { try { Motion.removeAllListeners(); } catch (e) {} };
   }, [currentUser, isCoachView, userProfile?.weight]);
 
-  // --- FONCTION SYNC GLOBALE RTDB ---
   const syncEverythingToRTDB = async (profileData, workout, plan) => {
     if (!currentUser) return;
     setIsSyncing(true);
@@ -268,6 +282,7 @@ export default function Dashboard() {
     });
 
     const fullData = {
+        coachId: profileData.coachId || null,
         live_data: {
             steps: profileData.dailySteps || 0,
             calories_burned: profileData.dailyBurnedCalories || 0,
@@ -287,7 +302,6 @@ export default function Dashboard() {
 
     try {
         await update(ref(rtdb, `users/${currentUser.uid}`), fullData);
-        // Fallback Bluetooth pour compatibilité immédiate
         await WearConnectivity.sendDataToWatch({
             path: "/update-complex-data",
             data: JSON.stringify({ calendar: weeklySummary, health: fullData.live_data })
@@ -296,17 +310,12 @@ export default function Dashboard() {
     setTimeout(() => setIsSyncing(false), 800);
   };
 
-  // --- ACTIONS ---
   const handleAddWater = async (amountML) => {
     if (!currentUser || isCoachView) return;
     try {
         const newTotal = liveStats.water + amountML;
         setLiveStats(prev => ({ ...prev, water: newTotal }));
-
-        // RTDB Sync
         update(ref(rtdb, `users/${currentUser.uid}/live_data`), { water: newTotal });
-
-        // Firestore Sync
         await updateDoc(doc(db, "users", currentUser.uid), { dailyWater: newTotal, lastActiveDate: getTodayString() });
     } catch (e) {}
   };
@@ -315,21 +324,15 @@ export default function Dashboard() {
     if (!currentUser || manualSteps <= 0) return;
     const kcalPerStep = (parseFloat(userProfile?.weight) || 75) * 0.00075;
     const addedBurn = manualSteps * kcalPerStep;
-
     const nextSteps = liveStats.steps + parseInt(manualSteps);
     const nextCals = liveStats.caloriesBurned + addedBurn;
 
     setLiveStats(prev => ({ ...prev, steps: nextSteps, caloriesBurned: nextCals }));
-
-    // RTDB Sync
     update(ref(rtdb, `users/${currentUser.uid}/live_data`), { steps: nextSteps, calories_burned: nextCals });
-
-    // Firestore Sync
     await updateDoc(doc(db, "users", currentUser.uid), {
         dailySteps: increment(manualSteps),
         dailyBurnedCalories: increment(addedBurn)
     });
-
     setIsAddStepsOpen(false);
     setManualSteps(0);
   };
@@ -338,13 +341,8 @@ export default function Dashboard() {
       if(!meal.calories || isCoachView) return;
       const cal = parseInt(meal.calories);
       const newTotal = liveStats.caloriesConsumed + cal;
-
       setLiveStats(prev => ({ ...prev, caloriesConsumed: newTotal }));
-
-      // RTDB Sync
       update(ref(rtdb, `users/${currentUser.uid}/live_data`), { calories_consumed: newTotal });
-
-      // Firestore Sync
       await updateDoc(doc(db, "users", currentUser.uid), { dailyCalories: increment(cal) });
   };
 
@@ -364,7 +362,6 @@ export default function Dashboard() {
       } catch(e) {}
   };
 
-  // --- VARIABLES D'AFFICHAGE ---
   const getFirstName = () => userProfile?.firstName || userProfile?.first_name || "Athlète";
   const currentWeight = userProfile?.weight ? parseFloat(userProfile.weight) : 0;
   const targetWeight = parseFloat(userProfile?.targetWeight || 0);
@@ -383,7 +380,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-6 bg-gradient-to-r from-[#7b2cbf]/10 to-transparent p-8 rounded-3xl border border-[#7b2cbf]/20 relative overflow-hidden">
         <div className="relative z-10">
@@ -408,7 +404,6 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
         <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Poids */}
@@ -432,7 +427,7 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Nutrition DU JOUR */}
+                {/* Nutrition */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#7b2cbf] flex flex-col justify-between shadow-xl">
                     <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-2"><Utensils className="text-[#7b2cbf]" size={20}/><h3 className="font-bold text-gray-200">Nutrition</h3></div>
@@ -548,7 +543,10 @@ export default function Dashboard() {
             />
 
             <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 shadow-xl flex flex-col">
-                <h3 className="text-lg font-black italic text-white uppercase mb-4 flex items-center gap-2 tracking-tighter"><Calendar className="text-[#00f5d4]"/> Agenda Hebdo</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-black italic text-white uppercase flex items-center gap-2 tracking-tighter"><Calendar className="text-[#00f5d4]"/> Agenda Hebdo</h3>
+                  <Link to="/performance"><Button size="sm" variant="ghost" className="text-xs text-[#9d4edd] font-bold">VOIR PERFORMANCE <TrendingUp size={14} className="ml-1"/></Button></Link>
+                </div>
                 <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                     {weekDaysShort.map((d, index) => {
                         const workout = getWorkoutForDay(index);

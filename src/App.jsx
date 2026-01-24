@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'; // <--- 1. J'ai ajouté useEffect ici
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
@@ -29,6 +29,7 @@ import Performance from '@/pages/Performance';
 import Gallery from '@/pages/Gallery';
 import Messages from '@/pages/Messages';
 import Challenges from '@/pages/Challenges';
+import WatchPairing from '@/pages/WatchPairing';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import { App as CapacitorApp } from '@capacitor/app';
 
@@ -43,9 +44,7 @@ const PrivateRoute = ({ children }) => {
 const AppContent = () => {
   const location = useLocation();
 
-  // --- 2. LE CODE EST DÉPLACÉ ICI (Au bon endroit) ---
   useEffect(() => {
-    // Gestion du bouton retour physique sur Android
     const backListener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
       if (!canGoBack) {
         CapacitorApp.exitApp();
@@ -54,7 +53,6 @@ const AppContent = () => {
       }
     });
 
-    // Nettoyage de l'écouteur quand le composant est détruit
     return () => {
       backListener.then(handler => handler.remove());
     };
@@ -65,6 +63,7 @@ const AppContent = () => {
     if (path === '/' || path === '/dashboard') return 'Tableau de Bord';
     if (path.includes('payments')) return 'Finance';
     if (path.includes('coach-onboarding')) return 'Configuration Coach';
+    if (path.includes('watch-pairing')) return 'Connexion Montre';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
   };
 
@@ -104,6 +103,7 @@ const AppContent = () => {
               <Route path="/mon-coach" element={<MyCoach />} />
               <Route path="/coach/payments" element={<Payments />} />
               <Route path="/privacy" element={<Privacy />} />
+              <Route path="/watch-pairing" element={<WatchPairing />} />
               <Route path="/unauthorized" element={<UserNotRegisteredError />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

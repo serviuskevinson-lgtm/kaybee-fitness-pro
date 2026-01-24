@@ -31,7 +31,10 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
     @Override
     public void onMessageReceived(MessageEvent messageEvent) {
-        if (messageEvent.getPath().equals("/health-data")) {
+        String path = messageEvent.getPath();
+        Log.d("WearPlugin", "Received message: " + path);
+        
+        if (path.equals("/health-data")) {
             String dataString = new String(messageEvent.getData());
             try {
                 JSObject ret = new JSObject(dataString);
@@ -39,7 +42,48 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             } catch (Exception e) {
                 Log.e("WearPlugin", "Error parsing health data", e);
             }
+        } else if (path.equals("/request-sync")) {
+            JSObject ret = new JSObject();
+            ret.put("requested", true);
+            notifyListeners("onRequestSync", ret);
+        } else if (path.equals("/pair-success")) {
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            notifyListeners("onPairSuccess", ret);
         }
+    }
+
+    @PluginMethod
+    public void pairWatch(PluginCall call) {
+        String pairingCode = call.getString("pairingCode");
+        String userId = call.getString("userId");
+
+        if (pairingCode == null || userId == null) {
+            call.reject("Pairing code and User ID are required");
+            return;
+        }
+
+        JSObject data = new JSObject();
+        data.put("pairingCode", pairingCode);
+        data.put("userId", userId);
+        String dataString = data.toString();
+
+        new Thread(() -> {
+            try {
+                List<Node> nodes = Tasks.await(Wearable.getNodeClient(getContext()).getConnectedNodes());
+                if (nodes.isEmpty()) {
+                    call.reject("Aucune montre connectée en Bluetooth");
+                    return;
+                }
+                for (Node node : nodes) {
+                    Tasks.await(Wearable.getMessageClient(getContext())
+                            .sendMessage(node.getId(), "/pair", dataString.getBytes()));
+                }
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Erreur jumelage: " + e.getMessage());
+            }
+        }).start();
     }
 
     @PluginMethod

@@ -4,9 +4,8 @@ import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ClientSelector from '@/components/coach/ClientSelector';
-import { useTranslation } from 'react-i18next'; // <--- 1. IMPORT AJOUTÉ
-// Ajoute l'import icône
-import { UserCheck } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { UserCheck, Watch } from 'lucide-react';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -40,9 +39,8 @@ export default function AppSidebar() {
   const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
   const [isCoach, setIsCoach] = useState(false);
-  const { t } = useTranslation(); // <--- 2. HOOK D'ACTIVATION AJOUTÉ
+  const { t } = useTranslation();
 
-  // Vérifier si l'utilisateur est un coach pour afficher les outils
   useEffect(() => {
     const checkRole = async () => {
         if(currentUser) {
@@ -64,21 +62,20 @@ export default function AppSidebar() {
     }
   };
 
-  // 3. TEXTES REMPLACÉS PAR t('clé')
   const items = [
     { title: t('dashboard'), url: "/", icon: LayoutDashboard },
     { title: t('exercises'), url: "/exercises", icon: Dumbbell },
     { title: t('meals'), url: "/meals", icon: Utensils },
     { title: t('session_active'), url: "/session", icon: Timer },
     { title: t('history'), url: "/performance", icon: LineChart },
-    { title: "Galerie", url: "/gallery", icon: ImageIcon }, // Pas encore traduit dans ton i18n
+    { title: "Galerie", url: "/gallery", icon: ImageIcon },
     { title: t('messages'), url: "/messages", icon: MessageSquare },
     { title: t('challenges'), url: "/challenges", icon: Trophy },
     { title: t('community'), url: "/community", icon: Users },
     { title: t('my_coach'), url: "/mon-coach", icon: UserCheck },
+    { title: "Ma Montre", url: "/watch-pairing", icon: Watch }, // Ajout de Ma Montre ici
   ];
 
-  // Ajouter Paiements si c'est un coach
   if (isCoach) {
       items.push({ title: t('finance'), url: "/coach/payments", icon: CreditCard });
   }
@@ -86,7 +83,6 @@ export default function AppSidebar() {
   return (
     <Sidebar className="border-r border-[#7b2cbf]/30 bg-[#0a0a0f]/95 text-white" collapsible="icon">
       
-      {/* HEADER : Logo + Sélecteur Client (Si Coach) */}
       <SidebarHeader className="flex flex-col justify-center border-b border-[#7b2cbf]/20 pt-4 pb-2">
          <div className="flex items-center gap-2 px-4 w-full overflow-hidden transition-all mb-4">
              <img 
@@ -99,13 +95,11 @@ export default function AppSidebar() {
              </span>
          </div>
          
-         {/* SELECTEUR DE CLIENT (Visible uniquement pour les coachs) */}
          <div className="group-data-[collapsible=icon]:hidden">
             {isCoach && <ClientSelector />}
          </div>
       </SidebarHeader>
 
-      {/* MENU */}
       <SidebarContent className="py-2">
         <SidebarGroup>
           <SidebarGroupContent>
@@ -114,7 +108,7 @@ export default function AppSidebar() {
                 const isActive = location.pathname === item.url || (item.url !== '/' && location.pathname.startsWith(item.url));
                 
                 return (
-                  <SidebarMenuItem key={item.url}> {/* Utiliser l'URL comme clé car le titre change */}
+                  <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton 
                       asChild 
                       isActive={isActive}
@@ -137,7 +131,6 @@ export default function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* FOOTER : Profil & Déconnexion */}
       <SidebarFooter className="border-t border-[#7b2cbf]/20 p-4">
         <SidebarMenu>
           <SidebarMenuItem>
