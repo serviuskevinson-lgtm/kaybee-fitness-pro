@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
-import { db } from '@/lib/firebase';
+import { db, app } from '@/lib/firebase';
 import { 
   doc, getDoc, collection, addDoc, query, where, getDocs, orderBy, deleteDoc, updateDoc, arrayUnion, increment, setDoc
 } from 'firebase/firestore';
@@ -87,7 +87,7 @@ export default function Dashboard() {
       points: 0
   });
 
-  const rtdb = getDatabase();
+  const rtdb = getDatabase(app);
 
   const weekDaysShort = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   const todayName = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][new Date().getDay()];
@@ -209,15 +209,20 @@ export default function Dashboard() {
     const unsubscribe = onValue(liveDataRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
-            setLiveStats(prev => ({
-                ...prev,
-                steps: Math.max(prev.steps, data.steps || 0),
-                caloriesBurned: Math.max(prev.caloriesBurned, data.calories_burned || 0),
-                caloriesConsumed: data.calories_consumed || prev.caloriesConsumed,
-                water: data.water || prev.water,
-                heartRate: data.heart_rate || 0,
-                points: data.points || prev.points
-            }));
+            setLiveStats(prev => {
+                const dbSteps = data.steps || 0;
+                const dbCals = data.calories_burned || 0;
+
+                return {
+                    ...prev,
+                    steps: data.source === 'watch' ? dbSteps : Math.max(prev.steps, dbSteps),
+                    caloriesBurned: data.source === 'watch' ? dbCals : Math.max(prev.caloriesBurned, dbCals),
+                    caloriesConsumed: data.calories_consumed || prev.caloriesConsumed,
+                    water: data.water || prev.water,
+                    heartRate: data.heart_rate || 0,
+                    points: data.points || prev.points
+                };
+            });
             if (data.heart_rate) setWatchHeartRate(data.heart_rate);
         }
     });
@@ -230,10 +235,11 @@ export default function Dashboard() {
 
   // --- COMPTEUR ACCÉLÉROMÈTRE (Fallback) ---
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || isCoachView || !currentUser) return;
+    if (!Capacitor.isNativePlatform() || isCoachView || !currentUser || !userProfile) return;
 
     let accX = 0, accY = 0, accZ = 0;
-    const kcalPerStep = (parseFloat(userProfile?.weight) || 75) * 0.00075;
+    const weight = parseFloat(userProfile?.weight) || 75;
+    const kcalPerStep = weight * 0.00075;
 
     const startCounting = async () => {
         try {
@@ -246,18 +252,13 @@ export default function Dashboard() {
                         const nextSteps = prev.steps + 1;
                         const nextCals = prev.caloriesBurned + kcalPerStep;
 
-                        if (nextSteps % 20 === 0) {
+                        if (nextSteps % 10 === 0) {
                             update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
                                 steps: nextSteps,
-                                calories_burned: nextCals
+                                calories_burned: nextCals,
+                                source: 'phone',
+                                timestamp: Date.now()
                             });
-
-                            if (nextSteps % 100 === 0) {
-                                updateDoc(doc(db, "users", currentUser.uid), {
-                                    dailySteps: nextSteps,
-                                    dailyBurnedCalories: nextCals
-                                });
-                            }
                         }
                         return { ...prev, steps: nextSteps, caloriesBurned: nextCals };
                     });
@@ -269,7 +270,7 @@ export default function Dashboard() {
 
     startCounting();
     return () => { try { Motion.removeAllListeners(); } catch (e) {} };
-  }, [currentUser, isCoachView, userProfile?.weight]);
+  }, [currentUser, isCoachView, userProfile]);
 
   const syncEverythingToRTDB = async (profileData, workout, plan) => {
     if (!currentUser) return;

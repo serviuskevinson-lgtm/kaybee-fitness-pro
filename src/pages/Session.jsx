@@ -63,16 +63,18 @@ export default function Session() {
 
           // Vérifier si déjà faite aujourd'hui
           const today = new Date().toISOString().split('T')[0];
-          const lastWorkoutDate = data.history?.length > 0 ? data.history[data.history.length - 1].date : "";
+          const history = data.history || [];
+          const lastWorkoutDate = history.length > 0 ? history[history.length - 1].date : "";
           
-          if (lastWorkoutDate.startsWith(today)) {
+          if (lastWorkoutDate && lastWorkoutDate.startsWith(today)) {
               setIsCompletedToday(true);
           }
 
           // Trouver la séance prévue ce jour
           const weekDays = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
           const todayName = weekDays[new Date().getDay()];
-          const todayWorkout = data.workouts?.find(w => w.scheduledDays?.includes(todayName));
+          const workouts = data.workouts || [];
+          const todayWorkout = workouts.find(w => w.scheduledDays?.includes(todayName));
           
           setWorkout(todayWorkout || null);
         }
@@ -84,14 +86,15 @@ export default function Session() {
 
   // Fonction pour trouver le prochain jour d'entraînement
   const getNextWorkoutInfo = () => {
-    if (!userProfile?.workouts) return "Aucun programme défini";
+    const workouts = userProfile?.workouts || [];
+    if (workouts.length === 0) return "Aucun programme défini";
     const weekDays = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const currentDayIdx = new Date().getDay();
     
     for (let i = 1; i <= 7; i++) {
         const nextIdx = (currentDayIdx + i) % 7;
         const nextDayName = weekDays[nextIdx];
-        const hasWorkout = userProfile.workouts.some(w => w.scheduledDays?.includes(nextDayName));
+        const hasWorkout = workouts.some(w => w.scheduledDays?.includes(nextDayName));
         
         if (hasWorkout) {
             return i === 1 ? "Demain" : `Dans ${i} jours (${nextDayName})`;
@@ -105,10 +108,11 @@ export default function Session() {
     setIsSessionStarted(true);
     if (workout) {
         // Envoi à la montre
+        const exercises = workout.exercises || [];
         const watchData = {
             name: workout.name,
-            exercises: (workout.exercises || []).map(e => ({
-                name: e.name,
+            exercises: exercises.map(e => ({
+                name: e.name || "Exercice",
                 sets: parseInt(e.sets || 3),
                 reps: parseInt(e.reps || 10),
                 weight: parseFloat(e.weight || 0)
@@ -264,6 +268,7 @@ export default function Session() {
   }
 
   // --- VUE 3 : SÉANCE EN COURS ---
+  const exercises = workout?.exercises || [];
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white p-4 pb-32">
         <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-4 sticky top-0 bg-[#0a0a0f] z-10 pt-2">
@@ -274,8 +279,9 @@ export default function Session() {
         </div>
 
         <div className="space-y-4">
-            {workout?.exercises?.map((exo, idx) => {
+            {exercises.map((exo, idx) => {
                 const isExpanded = expandedExo === idx;
+                const numSets = parseInt(exo.sets) || 0;
                 return (
                     <div key={idx} className={`bg-[#1a1a20] border ${isExpanded ? 'border-[#7b2cbf]' : 'border-gray-800'} rounded-2xl overflow-hidden transition-all`}>
                         <div className="p-4 flex justify-between items-center cursor-pointer" onClick={() => setExpandedExo(isExpanded ? null : idx)}>
@@ -287,7 +293,7 @@ export default function Session() {
                         </div>
                         {isExpanded && (
                             <div className="p-4 pt-0 space-y-3 bg-[#14141a]">
-                                {Array.from({ length: parseInt(exo.sets) }).map((_, i) => (
+                                {Array.from({ length: numSets }).map((_, i) => (
                                     <div key={i} className="flex items-center gap-2">
                                         <span className="text-xs text-gray-500 w-12 font-bold">SET {i+1}</span>
                                         <Input type="number" placeholder={exo.weight || "kg"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" value={sessionLogs[`${idx}-${i}`]?.weight || ''} onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)} />
