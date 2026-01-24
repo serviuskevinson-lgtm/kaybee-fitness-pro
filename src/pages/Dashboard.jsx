@@ -87,6 +87,7 @@ export default function Dashboard() {
       points: 0
   });
 
+  const lastWatchUpdate = useRef(0); // Pour la règle de priorité
   const rtdb = getDatabase(app);
 
   const weekDaysShort = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -209,12 +210,18 @@ export default function Dashboard() {
     const unsubscribe = onValue(liveDataRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
+            // Règle de priorité : si la source est la montre, on note le timestamp
+            if (data.source === 'watch') {
+                lastWatchUpdate.current = Date.now();
+            }
+
             setLiveStats(prev => {
                 const dbSteps = data.steps || 0;
                 const dbCals = data.calories_burned || 0;
 
                 return {
                     ...prev,
+                    // Si la montre a envoyé des données, elles priment. Sinon on prend le max.
                     steps: data.source === 'watch' ? dbSteps : Math.max(prev.steps, dbSteps),
                     caloriesBurned: data.source === 'watch' ? dbCals : Math.max(prev.caloriesBurned, dbCals),
                     caloriesConsumed: data.calories_consumed || prev.caloriesConsumed,
@@ -233,7 +240,7 @@ export default function Dashboard() {
     };
   }, [currentUser, isCoachView, targetUserId, userProfile, todayWorkout, todayMeals]);
 
-  // --- COMPTEUR ACCÉLÉROMÈTRE (Fallback) ---
+  // --- COMPTEUR ACCÉLÉROMÈTRE (Téléphone) ---
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || isCoachView || !currentUser || !userProfile) return;
 
@@ -247,30 +254,40 @@ export default function Dashboard() {
                 const { x, y, z } = event.accelerationIncludingGravity;
                 const delta = Math.abs(x - accX) + Math.abs(y - accY) + Math.abs(z - accZ);
 
-                if (delta > 15) {
-                    setLiveStats(prev => {
-                        const nextSteps = prev.steps + 1;
-                        const nextCals = prev.caloriesBurned + kcalPerStep;
+                // Détection d'un pas (seuil ajusté à 13 pour plus de précision)
+                if (delta > 13) {
+                    const now = Date.now();
+                    // Règle : Si la montre a envoyé une mise à jour il y a moins de 60s, le téléphone arrête de compter.
+                    const isWatchActive = (now - lastWatchUpdate.current) < 60000;
 
-                        if (nextSteps % 10 === 0) {
-                            update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
-                                steps: nextSteps,
-                                calories_burned: nextCals,
-                                source: 'phone',
-                                timestamp: Date.now()
-                            });
-                        }
-                        return { ...prev, steps: nextSteps, caloriesBurned: nextCals };
-                    });
+                    if (!isWatchActive) {
+                        setLiveStats(prev => {
+                            const nextSteps = prev.steps + 1;
+                            const nextCals = prev.caloriesBurned + kcalPerStep;
+
+                            // Sync vers RTDB tous les 10 pas
+                            if (nextSteps % 10 === 0) {
+                                update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
+                                    steps: nextSteps,
+                                    calories_burned: nextCals,
+                                    source: 'phone',
+                                    timestamp: now
+                                });
+                            }
+                            return { ...prev, steps: nextSteps, caloriesBurned: nextCals };
+                        });
+                    }
                 }
                 accX = x; accY = y; accZ = z;
             });
-        } catch (e) {}
+        } catch (e) {
+            console.error("Erreur accéléromètre:", e);
+        }
     };
 
     startCounting();
     return () => { try { Motion.removeAllListeners(); } catch (e) {} };
-  }, [currentUser, isCoachView, userProfile]);
+  }, [currentUser, isCoachView, userProfile, rtdb]);
 
   const syncEverythingToRTDB = async (profileData, workout, plan) => {
     if (!currentUser) return;
