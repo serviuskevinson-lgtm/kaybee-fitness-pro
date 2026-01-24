@@ -8,7 +8,8 @@ import { Watch, Smartphone, CheckCircle2, RefreshCcw, Wifi, Bluetooth } from 'lu
 import { useTranslation } from 'react-i18next';
 import { useToast } from "@/components/ui/use-toast";
 
-const WearConnectivity = registerPlugin('WearConnectivity');
+// On utilise "WearPlugin" pour correspondre au nom de la classe Java
+const WearConnectivity = registerPlugin('WearPlugin');
 
 export default function WatchPairing() {
   const { currentUser } = useAuth();

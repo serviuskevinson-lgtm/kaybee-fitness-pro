@@ -21,6 +21,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     public void load() {
         super.load();
         Wearable.getMessageClient(getContext()).addListener(this);
+        Log.d("WearPlugin", "WearPlugin loaded and listener added");
     }
 
     @Override
@@ -58,6 +59,8 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         String pairingCode = call.getString("pairingCode");
         String userId = call.getString("userId");
 
+        Log.d("WearPlugin", "pairWatch called with code: " + pairingCode + " for user: " + userId);
+
         if (pairingCode == null || userId == null) {
             call.reject("Pairing code and User ID are required");
             return;
@@ -71,6 +74,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         new Thread(() -> {
             try {
                 List<Node> nodes = Tasks.await(Wearable.getNodeClient(getContext()).getConnectedNodes());
+                Log.d("WearPlugin", "Found " + nodes.size() + " connected nodes");
                 if (nodes.isEmpty()) {
                     call.reject("Aucune montre connectée en Bluetooth");
                     return;
@@ -78,9 +82,11 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
                 for (Node node : nodes) {
                     Tasks.await(Wearable.getMessageClient(getContext())
                             .sendMessage(node.getId(), "/pair", dataString.getBytes()));
+                    Log.d("WearPlugin", "Sent pairing message to node: " + node.getDisplayName());
                 }
                 call.resolve();
             } catch (Exception e) {
+                Log.e("WearPlugin", "Pairing error", e);
                 call.reject("Erreur jumelage: " + e.getMessage());
             }
         }).start();
