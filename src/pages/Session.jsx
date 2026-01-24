@@ -6,7 +6,7 @@ import { doc, getDoc, updateDoc, arrayUnion, increment } from 'firebase/firestor
 import { 
   Timer, CheckCircle, ChevronDown, ChevronUp, 
   Play, RotateCcw, Dumbbell, AlertCircle, XCircle, Save, 
-  Trophy, CalendarClock, ArrowRight
+  Trophy, CalendarClock, ArrowRight, Activity
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,8 @@ export default function Session() {
   const [userProfile, setUserProfile] = useState(null);
   const [workout, setWorkout] = useState(null); 
   const [loading, setLoading] = useState(true);
-  
+  const [isSaving, setIsSaving] = useState(false);
+
   // États Séance Active
   const [isSessionStarted, setIsSessionStarted] = useState(false); 
   const [isCompletedToday, setIsCompletedToday] = useState(false);
@@ -186,7 +187,7 @@ export default function Session() {
             workoutsCompleted: increment(1),
             points: increment(sessionStats.sets * 5 + 50),
             totalVolume: increment(sessionStats.volume),
-            dailyBurnedCalories: increment(sessionStats.calories), // IMPORTANT: Ajout au dashboard
+            dailyBurnedCalories: increment(sessionStats.calories),
             lastActiveDate: new Date().toISOString().split('T')[0]
         });
         
@@ -289,8 +290,8 @@ export default function Session() {
                                 {Array.from({ length: parseInt(exo.sets) }).map((_, i) => (
                                     <div key={i} className="flex items-center gap-2">
                                         <span className="text-xs text-gray-500 w-12 font-bold">SET {i+1}</span>
-                                        <Input type="number" placeholder={exo.weight || "kg"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)} />
-                                        <Input type="number" placeholder={exo.reps || "reps"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" onChange={(e) => handleSetChange(idx, i, 'reps', e.target.value)} />
+                                        <Input type="number" placeholder={exo.weight || "kg"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" value={sessionLogs[`${idx}-${i}`]?.weight || ''} onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)} />
+                                        <Input type="number" placeholder={exo.reps || "reps"} className="h-10 bg-black border-gray-800 text-white text-center font-bold" value={sessionLogs[`${idx}-${i}`]?.reps || ''} onChange={(e) => handleSetChange(idx, i, 'reps', e.target.value)} />
                                         <button onClick={() => toggleSetComplete(idx, i)} className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors ${sessionLogs[`${idx}-${i}`]?.done ? 'bg-[#00f5d4] text-black' : 'bg-gray-800 text-gray-500'}`}><CheckCircle size={20}/></button>
                                     </div>
                                 ))}
@@ -321,6 +322,18 @@ export default function Session() {
                 <Button onClick={confirmSaveSession} disabled={isSaving} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black h-12 rounded-xl">
                     {isSaving ? "SAUVEGARDE..." : "ENREGISTRER & QUITTER"}
                 </Button>
+            </DialogContent>
+        </Dialog>
+
+        {/* Modal d'abandon */}
+        <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
+            <DialogContent className="bg-[#1a1a20] border-red-500 text-white">
+                <DialogHeader><DialogTitle className="text-red-500 text-center uppercase font-black">Abandonner la séance ?</DialogTitle></DialogHeader>
+                <p className="text-center text-gray-400 text-sm">Tes progrès pour cette séance ne seront pas enregistrés.</p>
+                <div className="flex gap-4 mt-6">
+                    <Button onClick={() => setShowCancelModal(false)} className="flex-1 bg-gray-800 text-white">Continuer</Button>
+                    <Button onClick={() => navigate('/dashboard')} className="flex-1 bg-red-500 text-white font-bold">Quitter</Button>
+                </div>
             </DialogContent>
         </Dialog>
     </div>

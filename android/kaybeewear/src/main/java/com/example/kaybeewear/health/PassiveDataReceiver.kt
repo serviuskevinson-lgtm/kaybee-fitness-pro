@@ -33,15 +33,15 @@ class PassiveDataReceiver : PassiveListenerService() {
     }
 
     private fun syncToFirebase(steps: Long?, calories: Double?, distance: Double?) {
-        // We get the UID from SharedPreferences (it should be saved there when received from phone)
         val prefs = getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE)
         val userId = prefs.getString("userId", null) ?: return
 
         val updates = mutableMapOf<String, Any>()
         steps?.let { updates["steps"] = it }
-        calories?.let { updates["calories"] = it }
+        calories?.let { updates["calories_burned"] = it } // Unifié avec le dashboard
         distance?.let { updates["distance"] = it }
         updates["last_update"] = System.currentTimeMillis()
+        updates["source"] = "watch"
 
         database.child("users").child(userId).child("live_data").updateChildren(updates)
             .addOnFailureListener { e -> Log.e("PassiveDataReceiver", "Firebase sync failed", e) }
@@ -54,7 +54,7 @@ class PassiveDataReceiver : PassiveListenerService() {
                 val json = JSONObject().apply {
                     put("type", "passive_update")
                     steps?.let { put("steps", it) }
-                    calories?.let { put("calories", it) }
+                    calories?.let { put("calories_burned", it) }
                     distance?.let { put("distance", it) }
                     put("timestamp", System.currentTimeMillis())
                 }

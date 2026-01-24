@@ -8,8 +8,8 @@ import { Watch, Smartphone, CheckCircle2, RefreshCcw, Wifi, Bluetooth } from 'lu
 import { useTranslation } from 'react-i18next';
 import { useToast } from "@/components/ui/use-toast";
 
-// On utilise "WearPlugin" pour correspondre au nom de la classe Java
-const WearConnectivity = registerPlugin('WearPlugin');
+// On utilise le nom exact déclaré dans l'annotation Java @CapacitorPlugin(name = "WearPlugin")
+const WearPlugin = registerPlugin('WearPlugin');
 
 export default function WatchPairing() {
   const { currentUser } = useAuth();
@@ -20,18 +20,28 @@ export default function WatchPairing() {
   const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
-    const successListener = WearConnectivity.addListener('onPairSuccess', () => {
-      setIsSuccess(true);
-      setIsPairing(false);
-      toast({
-        title: "Succès !",
-        description: "Votre montre est maintenant connectée.",
-        variant: "default",
-      });
-    });
+    let successListener;
+
+    const setupListener = async () => {
+        try {
+            successListener = await WearPlugin.addListener('onPairSuccess', () => {
+              setIsSuccess(true);
+              setIsPairing(false);
+              toast({
+                title: "Succès !",
+                description: "Votre montre est maintenant connectée.",
+                variant: "default",
+              });
+            });
+        } catch (e) {
+            console.error("Impossible d'ajouter l'écouteur WearPlugin", e);
+        }
+    };
+
+    setupListener();
 
     return () => {
-      successListener.remove();
+      if (successListener) successListener.remove();
     };
   }, [toast]);
 
@@ -47,7 +57,12 @@ export default function WatchPairing() {
 
     setIsPairing(true);
     try {
-      await WearConnectivity.pairWatch({
+      // Vérification si le plugin est disponible avant l'appel
+      if (!WearPlugin) {
+        throw new Error("Plugin WearPlugin non chargé");
+      }
+
+      await WearPlugin.pairWatch({
         pairingCode: pairingCode,
         userId: currentUser.uid
       });
@@ -58,9 +73,10 @@ export default function WatchPairing() {
       });
     } catch (error) {
       setIsPairing(false);
+      console.error("Erreur Appel pairWatch:", error);
       toast({
         title: "Erreur de connexion",
-        description: error.message || "Impossible de joindre la montre. Vérifiez le Bluetooth.",
+        description: error.message || "Impossible de joindre la montre.",
         variant: "destructive",
       });
     }
@@ -74,7 +90,7 @@ export default function WatchPairing() {
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Montre Connectée !</h2>
         <p className="text-gray-400 mb-8 max-w-xs">
-          Vos données de santé seront désormais synchronisées en temps réel entre votre montre et votre téléphone.
+          Vos données de santé seront désormais synchronisées en temps réel.
         </p>
         <Button
           className="bg-[#7b2cbf] hover:bg-[#9d4edd] text-white px-8"
@@ -102,7 +118,7 @@ export default function WatchPairing() {
             Connecter ma Montre
           </CardTitle>
           <CardDescription className="text-gray-400">
-            Jumelez votre montre pour suivre vos pulsations et vos calories en temps réel.
+            Saisissez le code affiché sur votre montre.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -126,40 +142,22 @@ export default function WatchPairing() {
             disabled={isPairing || pairingCode.length !== 6}
           >
             {isPairing ? (
-              <><RefreshCcw className="mr-2 animate-spin" size={18} /> Connexion en cours...</>
+              <><RefreshCcw className="mr-2 animate-spin" size={18} /> Connexion...</>
             ) : (
               "VALIDER LE CODE"
             )}
           </Button>
 
           <div className="pt-6 border-t border-gray-800">
-            <h4 className="text-xs font-bold text-gray-500 uppercase mb-4">Instructions</h4>
+            <h4 className="text-xs font-bold text-gray-500 uppercase mb-4">Aide</h4>
             <div className="space-y-3">
-              <div className="flex gap-3 text-sm">
-                <div className="w-5 h-5 bg-[#00f5d4]/10 rounded-full flex items-center justify-center text-[#00f5d4] text-[10px] font-bold">1</div>
-                <p className="text-gray-400">Lancez l'app <span className="text-white font-bold">Kaybee</span> sur votre montre Wear OS.</p>
-              </div>
-              <div className="flex gap-3 text-sm">
-                <div className="w-5 h-5 bg-[#00f5d4]/10 rounded-full flex items-center justify-center text-[#00f5d4] text-[10px] font-bold">2</div>
-                <p className="text-gray-400">Le code s'affichera automatiquement sur l'écran de la montre.</p>
-              </div>
-              <div className="flex gap-3 text-sm">
-                <div className="w-5 h-5 bg-[#00f5d4]/10 rounded-full flex items-center justify-center text-[#00f5d4] text-[10px] font-bold">3</div>
-                <p className="text-gray-400">Assurez-vous que le <span className="text-white font-bold">Bluetooth</span> est activé sur les deux appareils.</p>
+              <div className="flex gap-3 text-sm text-gray-400 italic">
+                Note: Assurez-vous que l'application Kaybee est ouverte sur la montre.
               </div>
             </div>
           </div>
-
-          <div className="flex items-center justify-center gap-6 pt-4 text-[10px] text-gray-600 font-bold uppercase tracking-tighter">
-            <div className="flex items-center gap-1"><Bluetooth size={12} /> Bluetooth Ready</div>
-            <div className="flex items-center gap-1"><Wifi size={12} /> Wifi Sync</div>
-          </div>
         </CardContent>
       </Card>
-
-      <p className="text-center text-[10px] text-gray-600 uppercase">
-        Compatible avec Google Pixel Watch, Samsung Galaxy Watch (4+) et autres Wear OS.
-      </p>
     </div>
   );
 }

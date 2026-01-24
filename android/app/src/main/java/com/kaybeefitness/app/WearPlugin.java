@@ -14,7 +14,7 @@ import com.google.android.gms.wearable.Wearable;
 
 import java.util.List;
 
-@CapacitorPlugin(name = "WearConnectivity")
+@CapacitorPlugin(name = "WearPlugin")
 public class WearPlugin extends Plugin implements MessageClient.OnMessageReceivedListener {
 
     @Override
