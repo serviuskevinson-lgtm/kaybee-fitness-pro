@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ClientSelector from '@/components/coach/ClientSelector';
 import { useTranslation } from 'react-i18next';
-import { UserCheck, Watch } from 'lucide-react';
+import { UserCheck, Watch, Apple } from 'lucide-react';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -68,12 +68,13 @@ export default function AppSidebar() {
     { title: t('meals'), url: "/meals", icon: Utensils },
     { title: t('session_active'), url: "/session", icon: Timer },
     { title: t('history'), url: "/performance", icon: LineChart },
+    { title: "Historique Nutritif", url: "/nutrition", icon: Apple }, // Renommé et déplacé ici
     { title: "Galerie", url: "/gallery", icon: ImageIcon },
     { title: t('messages'), url: "/messages", icon: MessageSquare },
     { title: t('challenges'), url: "/challenges", icon: Trophy },
     { title: t('community'), url: "/community", icon: Users },
     { title: t('my_coach'), url: "/mon-coach", icon: UserCheck },
-    { title: "Ma Montre", url: "/watch-pairing", icon: Watch }, // Ajout de Ma Montre ici
+    { title: "Ma Montre", url: "/watch-pairing", icon: Watch },
   ];
 
   if (isCoach) {

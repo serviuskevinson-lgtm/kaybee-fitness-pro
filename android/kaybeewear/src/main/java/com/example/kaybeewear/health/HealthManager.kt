@@ -61,16 +61,27 @@ class HealthManager(private val context: Context) {
             if (heartRate != null) {
                 val bpm = heartRate.value.toInt()
                 sendHealthData("heart_rate", bpm.toString())
-                syncToFirebase("heart_rate", bpm)
+                syncHeartRateToFirebase(bpm)
             }
         }
+    }
+
+    fun syncHeartRateToFirebase(bpm: Int) {
+        val uid = userId ?: return
+        val db = database ?: return
+        val updates = mapOf(
+            "heart_rate" to bpm,
+            "source" to "watch",
+            "timestamp" to System.currentTimeMillis()
+        )
+        db.child("users").child(uid).child("live_data").updateChildren(updates)
+            .addOnFailureListener { e -> Log.e("HealthManager", "Firebase BPM sync failed", e) }
     }
 
     fun syncToFirebase(key: String, value: Any) {
         val uid = userId ?: return
         val db = database ?: return
         db.child("users").child(uid).child("live_data").child(key).setValue(value)
-            .addOnFailureListener { e -> Log.e("HealthManager", "Firebase sync failed", e) }
     }
 
     fun resetStats() {
@@ -78,7 +89,7 @@ class HealthManager(private val context: Context) {
         val db = database ?: return
         val updates = mapOf(
             "steps" to 0,
-            "calories" to 0,
+            "calories_burned" to 0,
             "distance" to 0
         )
         db.child("users").child(uid).child("live_data").updateChildren(updates)

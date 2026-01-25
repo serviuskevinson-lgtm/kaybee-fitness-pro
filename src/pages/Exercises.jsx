@@ -3,13 +3,13 @@ import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { db, storage } from '@/lib/firebase';
 import { 
-  collection, getDocs, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, updateDoc, arrayUnion 
+  collection, getDocs, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, updateDoc, arrayUnion, getDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   Dumbbell, Search, Plus, Trash2, Save, Play, 
   ChevronRight, ChevronLeft, LayoutList, History, Filter, Info, 
-  Upload, CheckCircle, Loader2, Clock, Calendar, Star, Image as ImageIcon, Video
+  Upload, CheckCircle, Loader2, Clock, Calendar as CalendarIcon, Star, Image as ImageIcon, Video, Sparkles, Wand2, Check
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { autoBuildWorkoutsWithGemini } from '@/lib/gemini';
+import { format, isSameDay } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
 // --- CONFIGURATION ---
 const ITEMS_PER_PAGE = 24;
@@ -39,16 +43,21 @@ const EQUIPMENTS = [
   { id: 'band', name: 'elastic_band' },
 ];
 
+const FOCUS_AREAS = [
+  "Pectoraux", "Dos", "Jambes", "Épaules", "Bras (Biceps/Triceps)",
+  "Abdominaux", "Fessiers", "Cardio / Endurance", "Full Body", "Haut du corps", "Bas du corps"
+];
+
 export default function Exercises() {
   const { currentUser } = useAuth();
-  // Sécurité anti-crash si le context est undefined
   const { selectedClient, isCoachView, targetUserId } = useClient() || {};
   const { t } = useTranslation();
   const navigate = useNavigate();
   
   // --- ÉTATS ---
   const [exercisesDB, setExercisesDB] = useState([]); 
-  const [customExercises, setCustomExercises] = useState([]); 
+  const [userProfile, setUserProfile] = useState(null);
+  const [customExercises, setCustomExercises] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
   // États Interface
@@ -64,10 +73,17 @@ export default function Exercises() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   
-  // NOUVEAU : PROGRAMMATION
+  // PROGRAMMATION MANUELLE
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
   const [programName, setProgramName] = useState("");
-  const [selectedDays, setSelectedDays] = useState([]);
+  const [programDates, setProgramDates] = useState([]);
+
+  // AUTO BUILD STATES
+  const [isAutoBuildModalOpen, setIsAutoBuildModalOpen] = useState(false);
+  const [autoBuildStep, setAutoBuildStep] = useState(1);
+  const [autoBuildDates, setAutoBuildDates] = useState([]);
+  const [autoBuildFocus, setAutoBuildFocus] = useState([]);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const [newTemplateName, setNewTemplateName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -154,16 +170,27 @@ export default function Exercises() {
     loadExercises();
   }, []);
 
-  // --- 2. CHARGEMENT EXERCICES PERSO ---
+  // --- 2. CHARGEMENT INFOS PROFIL ET EXERCICES PERSO ---
   useEffect(() => {
+    const fetchUserData = async () => {
+        if (!currentUser) return;
+        try {
+            const userRef = doc(db, "users", targetUserId || currentUser.uid);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                setUserProfile(userSnap.data());
+            }
+        } catch (e) { console.error(e); }
+    };
+
     const fetchCustomExercises = async () => {
         if (!currentUser) return;
         let authorIdToFetch = isCoachView ? currentUser.uid : null;
         
         if (!isCoachView) {
             try {
-                const userDoc = await getDocs(query(collection(db, "users"), where("uid", "==", currentUser.uid)));
-                if (!userDoc.empty) authorIdToFetch = userDoc.docs[0].data().coachId;
+                const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+                if (userSnap.exists()) authorIdToFetch = userSnap.data().coachId;
             } catch (e) { console.error(e); }
         }
 
@@ -175,8 +202,10 @@ export default function Exercises() {
             setCustomExercises(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isCustom: true })));
         } catch (e) { console.error(e); }
     };
+
+    fetchUserData();
     fetchCustomExercises();
-  }, [currentUser, isCoachView]);
+  }, [currentUser, isCoachView, targetUserId]);
 
   // --- 3. CHARGEMENT TEMPLATES ---
   useEffect(() => {
@@ -203,8 +232,6 @@ export default function Exercises() {
       setCart(cart.map(item => item.uniqueId === uniqueId ? { ...item, [field]: value } : item));
   };
 
-  // --- LOGIQUE SAUVEGARDE & PROGRAMMATION ---
-  
   // 1. Sauvegarder comme modèle
   const handleSaveTemplate = async () => {
     if (!newTemplateName.trim()) return;
@@ -224,8 +251,8 @@ export default function Exercises() {
 
   // 2. PROGRAMMER POUR LA SEMAINE (Lien Dashboard)
   const handleProgramWeek = async () => {
-      if (!programName.trim() || selectedDays.length === 0) {
-          alert("Donne un nom et choisis au moins un jour.");
+      if (!programName.trim() || programDates.length === 0) {
+          alert("Donne un nom et choisis au moins une date.");
           return;
       }
       setIsSaving(true);
@@ -234,7 +261,7 @@ export default function Exercises() {
               id: Date.now().toString(),
               name: programName,
               exercises: cart,
-              scheduledDays: selectedDays, 
+              scheduledDays: programDates.map(d => format(d, 'yyyy-MM-dd')),
               createdAt: new Date().toISOString(),
               assignedBy: isCoachView ? 'coach' : 'self'
           };
@@ -246,7 +273,7 @@ export default function Exercises() {
 
           setIsProgramModalOpen(false);
           setProgramName("");
-          setSelectedDays([]);
+          setProgramDates([]);
           alert(t('program_saved')); 
       } catch (e) {
           console.error("Erreur programmation:", e);
@@ -255,12 +282,66 @@ export default function Exercises() {
       }
   };
 
-  const toggleDaySelection = (day) => {
-      if (selectedDays.includes(day)) {
-          setSelectedDays(selectedDays.filter(d => d !== day));
-      } else {
-          setSelectedDays([...selectedDays, day]);
-      }
+  // --- AUTO BUILD LOGIC ---
+  const handleAutoBuild = async () => {
+    if (autoBuildDates.length === 0 || autoBuildFocus.length === 0) {
+      alert("Veuillez sélectionner des dates et au moins un focus.");
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const userWeight = userProfile?.weight || 75;
+      const weightUnit = userProfile?.weightUnit || 'kg';
+
+      const formattedDates = autoBuildDates.map(d => format(d, 'yyyy-MM-dd'));
+      const generatedWorkouts = await autoBuildWorkoutsWithGemini(
+        formattedDates,
+        autoBuildFocus,
+        userWeight,
+        weightUnit
+      );
+
+      const userRef = doc(db, "users", targetUserId);
+      const workoutPromises = generatedWorkouts.map(async (workout) => {
+        const enhancedExercises = workout.exercises.map(ex => {
+          const found = exercisesDB.find(dbEx => dbEx.name.toLowerCase().includes(ex.name.toLowerCase()));
+          return {
+            ...ex,
+            uniqueId: Math.random(),
+            imageUrl: found?.imageUrl || "https://images.unsplash.com/photo-1574680096141-1cddd32e04ca?w=800&q=80",
+            description: found?.description || t('default_instruction', {name: ex.name})
+          };
+        });
+
+        const workoutData = {
+          id: Date.now().toString() + Math.random(),
+          name: workout.name,
+          tip: workout.tip,
+          exercises: enhancedExercises,
+          scheduledDays: [workout.date],
+          createdAt: new Date().toISOString(),
+          assignedBy: 'AI'
+        };
+
+        return updateDoc(userRef, {
+          workouts: arrayUnion(workoutData)
+        });
+      });
+
+      await Promise.all(workoutPromises);
+      setIsAutoBuildModalOpen(false);
+      alert("Programme généré et ajouté à ton Dashboard !");
+      navigate('/dashboard');
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de la génération. Réessaie.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const toggleAutoFocus = (focus) => {
+    setAutoBuildFocus(prev => prev.includes(focus) ? prev.filter(f => f !== focus) : [...prev, focus]);
   };
 
   const confirmLoadTemplate = () => {
@@ -334,7 +415,6 @@ export default function Exercises() {
       });
   }, [allExercises, activeTab, activeEquipment, search]);
 
-  // --- CALCUL PAGINATION (C'est ici que c'était manquant) ---
   const totalPages = Math.ceil(filteredExercises.length / ITEMS_PER_PAGE);
   const currentExercises = filteredExercises.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
@@ -343,8 +423,9 @@ export default function Exercises() {
       
       {/* HEADER */}
       <div className="max-w-7xl mx-auto mb-10">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 shadow-xl">
-            <div className="flex-1">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 shadow-xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-[#9d4edd]/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none transition-all group-hover:bg-[#9d4edd]/10" />
+            <div className="flex-1 relative z-10">
                 <h1 className="text-4xl font-black italic uppercase flex items-center gap-3 text-white">
                     <Dumbbell className="text-[#9d4edd] w-10 h-10 fill-[#9d4edd]/20"/> 
                     {t('workout_builder')}
@@ -354,20 +435,28 @@ export default function Exercises() {
                 </p>
             </div>
 
-            {isCoachView && (
-                <div className="flex-shrink-0">
+            <div className="flex gap-4 relative z-10">
+                {/* --- BOUTON AUTO BUILD --- */}
+                <Button
+                    onClick={() => { setIsAutoBuildModalOpen(true); setAutoBuildStep(1); }}
+                    className="bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] hover:opacity-90 text-white font-black h-14 px-8 rounded-xl shadow-[0_0_20px_rgba(157,78,221,0.3)] transition-all hover:scale-105 border border-white/10"
+                >
+                    <Wand2 size={20} className="mr-2 animate-pulse"/> AUTO BUILD (IA)
+                </Button>
+
+                {isCoachView && (
                     <Button 
                         onClick={() => setIsCreateOpen(true)}
-                        className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-black h-14 px-8 rounded-xl shadow-[0_0_20px_rgba(157,78,221,0.4)] transition-all hover:scale-105 border border-[#9d4edd]/50 text-lg"
+                        className="bg-white text-black hover:bg-gray-200 font-black h-14 px-8 rounded-xl shadow-lg transition-all hover:scale-105 border-none"
                     >
                         <Plus size={24} className="mr-2"/> {t('create_exercise')}
                     </Button>
-                </div>
-            )}
+                )}
+            </div>
         </div>
       </div>
 
-      {/* --- BARRE D'AJOUT RAPIDE (Templates) --- */}
+      {/* --- FAVORITE TEMPLATES BAR --- */}
       {templates.length > 0 && (
         <div className="max-w-7xl mx-auto mb-10 animate-in slide-in-from-top duration-500">
             <h3 className="text-sm font-bold text-[#9d4edd] uppercase mb-4 flex items-center gap-2 tracking-widest pl-2">
@@ -399,7 +488,7 @@ export default function Exercises() {
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* --- COLONNE GAUCHE : SÉLECTION --- */}
+        {/* --- LEFT COLUMN : SELECTION --- */}
         <div className="lg:col-span-2 space-y-6">
             <div className="bg-[#1a1a20]/90 backdrop-blur p-5 rounded-3xl border border-gray-800 sticky top-4 z-10 shadow-2xl">
                 <div className="relative mb-5">
@@ -465,7 +554,7 @@ export default function Exercises() {
                                 </div>
                                 <div className="p-4 flex-1 flex flex-col justify-between">
                                     <div>
-                                        <h3 className="font-bold text-white text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[#9d4edd] transition-colors">{exo.name}</h3>
+                                        <h3 className="font-bold text-white text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[#00f5d4] transition-colors">{exo.name}</h3>
                                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wide truncate">{t(EQUIPMENTS.find(e => e.id === exo.equipment)?.name) || exo.equipment}</p>
                                     </div>
                                     <Button size="sm" className={`w-full mt-3 h-9 font-bold text-xs rounded-lg transition-all ${isAdded ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/50' : 'bg-[#9d4edd] text-white hover:bg-[#7b2cbf] shadow-lg shadow-purple-500/20'}`} onClick={() => isAdded ? removeFromCart(isAdded.uniqueId) : addToCart(exo)}>
@@ -487,7 +576,7 @@ export default function Exercises() {
             )}
         </div>
 
-        {/* --- COLONNE DROITE : PANIER --- */}
+        {/* --- RIGHT COLUMN : CART --- */}
         <div className="lg:col-span-1">
             <Card className="bg-[#1a1a20] border-gray-800 sticky top-4 h-[calc(100vh-100px)] flex flex-col shadow-[0_0_30px_rgba(0,0,0,0.5)] rounded-3xl overflow-hidden ring-1 ring-white/5">
                 <div className="p-6 border-b border-gray-800 bg-gradient-to-b from-[#252530] to-[#1a1a20]">
@@ -506,7 +595,6 @@ export default function Exercises() {
                                 <button onClick={() => removeFromCart(item.uniqueId)} className="text-gray-600 hover:text-red-500 transition-colors p-1 hover:bg-red-500/10 rounded-md"><Trash2 size={14}/></button>
                             </div>
                             
-                            {/* --- ICI : LES INPUTS SONT RESTAURÉS --- */}
                             <div className="grid grid-cols-3 gap-2">
                                 <div className="bg-[#1a1a20] p-1 rounded-lg border border-gray-700">
                                     <label className="text-[9px] text-[#9d4edd] font-bold uppercase block text-center mb-0.5">{t('sets')}</label>
@@ -538,13 +626,12 @@ export default function Exercises() {
                         <Save className="mr-2 h-4 w-4" /> {t('save_favorite')}
                     </Button>
 
-                    {/* --- BOUTON PROGRAMMER SEMAINE --- */}
-                    <Button 
+                    <Button
                         disabled={cart.length === 0} 
                         onClick={() => setIsProgramModalOpen(true)}
                         className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-bold h-12 rounded-xl"
                     >
-                        <Calendar className="mr-2 h-4 w-4" /> Programmer Semaine
+                        <CalendarIcon className="mr-2 h-4 w-4" /> Programmer
                     </Button>
 
                     <Button 
@@ -588,6 +675,58 @@ export default function Exercises() {
         </DialogContent>
       </Dialog>
 
+      {/* --- AUTO BUILD MODAL --- */}
+      <Dialog open={isAutoBuildModalOpen} onOpenChange={setIsAutoBuildModalOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-xl">
+            <DialogHeader>
+                <DialogTitle className="text-2xl font-black italic text-[#9d4edd] flex items-center gap-2 uppercase">
+                    <Sparkles className="animate-pulse" /> Auto Build AI
+                </DialogTitle>
+                <DialogDescription className="text-gray-400">Génère un programme complet de 5 à 6 séances basé sur tes besoins.</DialogDescription>
+            </DialogHeader>
+
+            {autoBuildStep === 1 ? (
+                <div className="space-y-6 py-4 animate-in fade-in duration-300 flex flex-col items-center">
+                    <h4 className="text-lg font-bold text-[#00f5d4] italic uppercase w-full text-center">1. Sélectionne tes dates d'entraînement</h4>
+                    <div className="bg-black/40 p-4 rounded-3xl border border-white/5">
+                        <Calendar
+                            mode="multiple"
+                            selected={autoBuildDates}
+                            onSelect={setAutoBuildDates}
+                            locale={fr}
+                            className="bg-transparent text-white"
+                        />
+                    </div>
+                    <DialogFooter className="w-full">
+                        <Button disabled={autoBuildDates.length === 0} onClick={() => setAutoBuildStep(2)} className="bg-[#9d4edd] text-white font-bold w-full h-12 rounded-xl">Suivant <ChevronRight className="ml-2" size={16}/></Button>
+                    </DialogFooter>
+                </div>
+            ) : (
+                <div className="space-y-6 py-4 animate-in slide-in-from-right duration-300">
+                    <h4 className="text-lg font-bold text-[#00f5d4] italic uppercase text-center">2. Sur quoi veux-tu travailler ?</h4>
+                    <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {FOCUS_AREAS.map(focus => (
+                            <button key={focus} onClick={() => toggleAutoFocus(focus)} className={`h-12 px-4 rounded-xl text-[10px] font-bold text-left transition-all border flex items-center justify-between ${autoBuildFocus.includes(focus) ? 'bg-[#9d4edd]/20 text-[#9d4edd] border-[#9d4edd]' : 'bg-black/30 text-gray-400 border-gray-700 hover:border-gray-500'}`}>
+                                {focus}
+                                {autoBuildFocus.includes(focus) && <Check size={14}/>}
+                            </button>
+                        ))}
+                    </div>
+                    <DialogFooter className="flex gap-3">
+                        <Button variant="ghost" onClick={() => setAutoBuildStep(1)} className="text-gray-500 font-bold h-12">Retour</Button>
+                        <Button
+                            disabled={autoBuildFocus.length === 0 || isGenerating}
+                            onClick={handleAutoBuild}
+                            className="bg-[#00f5d4] text-black font-black flex-1 h-12 rounded-xl shadow-[0_0_20px_rgba(0,245,212,0.3)]"
+                        >
+                            {isGenerating ? <><Loader2 className="animate-spin mr-2"/> Génération...</> : "Générer mon programme"}
+                        </Button>
+                    </DialogFooter>
+                </div>
+            )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-lg">
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('create_exercise')}</DialogTitle><DialogDescription>Cet exercice sera visible par vos clients.</DialogDescription></DialogHeader>
@@ -617,13 +756,21 @@ export default function Exercises() {
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-md">
             <DialogHeader>
                 <DialogTitle className="text-2xl font-black italic text-[#9d4edd] uppercase">Programmer</DialogTitle>
-                <DialogDescription className="text-gray-400">Définis le nom et les jours pour cet entraînement. Il apparaîtra sur ton Dashboard.</DialogDescription>
+                <DialogDescription className="text-gray-400">Sélectionne les dates exactes dans le calendrier pour cette séance.</DialogDescription>
             </DialogHeader>
-            <div className="space-y-6 py-4">
-                <div><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Nom de la séance</label><Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Ex: Pectoraux Lundi, Leg Day..." className="bg-black border-gray-700 text-white h-12 rounded-xl"/></div>
-                <div><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Jours planifiés</label><div className="grid grid-cols-4 gap-2">{['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'].map(day => (<button key={day} onClick={() => toggleDaySelection(day)} className={`h-10 rounded-lg text-xs font-bold transition-all border ${selectedDays.includes(day) ? 'bg-[#9d4edd] text-white border-[#9d4edd]' : 'bg-black/30 text-gray-400 border-gray-700 hover:border-gray-500'}`}>{day.slice(0, 3)}</button>))}</div></div>
+            <div className="space-y-6 py-4 flex flex-col items-center">
+                <Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Nom de la séance (ex: Full Body)" className="bg-black border-gray-700 text-white h-12 rounded-xl w-full"/>
+                <div className="bg-black/40 p-4 rounded-3xl border border-white/5">
+                    <Calendar
+                        mode="multiple"
+                        selected={programDates}
+                        onSelect={setProgramDates}
+                        locale={fr}
+                        className="bg-transparent text-white"
+                    />
+                </div>
             </div>
-            <DialogFooter><Button onClick={handleProgramWeek} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-bold h-12 rounded-xl">{isSaving ? "Enregistrement..." : "Confirmer"}</Button></DialogFooter>
+            <DialogFooter><Button onClick={handleProgramWeek} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-bold h-12 rounded-xl">{isSaving ? "Enregistrement..." : "Confirmer la planification"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

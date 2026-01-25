@@ -24,6 +24,7 @@ import Community from '@/pages/Community';
 import Profile from '@/pages/Profile';
 import Exercises from '@/pages/Exercises';
 import Meals from '@/pages/Meals';
+import Nutrition from '@/pages/Nutrition'; // Import de la nouvelle page
 import Session from '@/pages/Session';
 import Performance from '@/pages/Performance';
 import Gallery from '@/pages/Gallery';
@@ -64,6 +65,7 @@ const AppContent = () => {
     if (path.includes('payments')) return 'Finance';
     if (path.includes('coach-onboarding')) return 'Configuration Coach';
     if (path.includes('watch-pairing')) return 'Connexion Montre';
+    if (path.includes('nutrition')) return 'Nutrition & Macros';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
   };
 
@@ -95,6 +97,7 @@ const AppContent = () => {
               <Route path="/profile" element={<Profile />} />
               <Route path="/exercises" element={<Exercises />} />
               <Route path="/meals" element={<Meals />} />
+              <Route path="/nutrition" element={<Nutrition />} />
               <Route path="/session" element={<Session />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/gallery" element={<Gallery />} />
