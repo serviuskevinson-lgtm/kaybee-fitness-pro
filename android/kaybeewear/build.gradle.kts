@@ -50,7 +50,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
     
-    // Wear Compose dependencies
     val wearComposeVersion = "1.4.0"
     implementation("androidx.wear.compose:compose-material:$wearComposeVersion")
     implementation("androidx.wear.compose:compose-foundation:$wearComposeVersion")
@@ -68,7 +67,6 @@ dependencies {
 
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
     
-    // Health Services
     implementation("androidx.health:health-services-client:1.0.0-rc01")
     implementation("com.google.guava:guava:31.0.1-android")
     implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
@@ -76,6 +74,7 @@ dependencies {
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
     implementation("com.google.firebase:firebase-database-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-auth-ktx")
     
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))

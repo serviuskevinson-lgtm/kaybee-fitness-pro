@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Flame, Utensils, Activity, Plus, ScanSearch, BellRing, X, Zap, Camera, Upload, History } from 'lucide-react';
+import { Flame, Utensils, Activity, Plus, ScanSearch, BellRing, X, Zap, Camera, Upload, History, ChefHat, Loader2, Sparkles } from 'lucide-react';
 import { doc, updateDoc, increment, getDoc, setDoc } from 'firebase/firestore';
 import { getDatabase, ref as dbRef, update, onValue } from "firebase/database";
 import { db, app } from '@/lib/firebase';
@@ -21,7 +21,7 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
     const [inputMode, setInputMode] = useState(false);
     const [foodInput, setFoodInput] = useState("");
     const [isThinking, setIsThinking] = useState(false);
-    const [notification, setNotification] = useState(null);
+    const [previewImage, setPreviewImage] = useState(null);
     const fileInputRef = useRef(null);
 
     // Données nutritionnelles du jour
@@ -117,17 +117,28 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
         if (!file) return;
 
         setIsThinking(true);
+        setPreviewImage(URL.createObjectURL(file));
+
         try {
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onloadend = async () => {
-                const base64Image = reader.result;
-                const result = await analyzeFoodImageWithGemini(base64Image);
-                await saveNutritionToFirebase(result);
+                try {
+                    const base64Image = reader.result;
+                    const result = await analyzeFoodImageWithGemini(base64Image);
+                    await saveNutritionToFirebase(result);
+                } catch (err) {
+                    console.error("Erreur analyse image Gemini:", err);
+                    alert("Désolé, l'IA n'a pas pu analyser cette image. Réessayez avec une photo plus claire.");
+                } finally {
+                    setIsThinking(false);
+                    setPreviewImage(null);
+                }
             };
-        } catch (e) {
-            console.error("Erreur analyse image", e);
+        } catch (err) {
+            console.error("Erreur lecture fichier:", err);
             setIsThinking(false);
+            setPreviewImage(null);
         }
     };
 
@@ -139,7 +150,7 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
                         <CardTitle className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
                             <Zap size={16} className="text-[#fdcb6e]" /> Balance Énergétique
                         </CardTitle>
-                        <Button variant="ghost" size="sm" className="text-[#7b2cbf]" onClick={() => fileInputRef.current.click()}>
+                        <Button variant="ghost" size="sm" className="text-[#7b2cbf]" onClick={() => { setInputMode(true); setTimeout(() => fileInputRef.current?.click(), 100); }}>
                             <Camera size={18} />
                         </Button>
                     </div>
@@ -194,25 +205,74 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
 
             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleImageUpload} />
 
-            <Dialog open={inputMode} onOpenChange={setInputMode}>
-                <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
-                    <DialogHeader><DialogTitle>Enregistrer un repas</DialogTitle></DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <Input
-                            placeholder="Décrivez votre repas..."
-                            value={foodInput}
-                            onChange={(e) => setFoodInput(e.target.value)}
-                            className="bg-black border-gray-700 text-white"
-                        />
-                        <div className="grid grid-cols-2 gap-3">
-                            <Button onClick={handleAIAnalyze} disabled={isThinking || !foodInput} className="bg-[#7b2cbf] text-white font-bold">
-                                {isThinking ? "Analyse..." : <><ScanSearch className="mr-2 h-4 w-4"/> Texte (IA)</>}
-                            </Button>
-                            <Button onClick={() => fileInputRef.current.click()} disabled={isThinking} className="bg-[#00f5d4] text-black font-bold">
-                                <Camera className="mr-2 h-4 w-4"/> Photo (IA)
-                            </Button>
+            <Dialog open={inputMode} onOpenChange={(open) => { if(!isThinking) setInputMode(open); if(!open) setPreviewImage(null); }}>
+                <DialogContent className="bg-[#1a1a20] border-gray-800 text-white overflow-hidden max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            {isThinking ? <Sparkles className="text-[#00f5d4] animate-pulse" /> : <Utensils className="text-[#7b2cbf]" />}
+                            {isThinking ? "Analyse intelligente..." : "Enregistrer un repas"}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    {isThinking ? (
+                        <div className="flex flex-col items-center justify-center py-10 space-y-8 animate-in fade-in zoom-in duration-300">
+                            <div className="relative w-40 h-40">
+                                <div className="absolute inset-0 border-4 border-[#7b2cbf] border-t-transparent rounded-full animate-spin" />
+                                <div className="absolute inset-2 border-4 border-[#00f5d4] border-b-transparent rounded-full animate-spin [animation-duration:3s]" />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <ChefHat className="text-white animate-bounce" size={48} />
+                                </div>
+                                {previewImage && (
+                                    <img src={previewImage} alt="Analyse" className="absolute inset-0 w-full h-full object-cover rounded-full opacity-30 blur-[2px]" />
+                                )}
+                            </div>
+
+                            <div className="text-center space-y-2">
+                                <p className="text-[#00f5d4] font-black italic text-lg animate-pulse tracking-tight uppercase">L'IA Kaybee travaille...</p>
+                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Calcul des macros en cours</p>
+                            </div>
+
+                            <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] animate-progress" style={{ width: '100%' }} />
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        <div className="space-y-6 py-4">
+                            <div className="space-y-2">
+                                <p className="text-xs font-bold text-gray-500 uppercase">Description</p>
+                                <Input
+                                    placeholder="Ex: 2 oeufs, un avocat et du pain complet..."
+                                    value={foodInput}
+                                    onChange={(e) => setFoodInput(e.target.value)}
+                                    className="bg-black border-gray-800 text-white h-12 rounded-xl focus:border-[#7b2cbf]"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3">
+                                <Button
+                                    onClick={handleAIAnalyze}
+                                    disabled={isThinking || !foodInput}
+                                    className="bg-[#7b2cbf] hover:bg-[#9d4edd] text-white font-black h-14 rounded-2xl shadow-lg transition-all"
+                                >
+                                    <ScanSearch className="mr-2 h-5 w-5"/> ANALYSER LE TEXTE
+                                </Button>
+
+                                <div className="relative flex items-center py-2">
+                                    <div className="flex-grow border-t border-gray-800"></div>
+                                    <span className="flex-shrink mx-4 text-gray-600 text-[10px] font-black uppercase">OU</span>
+                                    <div className="flex-grow border-t border-gray-800"></div>
+                                </div>
+
+                                <Button
+                                    onClick={() => fileInputRef.current.click()}
+                                    disabled={isThinking}
+                                    className="bg-gradient-to-r from-[#00f5d4] to-[#00d2b4] text-black font-black h-14 rounded-2xl shadow-lg hover:scale-[1.02] transition-all"
+                                >
+                                    <Camera className="mr-2 h-5 w-5"/> PRENDRE UNE PHOTO
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </div>
