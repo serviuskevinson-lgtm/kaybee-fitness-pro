@@ -11,6 +11,7 @@ import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
 import androidx.health.services.client.data.DeltaDataType
 import androidx.health.services.client.data.ExerciseConfig
+import androidx.health.services.client.data.ExerciseLapSummary
 import androidx.health.services.client.data.ExerciseType
 import androidx.health.services.client.data.ExerciseUpdate
 import androidx.health.services.client.data.PassiveListenerConfig
@@ -103,7 +104,7 @@ class HealthManager(private val context: Context) {
             Log.d("HealthManager", "Exercise Availability: ${dataType.name} -> $availability")
         }
 
-        override fun onLapSummaryReceived(lapSummary: ExerciseUpdate.LapSummary) {}
+        override fun onLapSummaryReceived(lapSummary: ExerciseLapSummary) {}
         override fun onRegistered() { Log.d("HealthManager", "Exercise callback registered") }
         override fun onRegistrationFailed(throwable: Throwable) { Log.e("HealthManager", "Exercise registration failed", throwable) }
     }

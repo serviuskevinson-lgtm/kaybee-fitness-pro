@@ -1,5 +1,7 @@
 package com.kaybeefitness.app;
 
+import android.os.BatteryManager;
+import android.os.Build;
 import android.util.Log;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -51,7 +53,38 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             JSObject ret = new JSObject();
             ret.put("success", true);
             notifyListeners("onPairSuccess", ret);
+        } else if (path.equals("/status-update")) {
+            String dataString = new String(messageEvent.getData());
+            try {
+                JSObject ret = new JSObject(dataString);
+                notifyListeners("onStatusUpdate", ret);
+            } catch (Exception e) {
+                Log.e("WearPlugin", "Error parsing status data", e);
+            }
         }
+    }
+
+    @PluginMethod
+    public void getConnectedNodes(PluginCall call) {
+        new Thread(() -> {
+            try {
+                List<Node> nodes = Tasks.await(Wearable.getNodeClient(getContext()).getConnectedNodes());
+                JSObject ret = new JSObject();
+                if (!nodes.isEmpty()) {
+                    Node node = nodes.get(0);
+                    ret.put("connected", true);
+                    ret.put("name", node.getDisplayName());
+                    ret.put("id", node.getId());
+                    // On demande à la montre de nous envoyer sa batterie
+                    Wearable.getMessageClient(getContext()).sendMessage(node.getId(), "/request-battery", null);
+                } else {
+                    ret.put("connected", false);
+                }
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject(e.getMessage());
+            }
+        }).start();
     }
 
     @PluginMethod

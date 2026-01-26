@@ -2,18 +2,20 @@ package com.example.kaybeewear.presentation
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.BatteryManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -24,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -33,11 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.ScalingLazyListAnchorType
 import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.foundation.lazy.itemsIndexed
 import androidx.wear.compose.material.*
-import androidx.wear.compose.material.dialog.Dialog
 import com.example.kaybeewear.health.HealthManager
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.MessageClient
@@ -45,13 +43,11 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.firebase.database.DataSnapshot
 import org.json.JSONObject
-import java.time.LocalDate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 val PurplePrimary = Color(0xFF9d4edd)
-val PurpleDark = Color(0xFF7b2cbf)
 val GreenAccent = Color(0xFF00f5d4)
 val DarkBg = Color(0xFF0a0a0f)
 val CardBg = Color(0xFF1a1a20)
@@ -123,6 +119,21 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         checkAndRequestPermissions()
     }
 
+    private fun checkAndRequestPermissions() {
+        val permissions = arrayOf(
+            Manifest.permission.BODY_SENSORS,
+            Manifest.permission.ACTIVITY_RECOGNITION
+        )
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isEmpty()) {
+            startHealthMonitoring()
+        } else {
+            requestPermissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
     private fun checkConnection() {
         Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
             isPhoneConnected = nodes.isNotEmpty()
@@ -152,8 +163,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             caloriesBurned = (liveData.child("calories_burned").value as? Number)?.toInt() ?: caloriesBurned
             heartRate = (liveData.child("heart_rate").value as? Number)?.toInt() ?: heartRate
             isCoach = snapshot.child("role").getValue(String::class.java) == "coach"
-            
-            // ... Agenda Sync (Hebdo/Mensuel) ...
         } catch (e: Exception) { Log.e("MainActivity", "Error update UI", e) }
     }
 
@@ -192,7 +201,38 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
         isPhoneConnected = true
-        // Handle /pair, /set-user-id, /update-complex-data...
+        when (messageEvent.path) {
+            "/pair" -> {
+                val data = JSONObject(String(messageEvent.data))
+                val code = data.getString("pairingCode")
+                if (code == pairingCode) {
+                    val uid = data.getString("userId")
+                    currentUserId = uid
+                    getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
+                    healthManager.setUserId(uid)
+                    startFirebaseSync()
+                    // Envoyer succès au téléphone
+                    Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", null)
+                }
+            }
+            "/request-battery" -> {
+                sendBatteryStatus(messageEvent.sourceNodeId)
+            }
+        }
+    }
+
+    private fun sendBatteryStatus(nodeId: String) {
+        val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
+            this.registerReceiver(null, ifilter)
+        }
+        val level: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val batteryPct = level * 100 / scale.toFloat()
+        
+        val json = JSONObject().apply {
+            put("batteryLevel", batteryPct.toInt())
+        }
+        Wearable.getMessageClient(this).sendMessage(nodeId, "/status-update", json.toString().toByteArray())
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -218,19 +258,21 @@ fun WearApp(
     var showDebug by remember { mutableStateOf(false) }
 
     Scaffold(timeText = { TimeText() }) {
-        HorizontalPager(state = pagerState) { page ->
-            when (page) {
-                0 -> DashboardPage(heartRate, stepCount, calories, onLongClick = { showDebug = true })
-                1 -> SessionPage(activeWorkout)
-                2 -> SchedulePage("AGENDA HEBDO", weeklySummary)
-                3 -> SchedulePage("AGENDA MENSUEL", monthlySummary)
+        Box(modifier = Modifier.fillMaxSize()) {
+            HorizontalPager(state = pagerState) { page ->
+                when (page) {
+                    0 -> DashboardPage(heartRate, stepCount, calories, onLongClick = { showDebug = true })
+                    1 -> SessionPage(activeWorkout)
+                    2 -> SchedulePage("AGENDA HEBDO", weeklySummary)
+                    3 -> SchedulePage("AGENDA MENSUEL", monthlySummary)
+                }
             }
-        }
-        
-        if (showDebug) {
-            Dialog(onDismissRequest = { showDebug = false }) {
-                ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid) {
-                    showDebug = false
+            
+            if (showDebug) {
+                Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
+                    ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid) {
+                        showDebug = false
+                    }
                 }
             }
         }
@@ -277,7 +319,7 @@ fun ConnectionDebugPage(
         item { StatusRow("Data", if (firebaseDataFound) "OUI" else "NON", if (firebaseDataFound) GreenAccent else Color.Red) }
         item { Text("UID: ${uid.take(6)}...", color = Color.Gray, fontSize = 8.sp) }
         item { Text("Sync: $lastSync", color = Color.Gray, fontSize = 8.sp) }
-        item { Button(onClick = onClose, modifier = Modifier.height(24.dp)) { Text("FERMER", fontSize = 8.sp) } }
+        item { Button(onClick = onClose, modifier = Modifier.height(32.dp).fillMaxWidth().padding(horizontal = 20.dp)) { Text("FERMER", fontSize = 10.sp) } }
     }
 }
 
@@ -302,6 +344,23 @@ fun StatItem(icon: String, value: String, label: String, color: Color) {
 }
 
 @Composable
-fun SessionPage(workout: WorkoutData?) { /* ... Identique ... */ }
+fun SessionPage(workout: WorkoutData?) {
+    Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
+        Text("SESSION", color = Color.White)
+    }
+}
+
 @Composable
-fun SchedulePage(title: String, summary: List<ScheduleDay>) { /* ... Identique ... */ }
+fun SchedulePage(title: String, summary: List<ScheduleDay>) {
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg)) {
+        item { Text(title, color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 10.sp) }
+        items(summary) { day ->
+            Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Text(day.day, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    Text(day.workout, color = TextGray, fontSize = 9.sp)
+                }
+            }
+        }
+    }
+}

@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { 
+import {
   Dumbbell, Flame, Trophy, TrendingUp, Calendar as CalendarIcon,
   ArrowRight, Plus, Zap, Target, Clock, Users, Edit3, MapPin, UserPlus, Trash2, ChefHat, Activity, AlertTriangle, CreditCard, RefreshCw, CheckCircle, Utensils, HeartPulse, Footprints, Droplets, Minus, X, BrainCircuit, Lightbulb, Info, Target as TargetIcon, ArrowDownCircle, ArrowUpCircle, Beef, ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -72,7 +72,7 @@ const GoalRecognitionSystem = ({ profile, liveStats }) => {
 
     if (macros.protein < proteinTarget * 0.7) {
         primaryNeed = "PROTÉINES INSUFFISANTES";
-        recommendation = `Tes muscles ont besoin de carburant pour ta structure de ${weight}${unit}. Consomme au moins ${Math.round(proteinTarget - macros.protein)}g de protéines supplémentaires aujourd'hui.`;
+        recommendation = `Tes muscles ont besoin de carburant pour ta structure de ${weight}${unit}. Consomme au moins ${Math.round(proteinTarget - (macros.protein || 0))}g de protéines supplémentaires aujourd'hui.`;
         status = "critical";
         improveWidget = "Nutrition / Macros";
     } else if (isGaining && consumed < calorieTarget * 0.8) {
@@ -157,9 +157,9 @@ const GoalRecognitionSystem = ({ profile, liveStats }) => {
                         <div className="mt-4 pt-4 border-t border-white/5 relative z-10">
                             <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase mb-1">
                                 <span>Ratio Calories</span>
-                                <span>{Math.round((consumed / calorieTarget) * 100)}%</span>
+                                <span>{calorieTarget > 0 ? Math.round((consumed / calorieTarget) * 100) : 0}%</span>
                             </div>
-                            <Progress value={(consumed / calorieTarget) * 100} className="h-1.5 bg-gray-800 [&>div]:bg-[#00f5d4]" />
+                            <Progress value={calorieTarget > 0 ? (consumed / calorieTarget) * 100 : 0} className="h-1.5 bg-gray-800 [&>div]:bg-[#00f5d4]" />
                         </div>
                     </div>
                 </div>
@@ -204,10 +204,6 @@ export default function Dashboard() {
   // État Facturation
   const [hasPendingInvoices, setHasPendingInvoices] = useState(false);
 
-  // Modale Ajout Pas Manuel
-  const [isAddStepsOpen, setIsAddStepsOpen] = useState(false);
-  const [manualSteps, setManualSteps] = useState(0);
-
   // Stats "Live" synchronisées via RTDB
   const [liveStats, setLiveStats] = useState({
       steps: 0,
@@ -225,10 +221,25 @@ export default function Dashboard() {
 
   const todayName = format(new Date(), 'EEEE', { locale: fr });
 
+  // Demande de permission au démarrage
+  useEffect(() => {
+    const requestPermissions = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await Motion.requestPermissions();
+        } catch (e) {
+          console.error("Erreur demande permissions:", e);
+        }
+      }
+    };
+    requestPermissions();
+  }, []);
+
   // --- 1. SYNC & RESET LOGIC ---
   useEffect(() => {
     if (!currentUser) return;
 
+    let syncListener;
     const targetId = targetUserId || currentUser.uid;
 
     // Handshake avec la montre (UID pour RTDB)
@@ -237,21 +248,21 @@ export default function Dashboard() {
             try {
                 // On envoie le UID immédiatement
                 await WearConnectivity.sendDataToWatch({ path: "/set-user-id", data: currentUser.uid });
+
+                // Listener pour les demandes de sync venant de la montre
+                syncListener = await WearConnectivity.addListener('onRequestSync', async () => {
+                    if (currentUser && !isCoachView) {
+                        console.log("⌚ Sync demandée par la montre...");
+                        await WearConnectivity.sendDataToWatch({ path: "/set-user-id", data: currentUser.uid });
+                        if (userProfile) {
+                            syncEverythingToRTDB(userProfile, todayWorkout, { meals: todayMeals });
+                        }
+                    }
+                });
             } catch (e) {}
         }
     };
     setupWatch();
-
-    // Listener pour les demandes de sync venant de la montre
-    const syncListener = WearConnectivity.addListener('onRequestSync', async () => {
-        if (currentUser && !isCoachView) {
-            console.log("⌚ Sync demandée par la montre...");
-            await WearConnectivity.sendDataToWatch({ path: "/set-user-id", data: currentUser.uid });
-            if (userProfile) {
-                syncEverythingToRTDB(userProfile, todayWorkout, { meals: todayMeals });
-            }
-        }
-    });
 
     const initData = async () => {
         try {
@@ -381,7 +392,7 @@ export default function Dashboard() {
 
     return () => {
         unsubscribe();
-        syncListener.remove();
+        if (syncListener && syncListener.remove) syncListener.remove();
     };
   }, [currentUser, isCoachView, targetUserId, userProfile, todayWorkout, todayMeals]);
 
@@ -497,23 +508,6 @@ export default function Dashboard() {
         update(ref(rtdb, `users/${currentUser.uid}/live_data`), { water: newTotal });
         await updateDoc(doc(db, "users", currentUser.uid), { dailyWater: newTotal, lastActiveDate: getTodayString() });
     } catch (e) {}
-  };
-
-  const handleManualSteps = async () => {
-    if (!currentUser || manualSteps <= 0) return;
-    const kcalPerStep = (parseFloat(userProfile?.weight) || 75) * 0.00075;
-    const addedBurn = manualSteps * kcalPerStep;
-    const nextSteps = liveStats.steps + parseInt(manualSteps);
-    const nextCals = liveStats.caloriesBurned + addedBurn;
-
-    setLiveStats(prev => ({ ...prev, steps: nextSteps, caloriesBurned: nextCals }));
-    update(ref(rtdb, `users/${currentUser.uid}/live_data`), { steps: nextSteps, calories_burned: nextCals });
-    await updateDoc(doc(db, "users", currentUser.uid), {
-        dailySteps: increment(manualSteps),
-        dailyBurnedCalories: increment(addedBurn)
-    });
-    setIsAddStepsOpen(false);
-    setManualSteps(0);
   };
 
   const handleEatMeal = async (meal) => {
@@ -680,7 +674,6 @@ export default function Dashboard() {
                     <CardHeader className="pb-2">
                         <CardTitle className="text-white flex justify-between items-center text-sm font-bold uppercase tracking-widest">
                             <span className="flex items-center gap-2"><Footprints className="text-[#7b2cbf]"/> Pas du jour</span>
-                            <Button size="icon" variant="ghost" onClick={() => setIsAddStepsOpen(true)} className="h-6 w-6 text-[#7b2cbf]"><Plus size={14}/></Button>
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -791,16 +784,6 @@ export default function Dashboard() {
             </div>
         </div>
       </div>
-
-      <Dialog open={isAddStepsOpen} onOpenChange={setIsAddStepsOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
-          <DialogHeader><DialogTitle>{t('add_steps')}</DialogTitle></DialogHeader>
-          <div className="py-4 space-y-4">
-            <Input type="number" placeholder="Ex: 5000" className="bg-black border-gray-700 text-white font-black" value={manualSteps} onChange={(e) => setManualSteps(e.target.value)} />
-          </div>
-          <DialogFooter><Button onClick={handleManualSteps} className="w-full bg-[#7b2cbf] text-white font-black">{t('validate')}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Card className="bg-[#1a1a20] rounded-3xl border border-gray-800 mx-4">
         <CardHeader><CardTitle className="text-xl font-black italic uppercase text-white">{t('history')}</CardTitle></CardHeader>
