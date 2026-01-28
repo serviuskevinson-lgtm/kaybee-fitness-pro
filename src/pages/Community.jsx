@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
 import { searchCoachesWithGemini } from '@/lib/geminicoach';
@@ -191,6 +191,52 @@ export default function Community() {
   const [selectedSport, setSelectedSport] = useState('all');
   const [sessionType, setSessionType] = useState('private'); 
 
+  const searchCoaches = useCallback(async () => {
+    setIsLoading(true);
+    setIsAiLoading(true);
+    setRealWorldResults([]);
+
+    try {
+      // 1. Recherche Interne Kaybee
+      const q = query(collection(db, "users"), where("role", "==", "coach"));
+      const snap = await getDocs(q);
+      let internalResults = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (selectedSport !== 'all') {
+        internalResults = internalResults.filter(c => c.specialties && c.specialties.includes(selectedSport));
+      }
+      if (location) {
+        internalResults = internalResults.filter(c => c.city && c.city.toLowerCase().includes(location.toLowerCase()));
+      }
+      internalResults = internalResults.filter(c => (c.priceStart || 0) <= budget[0]);
+
+      setCoaches(internalResults);
+
+      // 2. Recherche Externe (Google Places via Gemini)
+      // On lance la recherche externe si une localisation est fournie,
+      // même s'il y a des résultats internes pour enrichir l'offre,
+      // ou spécifiquement si aucun coach interne n'est trouvé.
+      if (location && location.length > 2) {
+        const sportTerm = selectedSport === 'all' ? 'Fitness' : selectedSport;
+        const results = await searchCoachesWithGemini(location, sportTerm, budget[0], sessionType, internalResults);
+
+        // On filtre pour ne garder que ceux marqués 'isExternal' pour l'affichage séparé
+        const externalOnly = results.filter(r => r.isExternal).map((c, i) => ({
+          ...c,
+          coverImage: c.coverImage || `https://source.unsplash.com/random/800x600?${sportTerm},gym&sig=${i}`
+        }));
+        setRealWorldResults(externalOnly);
+      }
+
+    } catch (e) {
+      console.error("Search Error:", e);
+    } finally {
+      setIsLoading(false);
+      setIsAiLoading(false);
+    }
+  }, [location, selectedSport, budget, sessionType]);
+
+  // Initialisation et vérification du rôle
   useEffect(() => {
     const init = async () => {
         if (!currentUser) return;
@@ -202,49 +248,26 @@ export default function Community() {
             if (userData.role === 'coach') {
                 setMyProfileData({ id: userDoc.docs[0].id, ...userData });
             } else {
+                // Recherche initiale
                 searchCoaches();
             }
         }
     };
     init();
-  }, [currentUser]);
+  }, [currentUser, searchCoaches]);
 
-  const searchCoaches = async () => {
-    setIsLoading(true);
-    setRealWorldResults([]); 
+  // Recherche automatique avec debounce pour la saisie de localisation
+  useEffect(() => {
+    if (userRole === 'coach') return;
 
-    try {
-      const q = query(collection(db, "users"), where("role", "==", "coach")); 
-      const snap = await getDocs(q);
-      let results = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      if (selectedSport !== 'all') results = results.filter(c => c.specialties && c.specialties.includes(selectedSport));
-      if (location) results = results.filter(c => c.city && c.city.toLowerCase().includes(location.toLowerCase()));
-      results = results.filter(c => (c.priceStart || 0) <= budget[0]);
-
-      setCoaches(results);
-
-      // --- APPEL IA ---
-      if (location && location.length > 2) {
-        await searchRealPlacesWithAI(location, selectedSport, budget[0], sessionType);
+    const delayDebounceFn = setTimeout(() => {
+      if (location.length > 2 || selectedSport !== 'all') {
+        searchCoaches();
       }
+    }, 1000);
 
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
-  };
-
-  const searchRealPlacesWithAI = async (loc, sport, maxPrice, type) => {
-    setIsAiLoading(true);
-    const sportTerm = sport === 'all' ? 'Fitness' : sport;
-    try {
-      const results = await searchCoachesWithGemini(loc, sportTerm, maxPrice, type);
-      const enriched = results.map((c, i) => ({
-          ...c, 
-          // Image placeholder réaliste si Gemini n'en fournit pas (rare)
-          coverImage: `https://source.unsplash.com/random/800x600?${sportTerm},gym&sig=${i}`
-      }));
-      setRealWorldResults(enriched);
-    } catch (error) { console.error(error); } finally { setIsAiLoading(false); }
-  };
+    return () => clearTimeout(delayDebounceFn);
+  }, [location, selectedSport, budget, sessionType, userRole, searchCoaches]);
 
   const handleHireCoach = async (coachToHire) => {
     if (!currentUser) return;
@@ -269,14 +292,10 @@ export default function Community() {
     if ("geolocation" in navigator) {
       setIsLoading(true);
       navigator.geolocation.getCurrentPosition(async (position) => {
+        // Simulé pour l'instant ou on pourrait utiliser une API de reverse geocoding
         setTimeout(() => { setLocation("Montréal"); setIsLoading(false); alert(t('geo_simulated')); }, 800);
       }, () => { alert(t('error')); setIsLoading(false); });
     } else { alert("N/A"); }
-  };
-
-  // --- FONCTION TEMPORAIRE POUR REMPLIR LA DB (A RETIRER EN PROD) ---
-  const addFakeData = async () => {
-    // ... (Garde ta fonction existante si tu en as besoin, ou supprime-la)
   };
 
   if (userRole === 'coach' && myProfileData) return <CoachProfile coachData={myProfileData} isOwner={true} />;

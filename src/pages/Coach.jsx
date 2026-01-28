@@ -12,14 +12,14 @@ import {
   CheckCircle, Clock, XCircle 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-// IMPORT NOTIFICATIONS
-import { sendNotification } from '@/lib/notifications';
+import { hireCoach } from '@/lib/coachClient';
+import { useNavigate } from 'react-router-dom';
 
 export default function Coach() {
   const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const [selectedCoach, setSelectedCoach] = useState(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
-  const [requestMessage, setRequestMessage] = useState('');
   const [goals, setGoals] = useState('');
   const queryClient = useQueryClient();
 
@@ -50,9 +50,9 @@ export default function Coach() {
     queryFn: async () => {
       if(!currentUser) return [];
       const q = query(
-          collection(db, "notifications"), 
+          collection(db, "messages"),
           where("senderId", "==", currentUser.uid), 
-          where("type", "==", "coach_request")
+          where("type", "==", "coach_hire_request")
       );
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -63,23 +63,15 @@ export default function Coach() {
   // 4. MUTATION : ENVOYER LA DEMANDE
   const requestCoachMutation = useMutation({
     mutationFn: async () => {
-      // Envoi de la notification au coach
-      await sendNotification(
-          selectedCoach.id, // ID du coach
-          currentUser.uid, // Mon ID
-          currentUser.displayName || userProfile?.first_name || "Athlète", // Mon Nom
-          "Nouvelle Demande 🚀", // Titre
-          `${goals} - ${requestMessage}`, // Message combiné
-          "coach_request" // Type
-      );
+      await hireCoach(currentUser, selectedCoach, goals);
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['coachRequests']);
       setShowRequestModal(false);
-      setRequestMessage('');
       setGoals('');
       setSelectedCoach(null);
-      alert("Demande envoyée !");
+      alert("Demande envoyée au coach !");
+      navigate('/messages');
     },
     onError: (error) => {
         console.error("Erreur demande:", error);
@@ -88,7 +80,7 @@ export default function Coach() {
   });
 
   const handleRequestCoach = () => {
-    if (!selectedCoach || !requestMessage || !goals) return alert('Merci de remplir vos objectifs et le message.');
+    if (!selectedCoach || !goals) return alert('Merci de remplir vos objectifs.');
     requestCoachMutation.mutate();
   };
 
@@ -158,13 +150,12 @@ export default function Coach() {
               {myRequests.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-3 bg-black/50 rounded border border-gray-800">
                   <div>
-                    {/* On essaie d'afficher le nom du coach si possible, sinon 'Demande envoyée' */}
                     <p className="font-bold text-white">Demande de Coaching</p>
-                    <p className="text-xs text-gray-400">{request.createdAt ? new Date(request.createdAt).toLocaleDateString() : 'Récemment'}</p>
+                    <p className="text-xs text-gray-400">{request.createdAt ? new Date(request.createdAt.toDate()).toLocaleDateString() : 'Récemment'}</p>
                   </div>
                   <Badge className={`${getStatusColor(request.status)} border flex items-center gap-1`}>
                     {getStatusIcon(request.status)}
-                    {request.status === 'unread' ? 'En attente' : request.status}
+                    {request.status === 'pending' ? 'En attente' : request.status}
                   </Badge>
                 </div>
               ))}
@@ -245,14 +236,14 @@ export default function Coach() {
                     setSelectedCoach(coach);
                     setShowRequestModal(true);
                   }}
-                  disabled={coach.availability === 'Complet'}
+                  disabled={coach.availability === 'Complet' || userProfile?.coachId}
                   className={`w-full font-bold uppercase tracking-wider ${
-                    coach.availability === 'Complet' 
+                    coach.availability === 'Complet' || userProfile?.coachId
                       ? 'bg-gray-700 cursor-not-allowed' 
                       : 'bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] hover:from-[#9d4edd] hover:to-[#7b2cbf]'
                   }`}
                 >
-                  {coach.availability === 'Complet' ? 'Complet' : 'Demander ce coach'}
+                  {userProfile?.coachId ? 'Déjà un coach' : (coach.availability === 'Complet' ? 'Complet' : 'Demander ce coach')}
                 </Button>
               </CardContent>
             </Card>
@@ -277,25 +268,13 @@ export default function Coach() {
             <CardContent className="space-y-4">
               <div>
                 <label className="text-sm font-bold text-gray-400 mb-2 block">
-                  Vos Objectifs
+                  Vos Objectifs & Dates souhaitées
                 </label>
                 <Textarea
                   value={goals}
                   onChange={(e) => setGoals(e.target.value)}
-                  placeholder="Ex: Prise de masse, perte de poids, préparation compétition..."
+                  placeholder="Ex: Prise de masse pour cet été, mes objectifs sont..."
                   className="bg-black border-gray-800 text-white min-h-[100px]"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-bold text-gray-400 mb-2 block">
-                  Message de Motivation
-                </label>
-                <Textarea
-                  value={requestMessage}
-                  onChange={(e) => setRequestMessage(e.target.value)}
-                  placeholder="Pourquoi voulez-vous travailler avec ce coach ?"
-                  className="bg-black border-gray-800 text-white min-h-[120px]"
                 />
               </div>
 
@@ -304,7 +283,6 @@ export default function Coach() {
                   onClick={() => {
                     setShowRequestModal(false);
                     setSelectedCoach(null);
-                    setRequestMessage('');
                     setGoals('');
                   }}
                   variant="outline"
@@ -317,7 +295,7 @@ export default function Coach() {
                   disabled={requestCoachMutation.isPending}
                   className="flex-1 bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] font-bold text-black"
                 >
-                  {requestCoachMutation.isPending ? 'Envoi...' : 'Envoyer la Demande'}
+                  {requestCoachMutation.isPending ? 'Envoi...' : 'Engager ce Coach'}
                 </Button>
               </div>
             </CardContent>

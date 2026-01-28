@@ -68,12 +68,12 @@ export default function AppSidebar() {
     { title: t('meals'), url: "/meals", icon: Utensils },
     { title: t('session_active'), url: "/session", icon: Timer },
     { title: t('history'), url: "/performance", icon: LineChart },
-    { title: "Historique Nutritif", url: "/nutrition", icon: Apple }, // Renommé et déplacé ici
+    { title: "Historique Nutritif", url: "/nutrition", icon: Apple },
     { title: "Galerie", url: "/gallery", icon: ImageIcon },
     { title: t('messages'), url: "/messages", icon: MessageSquare },
     { title: t('challenges'), url: "/challenges", icon: Trophy },
     { title: t('community'), url: "/community", icon: Users },
-    { title: t('my_coach'), url: "/mon-coach", icon: UserCheck },
+    { title: isCoach ? "Mon Équipe" : t('my_coach'), url: isCoach ? "/my-team" : "/mon-coach", icon: isCoach ? Users : UserCheck },
     { title: "Ma Montre", url: "/watch-pairing", icon: Watch },
   ];
 

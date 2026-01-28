@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { db, storage } from '@/lib/firebase'; // Ajout de storage
+import { db, storage } from '@/lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // Pour l'avatar
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,39 +11,57 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { 
   Award, Trophy, Target, TrendingUp, User, 
-  Ruler, Weight, Activity, AlertCircle, Save, Camera, Edit2, X 
+  Ruler, Weight, Activity, AlertCircle, Save, Camera, Edit2, X, Calendar,
+  Clock, Info, Flame, Dumbbell, Heart, Zap, CheckCircle2, ChevronRight,
+  Image as ImageIcon, Loader2, Sparkles
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { motion, AnimatePresence } from 'framer-motion';
+
+const GOAL_OPTIONS = [
+  { id: 'fat_loss', label: 'Perte de Gras', icon: Flame, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+  { id: 'muscle_gain', label: 'Prise de Muscle', icon: Dumbbell, color: 'text-[#9d4edd]', bg: 'bg-[#9d4edd]/10' },
+  { id: 'endurance', label: 'Endurance', icon: Heart, color: 'text-red-500', bg: 'bg-red-500/10' },
+  { id: 'strength', label: 'Force Pure', icon: Zap, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  { id: 'flexibility', label: 'Souplesse', icon: Activity, color: 'text-[#00f5d4]', bg: 'bg-[#00f5d4]/10' },
+];
+
+const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 export default function Profile() {
   const { currentUser } = useAuth();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false); // Mode édition global
+  const [isEditing, setIsEditing] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [coachPhotoUploading, setCoachPhotoUploading] = useState(false);
   const fileInputRef = useRef(null);
+  const coachPhotoInputRef = useRef(null);
 
-  // État local pour le formulaire
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    username: '', // Le Pseudo (Rectangle Bleu)
+    username: '',
     email: '',
     birthDate: '',
     sex: '',
     height: '',
     weight: '',
-    weightUnit: 'lbs',
+    weightUnit: 'kg',
     injuries: '',
     allergies: '',
-    goals: [],
+    selectedGoals: [],
+    customGoals: '',
+    availability: [],
     targetWeight: '',
     targetDate: '',
-    avatar: '' // URL de la photo
+    avatar: '',
+    coachUpdatePhoto: '',
+    role: 'client',
+    coachId: null
   });
 
-  // Calculs dérivés (Niveau, Points...)
   const [stats, setStats] = useState({
     level: 1,
     points: 0,
@@ -51,7 +69,6 @@ export default function Profile() {
     challenges: 0
   });
 
-  // 1. CHARGEMENT DES DONNÉES FIRESTORE
   useEffect(() => {
     const fetchUserData = async () => {
       if (currentUser) {
@@ -61,23 +78,27 @@ export default function Profile() {
 
           if (docSnap.exists()) {
             const data = docSnap.data();
-            
             setFormData({
               firstName: data.first_name || data.firstName || '',
               lastName: data.last_name || data.lastName || '',
-              username: data.username || '', // Charge le pseudo
+              username: data.username || '',
               email: data.email || currentUser.email,
               birthDate: data.birth_date || data.birthDate || '',
               sex: data.sex || '',
               height: data.height || '',
               weight: data.weight || '',
-              weightUnit: data.unit || data.weightUnit || 'lbs',
+              weightUnit: data.weightUnit || 'kg',
               injuries: data.injuries || '',
               allergies: data.allergies || '',
-              goals: data.goals || [],
+              selectedGoals: data.selectedGoals || [],
+              customGoals: data.goals || '',
+              availability: data.availabilityDays || [],
               targetWeight: data.target_weight || data.targetWeight || '',
               targetDate: data.target_date || data.targetDate || '',
-              avatar: data.avatar || ''
+              avatar: data.avatar || '',
+              coachUpdatePhoto: data.coachUpdatePhoto || '',
+              role: data.role || 'client',
+              coachId: data.coachId || null
             });
 
             setStats({
@@ -93,42 +114,68 @@ export default function Profile() {
       }
       setLoading(false);
     };
-
     fetchUserData();
   }, [currentUser]);
 
-  // 2. GESTION UPLOAD AVATAR (Rectangle Rouge)
+  const toggleGoal = (goalId) => {
+    if (!isEditing) return;
+    setFormData(prev => ({
+      ...prev,
+      selectedGoals: (prev.selectedGoals || []).includes(goalId)
+        ? prev.selectedGoals.filter(id => id !== goalId)
+        : [...(prev.selectedGoals || []), goalId]
+    }));
+  };
+
+  const toggleDay = (day) => {
+    if (!isEditing) return;
+    setFormData(prev => ({
+      ...prev,
+      availability: (prev.availability || []).includes(day)
+        ? prev.availability.filter(d => d !== day)
+        : [...(prev.availability || []), day]
+    }));
+  };
+
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     setAvatarUploading(true);
     try {
         const storageRef = ref(storage, `avatars/${currentUser.uid}_${Date.now()}`);
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
-
-        // Mise à jour immédiate dans la DB
         await updateDoc(doc(db, "users", currentUser.uid), { avatar: downloadURL });
-        
-        // Mise à jour locale
         setFormData(prev => ({ ...prev, avatar: downloadURL }));
         alert("Photo de profil mise à jour !");
     } catch (error) {
-        console.error("Erreur upload avatar:", error);
-        alert("Erreur lors de l'envoi de la photo.");
-    } finally {
-        setAvatarUploading(false);
-    }
+        console.error(error);
+        alert("Erreur upload");
+    } finally { setAvatarUploading(false); }
   };
 
-  // 3. MISE À JOUR DU PROFIL (Bouton Enregistrer)
+  const handleCoachPhotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCoachPhotoUploading(true);
+    try {
+        const storageRef = ref(storage, `coach_updates/${currentUser.uid}_${Date.now()}`);
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+        await updateDoc(doc(db, "users", currentUser.uid), { coachUpdatePhoto: downloadURL });
+        setFormData(prev => ({ ...prev, coachUpdatePhoto: downloadURL }));
+        alert("Photo envoyée à votre coach !");
+    } catch (error) {
+        console.error(error);
+        alert("Erreur upload");
+    } finally { setCoachPhotoUploading(false); }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
       const docRef = doc(db, "users", currentUser.uid);
-      
       await updateDoc(docRef, {
         height: formData.height,
         weight: formData.weight,
@@ -136,287 +183,250 @@ export default function Profile() {
         allergies: formData.allergies,
         first_name: formData.firstName,
         last_name: formData.lastName,
-        username: formData.username, // Sauvegarde du pseudo
-        full_name: `${formData.firstName} ${formData.lastName}`, // Nom complet pour la recherche
-        // Pour la recherche : on peut créer un champ de mots-clés si besoin plus tard
+        username: formData.username,
+        full_name: `${formData.firstName} ${formData.lastName}`,
+        birth_date: formData.birthDate,
+        sex: formData.sex,
+        selectedGoals: formData.selectedGoals,
+        goals: formData.customGoals,
+        availabilityDays: formData.availability,
+        weightUnit: formData.weightUnit,
         keywords: [
             formData.username?.toLowerCase(), 
             formData.firstName?.toLowerCase(), 
             formData.lastName?.toLowerCase()
         ].filter(Boolean)
       });
-      
-      alert(t('success'));
-      setIsEditing(false); // Quitter le mode édition
+      alert("Profil mis à jour !");
+      setIsEditing(false);
     } catch (error) {
-      console.error("Erreur sauvegarde:", error);
-      alert(t('error'));
+      console.error(error);
+      alert("Erreur sauvegarde");
     }
     setSaving(false);
   };
 
-  if (loading) return <div className="text-white p-8">{t('loading')}</div>;
-
-  const age = formData.birthDate 
-    ? new Date().getFullYear() - new Date(formData.birthDate).getFullYear() 
-    : '?';
-
-  const progressToNext = ((stats.points % 500) / 500) * 100;
+  if (loading) return <div className="text-white p-8">Chargement...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="max-w-6xl mx-auto space-y-8 pb-20 px-4">
       
-      {/* --- HEADER --- */}
-      <div className="text-center relative">
-        
-        {/* BOUTON GLOBAL MODIFIER (Active les zones jaunes) */}
+      {/* HEADER SECTION */}
+      <div className="text-center relative pt-10">
         <div className="absolute top-0 right-0">
-            <Button 
-                onClick={() => setIsEditing(!isEditing)} 
+            <Button
+                onClick={() => setIsEditing(!isEditing)}
                 variant={isEditing ? "destructive" : "outline"}
-                className={`gap-2 ${!isEditing ? "border-[#7b2cbf] text-[#7b2cbf] hover:bg-[#7b2cbf] hover:text-white" : ""}`}
+                className={`gap-2 transition-all ${!isEditing ? "border-[#7b2cbf] hover:bg-[#7b2cbf] text-white" : ""}`}
             >
-                {isEditing ? <><X size={16}/> Annuler</> : <><Edit2 size={16}/> Modifier Profil</>}
+                {isEditing ? <><X size={16}/> Annuler</> : <><Edit2 size={16}/> Modifier</>}
             </Button>
         </div>
 
-        {/* AVATAR (Rectangle Rouge) */}
         <div className="relative w-32 h-32 mx-auto mb-4 group">
-            <div className="w-full h-full rounded-full p-1 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] shadow-[0_0_30px_rgba(123,44,191,0.6)]">
+            <div className="w-full h-full rounded-full p-1 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] shadow-lg">
                 <Avatar className="w-full h-full border-4 border-[#0a0a0f]">
                     <AvatarImage src={formData.avatar} className="object-cover"/>
-                    <AvatarFallback className="text-3xl font-black text-black bg-white">
-                        {formData.firstName?.[0]}{formData.lastName?.[0]}
+                    <AvatarFallback className="text-3xl font-black bg-[#1a1a20] text-white">
+                        {formData.firstName?.[0] || 'K'}
                     </AvatarFallback>
                 </Avatar>
             </div>
-            
-            {/* Bouton Caméra (Visible au survol ou en mode édition) */}
-            <div 
-                className="absolute bottom-0 right-0 bg-[#00f5d4] text-black p-2 rounded-full cursor-pointer border-4 border-[#0a0a0f] hover:scale-110 transition shadow-lg"
-                onClick={() => fileInputRef.current.click()}
-            >
-                {avatarUploading ? <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"/> : <Camera size={20} />}
-            </div>
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept="image/*" 
-                onChange={handleAvatarChange} 
-            />
+            {isEditing && (
+              <div
+                  className="absolute bottom-0 right-0 bg-[#00f5d4] text-black p-2 rounded-full cursor-pointer border-4 border-[#0a0a0f] hover:scale-110 transition"
+                  onClick={() => fileInputRef.current.click()}
+              >
+                  {avatarUploading ? <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"/> : <Camera size={20} />}
+              </div>
+            )}
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarChange} />
         </div>
-        
-        <h1 className="text-4xl font-black text-white capitalize mb-1">
+
+        <h1 className="text-4xl font-black text-white capitalize">
           {formData.firstName} <span className="text-[#00f5d4]">{formData.lastName}</span>
         </h1>
-
-        {/* PSEUDO (Rectangle Bleu) */}
-        <div className="h-8 flex justify-center items-center">
-            {isEditing ? (
-                <Input 
-                    placeholder="Choisis un pseudo (ex: @TheBeast)" 
-                    value={formData.username}
-                    onChange={(e) => setFormData({...formData, username: e.target.value})}
-                    className="w-64 bg-black border-[#7b2cbf] text-center text-[#9d4edd] font-bold h-8"
-                />
-            ) : (
-                formData.username && <p className="text-[#9d4edd] font-bold text-lg">@{formData.username}</p>
-            )}
-        </div>
-
-        <p className="text-gray-500 text-sm mt-1">{formData.email}</p>
-        
-        {/* Badges */}
-        <div className="flex items-center justify-center gap-4 mt-6">
-          <Badge className="bg-[#7b2cbf]/20 text-[#e0aaff] border-[#7b2cbf] px-4 py-1 text-sm flex gap-2">
-            <Award size={16} /> Niv. {stats.level}
-          </Badge>
-          <Badge className="bg-[#fdcb6e]/20 text-[#fdcb6e] border-[#fdcb6e] px-4 py-1 text-sm flex gap-2">
-            <Trophy size={16} /> {stats.points} {t('points')}
-          </Badge>
-        </div>
-
-        {/* Barre XP */}
-        <div className="mt-6 max-w-md mx-auto">
-          <div className="flex justify-between text-xs text-gray-500 mb-2">
-            <span>Niv. {stats.level}</span>
-            <span>{stats.points % 500} / 500 XP</span>
-          </div>
-          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] transition-all duration-500"
-              style={{ width: `${progressToNext}%` }}
-            />
-          </div>
-        </div>
+        <p className="text-[#9d4edd] font-bold">@{formData.username || 'athlète'}</p>
       </div>
 
-      {/* --- GRILLE DE STATS --- */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard icon={TrendingUp} value={stats.workouts} label="Séances" color="#00f5d4" />
-        <StatCard icon={Trophy} value={stats.challenges} label={t('challenges')} color="#fdcb6e" />
-        <StatCard icon={Target} value={stats.level} label="Niveau" color="#9d4edd" />
-      </div>
-
-      {/* --- FORMULAIRE PRINCIPAL --- */}
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* COLONNE GAUCHE : PHYSIQUE (Rectangle Jaune 1) */}
-        <Card className={`kb-card lg:col-span-1 h-fit bg-[#1a1a20] border-gray-800 transition-all ${isEditing ? 'ring-2 ring-[#00f5d4]/50' : ''}`}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-white">
-              <User className="text-[#9d4edd]" size={20} />
-              {t('profile')} {isEditing && <span className="text-xs text-[#00f5d4] ml-auto uppercase animate-pulse">Édition</span>}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            
-            <div className="grid grid-cols-2 gap-2 mb-2">
-                 <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold">{t('firstname')}</label>
-                    <Input 
-                        value={formData.firstName} 
-                        onChange={(e) => setFormData({...formData, firstName: e.target.value})} 
-                        className="bg-black border-gray-800 text-white h-9"
-                        disabled={!isEditing}
-                    />
-                 </div>
-                 <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold">{t('lastname')}</label>
-                    <Input 
-                        value={formData.lastName} 
-                        onChange={(e) => setFormData({...formData, lastName: e.target.value})} 
-                        className="bg-black border-gray-800 text-white h-9"
-                        disabled={!isEditing}
-                    />
-                 </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold">{t('birthdate')}</label>
-                    <div className="text-white font-bold text-lg border-b border-gray-800 py-1">{age} ans</div>
-                </div>
-                <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold">{t('sex')}</label>
-                    <div className="text-white font-bold text-lg border-b border-gray-800 py-1 capitalize">{formData.sex}</div>
-                </div>
-            </div>
-
-            <div>
-                <label className="text-xs text-gray-500 uppercase font-bold mb-1 block">{t('height')} (cm)</label>
-                <div className="relative">
-                    <Ruler className={`absolute left-3 top-1/2 -translate-y-1/2 ${isEditing ? "text-[#00f5d4]" : "text-gray-500"}`} size={16} />
-                    <Input 
-                        value={formData.height} 
-                        onChange={(e) => setFormData({...formData, height: e.target.value})}
-                        className="bg-black border-gray-800 pl-10 text-white focus:border-[#00f5d4]" 
-                        disabled={!isEditing}
-                    />
-                </div>
-            </div>
-
-            <div>
-                <label className="text-xs text-gray-500 uppercase font-bold mb-1 block">{t('weight')} ({formData.weightUnit})</label>
-                <div className="relative">
-                    <Weight className={`absolute left-3 top-1/2 -translate-y-1/2 ${isEditing ? "text-[#00f5d4]" : "text-gray-500"}`} size={16} />
-                    <Input 
-                        value={formData.weight} 
-                        onChange={(e) => setFormData({...formData, weight: e.target.value})}
-                        className="bg-black border-gray-800 pl-10 text-white focus:border-[#00f5d4]" 
-                        disabled={!isEditing}
-                    />
-                </div>
-            </div>
-            
-            <div className="bg-[#1a1a20] p-4 rounded-xl border border-dashed border-gray-700 mt-4">
-                <p className="text-xs text-gray-400 mb-1">{t('target_weight')} : {formData.targetWeight} {formData.weightUnit}</p>
-                {formData.targetDate && (
-                    <p className="text-xs text-gray-400">Date : {new Date(formData.targetDate).toLocaleDateString()}</p>
-                )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* COLONNE DROITE : SANTÉ & INFO (Rectangle Jaune 2) */}
-        <Card className={`kb-card lg:col-span-2 bg-[#1a1a20] border-gray-800 transition-all ${isEditing ? 'ring-2 ring-[#00f5d4]/50' : ''}`}>
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-white">
-                    <Activity className="text-[#00f5d4]" size={20} />
-                    {t('client_goals')} & Santé
-                </CardTitle>
+        {/* COLONNE GAUCHE */}
+        <div className="lg:col-span-4 space-y-6">
+          <Card className="kb-card border-gray-800 bg-[#1a1a20]">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
+                <User className="text-[#9d4edd]" size={16} /> Identité
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-                
-                <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold mb-2 block">{t('client_goals')}</label>
-                    <div className="flex flex-wrap gap-2">
-                        {formData.goals.length > 0 ? (
-                            formData.goals.map((g, i) => (
-                                <Badge key={i} className="bg-[#7b2cbf]/20 border-[#7b2cbf] text-gray-200">
-                                    {g}
-                                </Badge>
-                            ))
-                        ) : (
-                            <span className="text-gray-600 text-sm italic">Aucun objectif défini</span>
-                        )}
-                    </div>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500 uppercase font-bold">Prénom</label>
+                  <Input value={formData.firstName} onChange={(e)=>setFormData({...formData, firstName:e.target.value})} disabled={!isEditing} className="bg-black/50 border-gray-800 h-9"/>
                 </div>
-
-                <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold mb-2 block flex items-center gap-2">
-                        <AlertCircle size={14} className="text-red-400" /> {t('injuries_title')}
-                    </label>
-                    <Textarea
-                        placeholder={t('injuries_placeholder')}
-                        value={formData.injuries}
-                        onChange={(e) => setFormData({...formData, injuries: e.target.value})}
-                        className="bg-black border-gray-800 text-white min-h-[80px] focus:border-red-400/50"
-                        disabled={!isEditing}
-                    />
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500 uppercase font-bold">Nom</label>
+                  <Input value={formData.lastName} onChange={(e)=>setFormData({...formData, lastName:e.target.value})} disabled={!isEditing} className="bg-black/50 border-gray-800 h-9"/>
                 </div>
-
-                <div>
-                    <label className="text-xs text-gray-500 uppercase font-bold mb-2 block">{t('allergies_title')}</label>
-                    <Textarea
-                        placeholder={t('allergies_placeholder')}
-                        value={formData.allergies}
-                        onChange={(e) => setFormData({...formData, allergies: e.target.value})}
-                        className="bg-black border-gray-800 text-white min-h-[80px] focus:border-[#00f5d4]"
-                        disabled={!isEditing}
-                    />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-500 uppercase font-bold">Date de naissance</label>
+                <Input type="date" value={formData.birthDate} onChange={(e)=>setFormData({...formData, birthDate:e.target.value})} disabled={!isEditing} className="bg-black/50 border-gray-800 h-9 text-xs"/>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-500 uppercase font-bold">Sexe</label>
+                <div className="flex gap-2">
+                  {['male', 'female'].map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => isEditing && setFormData({...formData, sex: s})}
+                      className={`flex-1 py-2 rounded-lg border transition-all font-bold text-xs uppercase ${formData.sex === s ? 'bg-[#9d4edd] border-[#9d4edd] text-white' : 'border-gray-800 text-gray-500'}`}
+                    >
+                      {s === 'male' ? 'H' : 'F'}
+                    </button>
+                  ))}
                 </div>
-
-                {isEditing && (
-                    <div className="pt-4 border-t border-gray-800 flex justify-end animate-in slide-in-from-bottom-2">
-                        <Button 
-                            type="submit" 
-                            disabled={saving}
-                            className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-bold px-8 shadow-[0_0_15px_rgba(0,245,212,0.3)]"
-                        >
-                            {saving ? t('loading') : <><Save size={18} className="mr-2"/> {t('save')}</>}
-                        </Button>
-                    </div>
-                )}
-
+              </div>
             </CardContent>
-        </Card>
+          </Card>
 
-      </form>
+          <Card className="kb-card border-gray-800 bg-[#1a1a20]">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
+                <Ruler className="text-[#00f5d4]" size={16} /> Biométrie
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-black/40 p-3 rounded-xl border border-gray-800 text-center">
+                  <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Taille</label>
+                  <div className="flex items-center justify-center gap-1">
+                    <input type="number" value={formData.height} onChange={(e)=>setFormData({...formData, height:e.target.value})} disabled={!isEditing} className="bg-transparent text-xl font-black text-white w-12 text-center focus:outline-none"/>
+                    <span className="text-xs text-[#00f5d4] font-bold">cm</span>
+                  </div>
+                </div>
+                <div className="bg-black/40 p-3 rounded-xl border border-gray-800 text-center">
+                  <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Poids</label>
+                  <div className="flex items-center justify-center gap-1">
+                    <input type="number" value={formData.weight} onChange={(e)=>setFormData({...formData, weight:e.target.value})} disabled={!isEditing} className="bg-transparent text-xl font-black text-white w-12 text-center focus:outline-none"/>
+                    <span className="text-xs text-[#00f5d4] font-bold">{formData.weightUnit}</span>
+                  </div>
+                </div>
+              </div>
+              {isEditing && (
+                <div className="flex justify-center gap-2 mt-2">
+                  {['kg', 'lbs'].map(unit => (
+                    <button key={unit} type="button" onClick={() => setFormData({...formData, weightUnit: unit})} className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${formData.weightUnit === unit ? 'bg-[#00f5d4] text-black' : 'border border-gray-800 text-gray-500'}`}>{unit}</button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* COLONNE DROITE */}
+        <div className="lg:col-span-8 space-y-6">
+          <Card className="kb-card border-gray-800 bg-[#1a1a20] overflow-hidden">
+            <div className="bg-gradient-to-r from-[#7b2cbf]/10 to-transparent p-6 pb-0">
+              <CardTitle className="text-lg flex items-center gap-2 text-white uppercase font-black">
+                <Target className="text-[#00f5d4]" size={20} /> Mes Objectifs
+              </CardTitle>
+            </div>
+            <CardContent className="p-6 space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {GOAL_OPTIONS.map((goal) => {
+                  const Icon = goal.icon;
+                  const isSelected = (formData.selectedGoals || []).includes(goal.id);
+                  return (
+                    <button
+                      key={goal.id}
+                      type="button"
+                      onClick={() => toggleGoal(goal.id)}
+                      className={`flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all ${isSelected ? `border-[#00f5d4] ${goal.bg}` : 'border-gray-800 bg-black/20 opacity-50'} ${!isEditing && !isSelected ? 'hidden' : ''}`}
+                    >
+                      <Icon className={`w-8 h-8 mb-2 ${isSelected ? goal.color : 'text-gray-600'}`} />
+                      <span className={`text-[10px] font-black uppercase text-center ${isSelected ? 'text-white' : 'text-gray-600'}`}>{goal.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-gray-400 uppercase font-black">Précisions Coach</label>
+                <Textarea value={formData.customGoals} onChange={(e)=>setFormData({...formData, customGoals:e.target.value})} disabled={!isEditing} placeholder="Décrivez vos attentes spécifiques..." className="bg-black/40 border-gray-800 min-h-[100px] text-sm"/>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="kb-card border-gray-800 bg-[#1a1a20]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
+                  <Calendar className="text-[#9d4edd]" size={16} /> Disponibilités
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  {DAYS.map(day => {
+                    const isAvailable = (formData.availability || []).includes(day);
+                    return (
+                      <button key={day} type="button" onClick={() => toggleDay(day)} className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black transition-all border-2 ${isAvailable ? 'bg-[#9d4edd] border-[#9d4edd] text-white' : 'bg-black/40 border-gray-800 text-gray-600'} ${!isEditing && !isAvailable ? 'hidden' : ''}`}>{day}</button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="kb-card border-gray-800 bg-[#1a1a20]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
+                  <AlertCircle className="text-red-500" size={16} /> Santé
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-red-400 uppercase font-black">Blessures</label>
+                  <Input value={formData.injuries} onChange={(e)=>setFormData({...formData, injuries:e.target.value})} disabled={!isEditing} placeholder="Ex: Genou..." className="bg-black/40 border-gray-800 h-8 text-xs"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-yellow-500 uppercase font-black">Allergies</label>
+                  <Input value={formData.allergies} onChange={(e)=>setFormData({...formData, allergies:e.target.value})} disabled={!isEditing} placeholder="Ex: Gluten..." className="bg-black/40 border-gray-800 h-8 text-xs"/>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {isEditing && (
+            <div className="flex justify-end pt-4">
+              <Button onClick={handleSubmit} disabled={saving} className="bg-[#00f5d4] text-black font-black uppercase px-10 rounded-xl py-6 flex gap-2">
+                {saving ? <Loader2 className="animate-spin" /> : <><Save size={20}/> Sauvegarder</>}
+              </Button>
+            </div>
+          )}
+
+          {formData.coachId && !isEditing && (
+            <Card className="kb-card border-[#00f5d4]/30 bg-black/40 p-6">
+              <div className="flex flex-col md:flex-row items-center gap-6">
+                <div className="relative group">
+                  <div className="w-24 h-32 bg-black rounded-xl border-2 border-dashed border-gray-700 overflow-hidden flex items-center justify-center">
+                    {formData.coachUpdatePhoto ? <img src={formData.coachUpdatePhoto} className="w-full h-full object-cover" /> : <ImageIcon size={32} className="text-gray-800" />}
+                  </div>
+                  <button onClick={() => coachPhotoInputRef.current.click()} className="absolute -bottom-2 -right-2 bg-[#00f5d4] text-black p-2 rounded-lg shadow-lg"><Camera size={16} /></button>
+                  <input type="file" ref={coachPhotoInputRef} className="hidden" accept="image/*" onChange={handleCoachPhotoUpload} />
+                </div>
+                <div className="flex-1 space-y-2 text-center md:text-left">
+                  <h3 className="text-lg font-black text-white italic uppercase tracking-tighter flex items-center justify-center md:justify-start gap-2">
+                    <TrendingUp className="text-[#00f5d4]" /> Suivi Évolution
+                  </h3>
+                  <p className="text-xs text-gray-400 font-bold">Mettez à jour votre photo régulièrement pour votre coach.</p>
+                  {coachPhotoUploading && <div className="text-[#00f5d4] text-[10px] font-black uppercase animate-pulse">Envoi...</div>}
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      </div>
     </div>
   );
-}
-
-// Composant Carte Stats
-function StatCard({ icon: Icon, value, label, color }) {
-    return (
-        <Card className="kb-card border-0 bg-[#1a1a20]">
-            <CardContent className="p-6 text-center">
-                <Icon className="w-8 h-8 mx-auto mb-2" style={{ color }} />
-                <p className="text-3xl font-black text-white">{value}</p>
-                <p className="text-xs text-gray-400 uppercase tracking-wider">{label}</p>
-            </CardContent>
-        </Card>
-    );
 }

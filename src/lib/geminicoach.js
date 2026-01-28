@@ -8,63 +8,43 @@ const model = getGenerativeModel(vertexAI, {
   generationConfig: { responseMimeType: "application/json" }
 });
 
-// 2. CLÉ API GOOGLE PLACES (Pour référence ou usage futur par l'IA)
-const GOOGLE_PLACES_API_KEY = "AIzaSyAm3R3rPgdPDZI31p-ov5XkrNiI9c3UqU";
-
 /**
- * RECHERCHE HYBRIDE DE COACHS (Kaybee Certified + Google Places)
- *
- * @param {string} location - Ville ou zone de recherche
- * @param {string} specialty - Discipline (Musculation, Boxe, etc.)
- * @param {number} budget - Budget mensuel max
- * @param {string} type - Format (privé, semi, groupe, distance)
- * @param {Array} currentCoaches - Liste des coachs Kaybee déjà filtrés
- * @returns {Promise<Array>} - Un tableau de 24 résultats maximum
+ * RECHERCHE HYBRIDE DE COACHS ET ÉTABLISSEMENTS RÉELS VIA GEMINI AI
+ * Cette version utilise l'IA pour trouver des lieux réels au lieu d'appels API directs potentiellement bloqués.
  */
 export const searchCoachesWithGemini = async (location, specialty, budget, type, currentCoaches = []) => {
   try {
-    const targetTotal = 24;
-    const internalLimit = 18; // On prend au maximum 3/4 de coachs Kaybee (18/24)
+    const targetTotal = 12;
+    const internalLimit = 6;
 
-    // Sélection des coachs Kaybee (Priorité)
+    // On limite les coachs internes pour laisser de la place aux résultats externes
     const kaybeeCoaches = currentCoaches.slice(0, internalLimit);
+    const neededFromAI = targetTotal - kaybeeCoaches.length;
 
-    // Calcul du nombre de résultats à trouver sur Google pour atteindre 24 au total
-    const neededFromGoogle = targetTotal - kaybeeCoaches.length;
+    // Si on a déjà assez de coachs et pas de localisation, on s'arrête
+    if (!location || location.length < 2) {
+        return kaybeeCoaches.map(c => ({ ...c, isExternal: false, source: 'Kaybee Certified' }));
+    }
 
+    // Prompt pour Gemini afin de trouver de vrais lieux
     const prompt = `
-      Tu es un assistant de recherche expert spécialisé dans le fitness.
-      Utilise tes capacités de recherche en temps réel (via Google Places API : ${GOOGLE_PLACES_API_KEY}) pour identifier des établissements de sport, gyms, studios ou coachs RÉELS à "${location}" spécialisés en "${specialty}".
-      Le budget de l'utilisateur est de ${budget}$ par mois et le format souhaité est "${type}".
+      En tant qu'expert fitness local, trouve ${neededFromAI} établissements de sport ou coachs RÉELS et EXISTANTS à "${location}".
+      Discipline : ${specialty}.
+      Budget indicatif : ${budget}$ (session ou abonnement).
 
-      OBJECTIF : Trouver ${neededFromGoogle} résultats externes réels.
+      IMPORTANT : Donne des noms de vraies entreprises ou studios que l'on peut trouver sur Google Maps à ${location}.
 
-      POUR CHAQUE RÉSULTAT RÉEL TROUVÉ, EXTRAIS :
-      - "name": Nom exact de l'établissement ou du professionnel.
-      - "location": Adresse physique précise à ${location}.
-      - "phone": Numéro de téléphone valide.
-      - "website": Site Web officiel (URL complète).
-      - "rating": Note moyenne Google (ex: 4.8).
-      - "priceStart": Estimation du prix mensuel (nombre pur, ex: 75).
-      - "bio": Une description de 2 phrases sur leurs services et l'intensité.
-      - "specialty": "${specialty}".
-
-      CONSIGNES CRITIQUES :
-      - Ne génère QUE des lieux qui existent RÉELLEMENT à ${location}.
-      - Si tu ne trouves pas assez de résultats correspondant exactement, élargis aux gyms généralistes à proximité.
-      - Retourne UNIQUEMENT un tableau JSON. Pas de texte avant ou après.
-
-      FORMAT JSON ATTENDU :
+      Format de réponse (JSON uniquement) :
       [
         {
-          "name": "...",
-          "location": "...",
-          "phone": "...",
-          "website": "...",
+          "name": "Nom de l'établissement ou du coach",
+          "location": "Adresse ou quartier précis à ${location}",
+          "phone": "Téléphone format local",
+          "website": "URL réelle du site web",
           "rating": 4.5,
-          "priceStart": 60,
-          "bio": "...",
-          "specialty": "..."
+          "priceStart": 50,
+          "bio": "Une phrase courte décrivant leur expertise à ${location}.",
+          "specialty": "${specialty}"
         }
       ]
     `;
@@ -72,11 +52,11 @@ export const searchCoachesWithGemini = async (location, specialty, budget, type,
     const result = await model.generateContent(prompt);
     const text = result.response.text();
 
-    // Nettoyage et parsing du JSON renvoyé par l'IA
+    // Nettoyage et parsing du JSON
     const jsonMatch = text.match(/\[[\s\S]*\]/);
-    const googleResults = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    const aiResults = JSON.parse(jsonMatch ? jsonMatch[0] : text);
 
-    // 3. Formatage des résultats Kaybee (Internes)
+    // Formattage des résultats internes
     const internalFormatted = kaybeeCoaches.map(c => ({
         ...c,
         isAi: false,
@@ -84,23 +64,21 @@ export const searchCoachesWithGemini = async (location, specialty, budget, type,
         source: 'Kaybee Certified'
     }));
 
-    // 4. Formatage des résultats Google (Externes)
-    const externalFormatted = googleResults.map((c, i) => ({
+    // Formattage des résultats externes (IA)
+    const externalFormatted = aiResults.map((c, i) => ({
         ...c,
-        id: `google_${Date.now()}_${i}`,
+        id: `ai_${Date.now()}_${i}`,
         full_name: c.name,
         isAi: true,
         isExternal: true,
-        source: 'Google Places'
+        source: 'Gemini AI Search',
+        coverImage: `https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80`
     }));
 
-    // 5. Fusion finale : Kaybee d'abord, puis Google pour compléter jusqu'à 24
-    const finalResults = [...internalFormatted, ...externalFormatted];
-
-    return finalResults.slice(0, targetTotal);
+    return [...internalFormatted, ...externalFormatted];
   } catch (error) {
-    console.error("Erreur Recherche Hybride Coach:", error);
-    // En cas d'erreur de l'IA, on retourne au moins les coachs internes Kaybee
-    return currentCoaches.slice(0, 24);
+    console.error("Erreur Recherche Gemini Coach:", error);
+    // Retourne au moins les coachs internes en cas d'échec de l'IA
+    return currentCoaches.map(c => ({ ...c, isExternal: false, source: 'Kaybee Certified' }));
   }
 };

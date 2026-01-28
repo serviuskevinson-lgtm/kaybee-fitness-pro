@@ -6,7 +6,6 @@ import {
   onSnapshot, orderBy, doc, limit, serverTimestamp 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { linkWithPopup, FacebookAuthProvider } from 'firebase/auth';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,11 +14,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { 
   Send, Search, UserPlus, Users, MessageCircle, 
-  Image as ImageIcon, Paperclip, Loader2, RefreshCw, Smartphone, Facebook, Briefcase
+  Image as ImageIcon, Paperclip, Loader2, RefreshCw, Smartphone, Facebook, Briefcase,
+  Check, X, HelpCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useTranslation } from 'react-i18next';
 import { sendNotification } from '@/lib/notifications';
+import { respondToHireRequest } from '@/lib/coachClient';
 
 export default function Messages() {
   const { currentUser } = useAuth();
@@ -34,7 +35,7 @@ export default function Messages() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [friendList, setFriendList] = useState([]);
-  const [receivedRequests, setReceivedRequests] = useState([]); // Reçues
+  const [sentRequests, setSentRequests] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [coachRequests, setCoachRequests] = useState([]);
   
@@ -49,7 +50,6 @@ export default function Messages() {
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (searchTerm.length >= 2) {
-        // Recherche combinée Nom + Email
         const qName = query(
             collection(db, "users"), 
             where("full_name", ">=", searchTerm), 
@@ -68,7 +68,6 @@ export default function Messages() {
         snapName.forEach(d => results.push({uid: d.id, ...d.data()}));
         snapEmail.forEach(d => results.push({uid: d.id, ...d.data()}));
 
-        // Dédoublonnage et retirer soi-même
         const unique = results
             .filter((v,i,a)=>a.findIndex(t=>(t.uid===v.uid))===i)
             .filter(u => u.uid !== currentUser.uid);
@@ -76,7 +75,7 @@ export default function Messages() {
         setSearchResults(unique);
         if(activeTab !== 'search') setActiveTab('search');
       }
-    }, 300); // Délai de 300ms
+    }, 300);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, currentUser]);
@@ -86,19 +85,16 @@ export default function Messages() {
   useEffect(() => {
     if (!currentUser) return;
 
-    // A. Demandes d'amis
     const qRequests = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "pending"));
     const unsubRequests = onSnapshot(qRequests, (snapshot) => {
       setFriendRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // B. Envoyées (Amis - Pour gérer le Pending/Annuler)
     const qSent = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "pending"));
     const unsubSent = onSnapshot(qSent, (snapshot) => {
       setSentRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // B. Requêtes de Coaching
     const qCoachReqs = query(
         collection(db, "notifications"), 
         where("recipientId", "==", currentUser.uid), 
@@ -109,7 +105,6 @@ export default function Messages() {
        setCoachRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // C. Liste d'amis (Acceptés) + Clients
     const handleFriendsUpdate = async () => {
       const q1 = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "accepted"));
       const q2 = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "accepted"));
@@ -129,14 +124,13 @@ export default function Messages() {
     handleFriendsUpdate();
     const interval = setInterval(handleFriendsUpdate, 10000); 
 
-    return () => { unsubRequests(); unsubCoachRequests(); clearInterval(interval); };
+    return () => { unsubRequests(); unsubSent(); unsubCoachRequests(); clearInterval(interval); };
   }, [currentUser]);
 
   // --- 3. GESTION DU CHAT ---
   useEffect(() => {
     if (!selectedFriend || !currentUser) return;
     
-    // ID unique deterministe
     const conversationId = [currentUser.uid, selectedFriend.uid].sort().join('_');
     
     const qMessages = query(
@@ -187,8 +181,7 @@ export default function Messages() {
     }
   };
 
-const setFriendRequest = async (targetUser) => {
-    // Vérif Anti-Spam
+  const setFriendRequest = async (targetUser) => {
     const alreadySent = sentRequests.some(req => req.toId === targetUser.uid);
     if (alreadySent) return alert("Demande déjà en attente !");
 
@@ -220,6 +213,21 @@ const setFriendRequest = async (targetUser) => {
       } catch (e) { console.error(e); }
   };
 
+  const handleHireAction = async (msg, action) => {
+    if (action === 'question') {
+      setMessageText("Peux-tu m'en dire plus sur tes disponibilités et ton expérience passée ?");
+      return;
+    }
+
+    try {
+      await respondToHireRequest(msg.id, null, currentUser.uid, msg.senderId, action);
+      alert(action === 'accept' ? "Client accepté !" : "Demande refusée.");
+    } catch (error) {
+      console.error(error);
+      alert("Erreur lors de l'action.");
+    }
+  };
+
   const rejectRequest = async (collectionName, id) => {
       await updateDoc(doc(db, collectionName, id), { status: "rejected" });
   };
@@ -246,7 +254,6 @@ const setFriendRequest = async (targetUser) => {
     setIsUploading(false);
   };
 
-  // Sync Dummy Functions
   const syncPhoneContacts = () => alert("Fonctionnalité mobile requise");
   const syncFacebookFriends = () => alert("API Facebook requise");
 
@@ -302,7 +309,6 @@ const setFriendRequest = async (targetUser) => {
           </TabsContent>
 
           <TabsContent value="requests" className="flex-1 overflow-y-auto p-2 space-y-4">
-            {/* Requêtes Coach */}
             {coachRequests.length > 0 && (
                 <div>
                     <p className="text-xs font-bold text-[#7b2cbf] uppercase mb-2 px-2">Clients Potentiels</p>
@@ -321,7 +327,6 @@ const setFriendRequest = async (targetUser) => {
                 </div>
             )}
 
-            {/* Requêtes Amis */}
             {friendRequests.length > 0 && (
                 <div>
                     <p className="text-xs font-bold text-white uppercase mb-2 px-2">Amis</p>
@@ -367,11 +372,55 @@ const setFriendRequest = async (targetUser) => {
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-[#1a1a20] to-black/50">
               {messages.map((msg) => {
                 const isMe = msg.senderId === currentUser.uid;
+                const isHireRequest = msg.type === 'coach_hire_request';
+
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[70%] rounded-2xl p-3 ${isMe ? 'bg-[#7b2cbf] text-white' : 'bg-gray-800 text-gray-200'}`}>
+                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[70%] rounded-2xl p-3 ${isMe ? 'bg-[#7b2cbf] text-white' : 'bg-gray-800 text-gray-200'} ${isHireRequest ? 'border-2 border-[#00f5d4]' : ''}`}>
                       {msg.mediaUrl && <img src={msg.mediaUrl} className="rounded-lg mb-2 max-h-60 object-cover border border-white/10" />}
                       {msg.text && <p className="text-sm whitespace-pre-wrap">{msg.text}</p>}
+
+                      {isHireRequest && !isMe && msg.status === 'pending' && (
+                        <div className="mt-4 space-y-2 border-t border-white/10 pt-3">
+                          <p className="text-[10px] font-bold uppercase text-[#00f5d4] mb-2">Actions Coach :</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleHireAction(msg, 'accept')}
+                              className="bg-[#00f5d4] text-black font-bold h-8 text-xs hover:bg-[#00d1b5]"
+                            >
+                              <Check className="w-3 h-3 mr-1" /> Accepter
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleHireAction(msg, 'question')}
+                              className="border-[#9d4edd] text-[#9d4edd] font-bold h-8 text-xs bg-transparent"
+                            >
+                              <HelpCircle className="w-3 h-3 mr-1" /> Poser plus de questions
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleHireAction(msg, 'refuse')}
+                              className="text-red-400 font-bold h-8 text-xs hover:bg-red-400/10"
+                            >
+                              <X className="w-3 h-3 mr-1" /> Refuser
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isHireRequest && msg.status !== 'pending' && (
+                        <div className="mt-2 flex items-center gap-1">
+                          {msg.status === 'accepted' ? (
+                            <Badge className="bg-green-500/20 text-green-400 border-green-500/50 text-[10px]">Demande Acceptée</Badge>
+                          ) : (
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/50 text-[10px]">Demande Refusée</Badge>
+                          )}
+                        </div>
+                      )}
+
                       <p className="text-[10px] opacity-50 mt-1 text-right">{msg.createdAt ? format(msg.createdAt.toDate(), 'HH:mm') : '...'}</p>
                     </div>
                   </div>
