@@ -88,30 +88,44 @@ export default function Challenges() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- 3. AUTO-DELETE EXPIRED CHALLENGES ---
+  // --- 3. AUTO-DELETE EXPIRED CHALLENGES & PROOFS ---
   useEffect(() => {
     const checkExpirations = async () => {
-      const expired = challenges.filter(c => {
+      const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+
+      // Nettoyage des Challenges expirés
+      const expiredChallenges = challenges.filter(c => {
         if (!c.createdAt) return false;
         const createdAt = new Date(c.createdAt.seconds * 1000);
-        const expiresAt = new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-        return Date.now() > expiresAt.getTime();
+        return Date.now() > (createdAt.getTime() + oneWeekInMs);
       });
 
-      for (const chall of expired) {
+      for (const chall of expiredChallenges) {
         try {
           await deleteDoc(doc(db, "challenges", chall.id));
           console.log(`Challenge ${chall.id} supprimé car expiré.`);
-        } catch (e) {
-          console.error("Erreur suppression challenge expiré:", e);
-        }
+        } catch (e) { console.error("Erreur suppression challenge expiré:", e); }
+      }
+
+      // Nettoyage des Preuves (Tribunal) expirées
+      const expiredProofs = pendingProofs.filter(p => {
+        if (!p.createdAt) return false;
+        const createdAt = new Date(p.createdAt.seconds * 1000);
+        return Date.now() > (createdAt.getTime() + oneWeekInMs);
+      });
+
+      for (const proof of expiredProofs) {
+        try {
+          await deleteDoc(doc(db, "challenge_proofs", proof.id));
+          console.log(`Preuve ${proof.id} supprimée du tribunal car expirée.`);
+        } catch (e) { console.error("Erreur suppression preuve expirée:", e); }
       }
     };
 
-    if (challenges.length > 0) {
+    if (challenges.length > 0 || pendingProofs.length > 0) {
       checkExpirations();
     }
-  }, [challenges, currentTime]);
+  }, [challenges, pendingProofs, currentTime]);
 
   // --- 4. CLASSEMENT ---
   useEffect(() => {

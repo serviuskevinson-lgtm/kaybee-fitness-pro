@@ -56,8 +56,11 @@ val TextGray = Color(0xFF94a3b8)
 class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener, SensorEventListener {
 
     private var heartRate by mutableIntStateOf(0)
-    private var stepCount by mutableIntStateOf(0)
-    private var caloriesBurned by mutableIntStateOf(0)
+    private var stepCount by mutableLongStateOf(0L)
+    private var caloriesBurned by mutableDoubleStateOf(0.0)
+    private var waterLevel by mutableDoubleStateOf(0.0)
+    
+    private var todayNutrition by mutableStateOf(NutritionData())
     
     private var isPhoneConnected by mutableStateOf(false)
     private var lastFirebaseSync by mutableStateOf("Jamais")
@@ -108,11 +111,13 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 PairingScreen(pairingCode)
             } else {
                 WearApp(
-                    heartRate = heartRate, stepCount = stepCount, calories = caloriesBurned,
+                    heartRate = heartRate, stepCount = stepCount.toInt(), calories = caloriesBurned.toInt(),
+                    nutrition = todayNutrition, water = waterLevel,
                     weeklySummary = weeklySummary, monthlySummary = monthlySummary,
                     activeWorkout = activeWorkout, isCoach = isCoach,
                     isPhoneConnected = isPhoneConnected, firebaseSocketConnected = firebaseSocketConnected,
-                    firebaseDataFound = firebaseDataFound, lastSync = lastFirebaseSync, currentUid = currentUserId ?: "N/A"
+                    firebaseDataFound = firebaseDataFound, lastSync = lastFirebaseSync, currentUid = currentUserId ?: "N/A",
+                    onAddWater = { healthManager.addWater(0.25) }
                 )
             }
         }
@@ -159,9 +164,22 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private fun updateUIFromSnapshot(snapshot: DataSnapshot) {
         try {
             val liveData = snapshot.child("live_data")
-            stepCount = (liveData.child("steps").value as? Number)?.toInt() ?: stepCount
-            caloriesBurned = (liveData.child("calories_burned").value as? Number)?.toInt() ?: caloriesBurned
+            stepCount = (liveData.child("steps").value as? Number)?.toLong() ?: stepCount
+            caloriesBurned = (liveData.child("calories_burned").value as? Number)?.toDouble() ?: caloriesBurned
             heartRate = (liveData.child("heart_rate").value as? Number)?.toInt() ?: heartRate
+            waterLevel = (liveData.child("water").value as? Number)?.toDouble() ?: waterLevel
+            
+            val nutrition = liveData.child("nutrition")
+            if (nutrition.exists()) {
+                todayNutrition = NutritionData(
+                    calories = (nutrition.child("calories").value as? Number)?.toInt() ?: 0,
+                    protein = (nutrition.child("protein").value as? Number)?.toInt() ?: 0,
+                    carbs = (nutrition.child("carbs").value as? Number)?.toInt() ?: 0,
+                    fats = (nutrition.child("fats").value as? Number)?.toInt() ?: 0,
+                    fiber = (nutrition.child("fiber").value as? Number)?.toInt() ?: 0,
+                    sugar = (nutrition.child("sugar").value as? Number)?.toInt() ?: 0
+                )
+            }
             isCoach = snapshot.child("role").getValue(String::class.java) == "coach"
         } catch (e: Exception) { Log.e("MainActivity", "Error update UI", e) }
     }
@@ -211,28 +229,10 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                     getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
                     healthManager.setUserId(uid)
                     startFirebaseSync()
-                    // Envoyer succès au téléphone
                     Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", null)
                 }
             }
-            "/request-battery" -> {
-                sendBatteryStatus(messageEvent.sourceNodeId)
-            }
         }
-    }
-
-    private fun sendBatteryStatus(nodeId: String) {
-        val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
-            this.registerReceiver(null, ifilter)
-        }
-        val level: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        val batteryPct = level * 100 / scale.toFloat()
-        
-        val json = JSONObject().apply {
-            put("batteryLevel", batteryPct.toInt())
-        }
-        Wearable.getMessageClient(this).sendMessage(nodeId, "/status-update", json.toString().toByteArray())
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -244,16 +244,19 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 data class ScheduleDay(val day: String, val workout: String)
 data class WorkoutData(val name: String, val exercises: List<ExerciseData>)
 data class ExerciseData(val name: String, val sets: Int, val reps: Int, val weight: Float)
+data class NutritionData(val calories: Int = 0, val protein: Int = 0, val carbs: Int = 0, val fats: Int = 0, val fiber: Int = 0, val sugar: Int = 0)
 
 @Composable
 fun WearApp(
     heartRate: Int, stepCount: Int, calories: Int,
+    nutrition: NutritionData, water: Double,
     weeklySummary: List<ScheduleDay>, monthlySummary: List<ScheduleDay>,
     activeWorkout: WorkoutData?, isCoach: Boolean,
     isPhoneConnected: Boolean, firebaseSocketConnected: Boolean,
-    firebaseDataFound: Boolean, lastSync: String, currentUid: String
+    firebaseDataFound: Boolean, lastSync: String, currentUid: String,
+    onAddWater: () -> Unit
 ) {
-    val pageCount = if (isCoach) 4 else 3
+    val pageCount = if (isCoach) 5 else 4 
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var showDebug by remember { mutableStateOf(false) }
 
@@ -261,18 +264,16 @@ fun WearApp(
         Box(modifier = Modifier.fillMaxSize()) {
             HorizontalPager(state = pagerState) { page ->
                 when (page) {
-                    0 -> DashboardPage(heartRate, stepCount, calories, onLongClick = { showDebug = true })
-                    1 -> SessionPage(activeWorkout)
-                    2 -> SchedulePage("AGENDA HEBDO", weeklySummary)
-                    3 -> SchedulePage("AGENDA MENSUEL", monthlySummary)
+                    0 -> DashboardPage(heartRate, stepCount, calories, water, onAddWater, onLongClick = { showDebug = true })
+                    1 -> NutritionPage(nutrition)
+                    2 -> SessionPage(activeWorkout)
+                    3 -> SchedulePage("AGENDA HEBDO", weeklySummary)
+                    4 -> SchedulePage("AGENDA MENSUEL", monthlySummary)
                 }
             }
-            
             if (showDebug) {
                 Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
-                    ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid) {
-                        showDebug = false
-                    }
+                    ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid) { showDebug = false }
                 }
             }
         }
@@ -280,25 +281,33 @@ fun WearApp(
 }
 
 @Composable
-fun DashboardPage(hr: Int, steps: Int, calories: Int, onLongClick: () -> Unit) {
+fun DashboardPage(hr: Int, steps: Int, calories: Int, water: Double, onAddWater: () -> Unit, onLongClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(8.dp),
+            modifier = Modifier.fillMaxSize().padding(4.dp),
             verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                "KAYBEE FITNESS", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 10.sp,
+                "KAYBEE FITNESS", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 9.sp,
                 modifier = Modifier.pointerInput(Unit) { detectTapGestures(onLongPress = { onLongClick() }) }
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(60.dp).clip(CircleShape).background(CardBg)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("❤️", fontSize = 14.sp)
-                    Text(if (hr > 0) "$hr" else "--", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Text("BPM", fontSize = 8.sp, color = Color.Gray)
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(50.dp).clip(CircleShape).background(CardBg)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (hr > 0) "$hr" else "--", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("BPM", fontSize = 7.sp, color = Color.Gray)
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Button(onClick = onAddWater, modifier = Modifier.size(40.dp), colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3b82f6))) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("💧", fontSize = 12.sp)
+                        Text("${water}L", fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatItem("👣", steps.toString(), "PAS", GreenAccent)
                 StatItem("🔥", calories.toString(), "KCAL", Color.Yellow)
@@ -308,38 +317,48 @@ fun DashboardPage(hr: Int, steps: Int, calories: Int, onLongClick: () -> Unit) {
 }
 
 @Composable
-fun ConnectionDebugPage(
-    isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, 
-    firebaseDataFound: Boolean, lastSync: String, uid: String, onClose: () -> Unit
-) {
-    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg)) {
-        item { Text("DEBUG SYNC", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 12.sp) }
-        item { StatusRow("Phone", if (isPhoneConnected) "OK" else "OFF", if (isPhoneConnected) GreenAccent else Color.Red) }
-        item { StatusRow("RTDB", if (firebaseSocketConnected) "ON" else "OFF", if (firebaseSocketConnected) GreenAccent else Color.Red) }
-        item { StatusRow("Data", if (firebaseDataFound) "OUI" else "NON", if (firebaseDataFound) GreenAccent else Color.Red) }
-        item { Text("UID: ${uid.take(6)}...", color = Color.Gray, fontSize = 8.sp) }
-        item { Text("Sync: $lastSync", color = Color.Gray, fontSize = 8.sp) }
-        item { Button(onClick = onClose, modifier = Modifier.height(32.dp).fillMaxWidth().padding(horizontal = 20.dp)) { Text("FERMER", fontSize = 10.sp) } }
+fun NutritionPage(nutri: NutritionData) {
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg), horizontalAlignment = Alignment.CenterHorizontally) {
+        item { Text("BILAN NUTRITION", color = GreenAccent, fontWeight = FontWeight.Black, fontSize = 10.sp) }
+        item {
+            Card(onClick = {}, modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth()) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("TOTAL MANGÉ", fontSize = 8.sp, color = TextGray)
+                    Text("${nutri.calories}", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color.White)
+                    Text("KCAL", fontSize = 8.sp, color = GreenAccent)
+                }
+            }
+        }
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                MacroMini("PROT", nutri.protein, Color(0xFF3b82f6))
+                MacroMini("GLUC", nutri.carbs, GreenAccent)
+                MacroMini("LIP", nutri.fats, Color(0xFFf59e0b))
+            }
+        }
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                MacroMini("FIBRE", nutri.fiber, Color(0xFF10b981))
+                MacroMini("SUCRE", nutri.sugar, Color(0xFFec4899))
+            }
+        }
     }
 }
 
 @Composable
-fun StatusRow(label: String, status: String, color: Color) {
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Color.White, fontSize = 10.sp)
-        Text(status, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+fun MacroMini(label: String, value: Int, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(2.dp)) {
+        Text(label, fontSize = 7.sp, fontWeight = FontWeight.Bold, color = TextGray)
+        Text("$value g", fontSize = 10.sp, fontWeight = FontWeight.Black, color = color)
     }
 }
 
 @Composable
 fun StatItem(icon: String, value: String, label: String, color: Color) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(CardBg).padding(vertical = 8.dp).width(55.dp)
-    ) {
-        Text(icon, fontSize = 14.sp)
-        Text(value, color = color, fontSize = 12.sp, fontWeight = FontWeight.Black)
-        Text(label, fontSize = 7.sp, color = Color.Gray)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(CardBg).padding(vertical = 6.dp).width(50.dp)) {
+        Text(icon, fontSize = 12.sp)
+        Text(value, color = color, fontSize = 11.sp, fontWeight = FontWeight.Black)
+        Text(label, fontSize = 6.sp, color = Color.Gray)
     }
 }
 
@@ -362,5 +381,26 @@ fun SchedulePage(title: String, summary: List<ScheduleDay>) {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ConnectionDebugPage(isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean, lastSync: String, uid: String, onClose: () -> Unit) {
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg)) {
+        item { Text("DEBUG SYNC", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 12.sp) }
+        item { StatusRow("Phone", if (isPhoneConnected) "OK" else "OFF", if (isPhoneConnected) GreenAccent else Color.Red) }
+        item { StatusRow("RTDB", if (firebaseSocketConnected) "ON" else "OFF", if (firebaseSocketConnected) GreenAccent else Color.Red) }
+        item { StatusRow("Data", if (firebaseDataFound) "OUI" else "NON", if (firebaseDataFound) GreenAccent else Color.Red) }
+        item { Text("UID: ${uid.take(6)}...", color = Color.Gray, fontSize = 8.sp) }
+        item { Text("Sync: $lastSync", color = Color.Gray, fontSize = 8.sp) }
+        item { Button(onClick = onClose, modifier = Modifier.height(32.dp).fillMaxWidth().padding(horizontal = 20.dp)) { Text("FERMER", fontSize = 10.sp) } }
+    }
+}
+
+@Composable
+fun StatusRow(label: String, status: String, color: Color) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Color.White, fontSize = 10.sp)
+        Text(status, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }

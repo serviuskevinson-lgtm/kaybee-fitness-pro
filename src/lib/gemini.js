@@ -1,155 +1,182 @@
 import { getAI, getGenerativeModel } from "firebase/ai";
-import { app } from "./firebase"; 
+import { app } from "./firebase";
 
-// 1. Initialiser le service Vertex AI
+// 1. CONFIGURATION DU MODÈLE (Gemini 2.5 Flash Lite)
 const vertexAI = getAI(app);
+const model = getGenerativeModel(vertexAI, {
+  model: "gemini-2.5-flash-lite",
+  generationConfig: { responseMimeType: "application/json" }
+});
 
-// 2. Choisir le modèle
-const model = getGenerativeModel(vertexAI, { model: "gemini-1.5-flash" });
+// 2. CLÉ API GOOGLE PLACES
+const GOOGLE_PLACES_API_KEY = "AIzaSyAm3R3rPgdPDZI31p-ov5XkrNiI9c3UqU";
 
-/**
- * Analyse un repas (Texte) pour donner les calories/macros
- */
-export const analyzeFoodWithGemini = async (description) => {
-  try {
-    const prompt = `
-      Agis comme un nutritionniste expert. Analyse ce repas : "${description}".
-      
-      Retourne UNIQUEMENT un objet JSON valide (sans Markdown, sans texte autour) avec ce format exact :
-      {
-        "name": "Nom court du plat",
-        "calories": 0,
-        "protein": 0,
-        "carbs": 0,
-        "fats": 0,
-        "fiber": 0,
-        "sugar": 0,
-        "advice": "Court conseil (max 10 mots)"
-      }
-      Si tu ne peux pas estimer, mets des valeurs approximatives basées sur des portions standards.
-    `;
-
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(jsonString);
-
-  } catch (error) {
-    console.error("Erreur Gemini (Nutrition):", error);
-    throw new Error("Impossible d'analyser ce repas.");
-  }
+// 3. MENU D'EXERCICES OFFICIEL
+const EXERCISE_MENU = {
+  "Pectoraux": ["Bench Press", "Incline Dumbbell Press", "Chest Fly", "Dips", "Push-ups"],
+  "Dos": ["Pull-ups", "Lat Pulldown", "Bent Over Row", "Deadlift", "Face Pull"],
+  "Jambes": ["Squat", "Leg Press", "Lunge", "Leg Extension", "Leg Curl"],
+  "Épaules": ["Military Press", "Lateral Raise", "Front Raise", "Arnold Press"],
+  "Bras": ["Biceps Curl", "Hammer Curl", "Triceps Extension", "Skullcrusher"],
+  "Abdominaux": ["Plank", "Crunch", "Leg Raise"],
+  "Fessiers": ["Glute Bridge", "Hip Thrust", "Bulgarian Split Squat", "Stiff Leg Deadlift"],
+  "Cardio / Endurance": ["Burpees", "Mountain Climbers", "Jumping Jacks", "High Knees"],
+  "Haut du corps": ["Push-ups", "Pull-ups", "Shoulder Press", "Dumbbell Row"],
+  "Bas du corps": ["Squat", "Lunge", "Calf Raise", "Glute Bridge"]
 };
 
 /**
- * Analyse une IMAGE de repas pour extraire les macros
- */
-export const analyzeFoodImageWithGemini = async (base64Image) => {
-  try {
-    const prompt = `
-      Regarde cette image de nourriture. Agis comme un nutritionniste expert.
-      Identifie le plat et estime les portions pour calculer les macronutriments.
-
-      Retourne UNIQUEMENT un objet JSON valide (sans Markdown) avec ce format exact :
-      {
-        "name": "Nom du plat identifié",
-        "calories": 0,
-        "protein": 0,
-        "carbs": 0,
-        "fats": 0,
-        "fiber": 0,
-        "sugar": 0,
-        "advice": "Un conseil nutritionnel court sur ce plat."
-      }
-    `;
-
-    const imagePart = {
-      inlineData: {
-        data: base64Image.split(',')[1],
-        mimeType: "image/jpeg"
-      }
-    };
-
-    const result = await model.generateContent([prompt, imagePart]);
-    const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(jsonString);
-
-  } catch (error) {
-    console.error("Erreur Gemini Image:", error);
-    throw new Error("L'IA n'a pas pu analyser l'image.");
-  }
-};
-
-/**
- * GÉNÉRATEUR DE SÉANCES AUTOMATIQUE (Auto Build)
- * Inclut la logique 70/30 (Populaire / Nouveau) et dates précises.
+ * FONCTION 1 : GÉNÉRATION DE SÉANCES (5-6 exercices par jour)
  */
 export const autoBuildWorkoutsWithGemini = async (dates, focusAreas, userWeight, weightUnit) => {
   try {
     const prompt = `
-      Agis comme un coach sportif expert de renommée mondiale.
-      Ta mission : Créer un programme d'entraînement de ${dates.length} séances.
+      Agis comme un coach sportif expert. Crée un programme pour ces dates : ${dates.join(', ')}.
+      Focus demandés : ${focusAreas.join(', ')}. Poids de l'athlète : ${userWeight} ${weightUnit}.
 
-      INFOS CLIENT :
-      - Dates : ${dates.join(', ')}
-      - Focus : ${focusAreas.join(', ')}
-      - Poids : ${userWeight} ${weightUnit}
+      CONSIGNES STRICTES :
+      1. Génère UNE séance par date fournie.
+      2. Chaque séance doit contenir entre 5 et 6 exercices.
+      3. Choisis UNIQUEMENT dans ce menu d'exercices : ${JSON.stringify(EXERCISE_MENU)}.
+      4. Si le focus est "Full Body", pioche dans toutes les catégories.
 
-      RÈGLES DE CONSTRUCTION :
-      1. LOGIQUE D'EXERCICES :
-         - 70% d'exercices MONDIALEMENT POPULAIRES (ex: Bench Press, Squat, Deadlift, Pull-ups).
-         - 30% d'exercices MOINS CONNUS ou originaux pour la nouveauté.
-      2. REGROUPEMENT : Combine intelligemment (ex: Pectoraux/Triceps, Dos/Biceps).
-      3. PARAMÈTRES : Défini Sets, Reps et Rest selon l'objectif.
-      4. COACH TIP : Donne un conseil court (ex: "Go heavy for less weight" ou "Focus on reps").
-
-      Retourne UNIQUEMENT un tableau JSON valide (sans Markdown) au format suivant :
-      [
-        {
-          "name": "Nom de la séance",
-          "date": "YYYY-MM-DD (doit être une des dates fournies)",
-          "tip": "Conseil (max 15 mots)",
-          "exercises": [
-            {
-              "name": "Nom de l'exercice",
-              "sets": "4",
-              "reps": "8-10",
-              "rest": "90"
-            }
-          ]
-        }
-      ]
+      Retourne UNIQUEMENT un tableau JSON:
+      [{"name": "Nom de la séance", "date": "YYYY-MM-DD", "tip": "Conseil coach", "exercises": [{"name": "Nom exact du menu", "sets": "4", "reps": "12", "rest": "60"}]}]
     `;
-
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(jsonString);
-
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    return JSON.parse(jsonMatch ? jsonMatch[0] : text);
   } catch (error) {
-    console.error("Erreur Gemini AutoBuild:", error);
-    throw new Error("L'IA n'a pas pu générer le programme.");
+    console.error("Erreur AutoBuild Gemini:", error);
+    throw error;
   }
 };
 
 /**
- * RECHERCHE COACH INTELLIGENTE
+ * FONCTION 2 : ANALYSE ALIMENTAIRE CONVERSATIONNELLE (Mode Chat)
  */
-export const searchCoachesWithGemini = async (location, specialty, budget, type) => {
+export const analyzeFoodChat = async (input, history = [], isImage = false) => {
   try {
+    const prompt = isImage
+      ? `Analyse cette image de nourriture.
+         1. Décompose chaque élément visible.
+         2. Pour chaque élément, estime : Quantité -> Calories et Macros.
+         3. Donne une décomposition claire dans "analysisBreakdown".
+         4. Retourne les totaux numériques dans "data".
+         CONSIGNE NOMBRES : Uniquement des nombres entiers, pas de texte dans les valeurs.
+
+         FORMAT JSON :
+         {
+           "success": true,
+           "needsMoreInfo": false,
+           "message": "Confirmation",
+           "analysisBreakdown": "Détail du calcul...",
+           "data": { "name": "Nom", "calories": 0, "protein": 0, "carbs": 0, "fats": 0, "fiber": 0, "sugar": 0 }
+         }`
+      : `Analyse ce repas : "${input}". Historique: ${JSON.stringify(history)}.
+         CONSIGNES :
+         1. Décompose chaque ingrédient. Si 3 tranches de pain, calcule 1 tranche * 3.
+         2. Écris le raisonnement dans "analysisBreakdown".
+         3. Si flou, demande une précision dans "message" et mets needsMoreInfo:true.
+         CONSIGNE NOMBRES : Uniquement des nombres entiers.
+
+         FORMAT JSON :
+         {
+           "success": true,
+           "needsMoreInfo": false,
+           "message": "Confirmation",
+           "analysisBreakdown": "Raisonnement du calcul...",
+           "data": { "name": "Nom", "calories": 0, "protein": 0, "carbs": 0, "fats": 0, "fiber": 0, "sugar": 0 }
+         }`;
+
+    const result = await model.generateContent(isImage ? [prompt, { inlineData: { data: input.split(',')[1], mimeType: "image/jpeg" } }] : prompt);
+    const response = JSON.parse(result.response.text());
+
+    if (response.data) {
+      ["calories", "protein", "carbs", "fats", "fiber", "sugar"].forEach(key => {
+        if (typeof response.data[key] === 'string') {
+          response.data[key] = parseInt(response.data[key].replace(/[^0-9]/g, '')) || 0;
+        }
+      });
+    }
+    return response;
+  } catch (error) {
+    return { success: false, needsMoreInfo: true, message: "Détaille un peu plus ton plat svp." };
+  }
+};
+
+// Wrappers pour compatibilité balance énergétique
+export const analyzeFoodWithGemini = async (description) => {
+  const res = await analyzeFoodChat(description);
+  return res.success ? res.data : null;
+};
+
+export const analyzeFoodImageWithGemini = async (base64Image) => {
+  const res = await analyzeFoodChat(base64Image, [], true);
+  return res.success ? res.data : null;
+};
+
+/**
+ * FONCTION 3 : ACCOUNTABILITY QUOTIDIENNE (3 Modes)
+ */
+export const generateDailyAccountability = async (profile, liveStats, history = [], mode = "accountability", lng = "fr") => {
+  try {
+    let modePrompt = "";
+    if (mode === "nutrition") {
+      modePrompt = lng === "en" ?
+        `Expert Nutritionist. List precise intakes (Calories, Protein, Carbs, Fats) for target ${profile.targetWeight}${profile.weightUnit}.` :
+        `Nutritionniste expert. Liste les apports précis (Calories, Protéines, Glucides, Lipides) pour l'objectif de ${profile.targetWeight}${profile.weightUnit}.`;
+    } else if (mode === "training") {
+      modePrompt = lng === "en" ?
+        `Performance Coach. Describe training style and intensity (load, rest, RPE).` :
+        `Coach de performance. Décris le style et l'intensité d'entraînement (charge, repos, RPE).`;
+    } else {
+      modePrompt = lng === "en" ?
+        `Accountability Coach. Analyze data and tell the athlete what's wrong and what to improve.` :
+        `Coach d'accountability strict. Analyse les données et dis à l'athlète ce qui ne va pas et ce qu'il doit améliorer.`;
+    }
+
     const prompt = `
-      Agis comme un expert fitness local à "${location}".
-      Ta mission : Trouver 5 coachs RÉELS.
-      Retourne UNIQUEMENT un tableau JSON valide.
+      ${modePrompt} Langue: ${lng === "en" ? "English" : "French"}.
+      PROFIL: ${JSON.stringify(profile)}
+      STATS: ${JSON.stringify(liveStats)}
+      HISTORIQUE: ${JSON.stringify(history.slice(-7))}
+
+      Retourne UNIQUEMENT JSON:
+      { "status": "success"|"warning"|"critical", "primaryNeed": "TITRE", "recommendation": "Texte", "improveWidget": "Nom" }
+    `;
+    const result = await model.generateContent(prompt);
+    return JSON.parse(result.response.text());
+  } catch (error) { return null; }
+};
+
+/**
+ * FONCTION 4 : RECHERCHE HYBRIDE DE COACHS (Kaybee + Google Places)
+ */
+export const searchCoachesWithGemini = async (location, specialty, budget, type, currentCoaches = []) => {
+  try {
+    const targetTotal = 24;
+    const internalLimit = Math.floor(targetTotal * 0.75);
+    const kaybeeCoaches = currentCoaches.slice(0, internalLimit);
+    const neededFromGoogle = targetTotal - kaybeeCoaches.length;
+
+    const prompt = `
+      Recherche de coachs réels à "${location}" pour "${specialty}". Budget: ${budget}$.
+      Trouve ${neededFromGoogle} centres fitness ou coachs RÉELS.
+      POUR CHAQUE RÉSULTAT, TROUVE : Nom, Adresse, Téléphone, Site Web, Note, Prix, Bio.
+
+      Retourne UNIQUEMENT un tableau JSON:
+      [{"name": "...", "location": "...", "phone": "...", "website": "...", "rating": 4.5, "priceStart": 60, "bio": "...", "specialty": "..."}]
     `;
 
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const jsonString = text.replace(/```json|```/g, "").trim();
-    const data = JSON.parse(jsonString);
-    return data.map((c, i) => ({ ...c, id: `ai_${Date.now()}_${i}`, isAi: true, isExternal: true }));
-  } catch (error) {
-    console.error("Erreur Gemini Search:", error);
-    return [];
-  }
+    const jsonMatch = result.response.text().match(/\[[\s\S]*\]/);
+    const googleResults = JSON.parse(jsonMatch ? jsonMatch[0] : result.response.text());
+
+    const internalFormatted = kaybeeCoaches.map(c => ({ ...c, isAi: false, isExternal: false, source: 'Kaybee Certified' }));
+    const externalFormatted = googleResults.map((c, i) => ({ ...c, id: `google_${Date.now()}_${i}`, full_name: c.name, isAi: true, isExternal: true, source: 'Google Places' }));
+
+    return [...internalFormatted, ...externalFormatted];
+  } catch (error) { return currentCoaches; }
 };

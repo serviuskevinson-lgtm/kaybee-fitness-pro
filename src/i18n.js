@@ -404,7 +404,15 @@ const resources = {
       "growth_title": "💪 Croissance activée",
       "growth_msg": "Surplus idéal. Tes muscles vont grossir cette nuit.",
       "stagnation_title": "📉 Tu vas stagner...",
-      "stagnation_msg": "Il manque des calories ! Mange un peu avant de dormir."
+      "stagnation_msg": "Il manque des calories ! Mange un peu avant de dormir.",
+
+      // --- AJOUTS INTELLIGENCE KAYBEE ---
+      "intelligence_title": "Intelligence Kaybee",
+      "mode_accountability": "Accountability",
+      "mode_nutrition": "Nutrition",
+      "mode_training": "Entraînement",
+      "focus_label": "Analyse",
+      "ai_thinking": "L'IA Kaybee étudie tes habitudes..."
       
     }
   },
@@ -715,6 +723,14 @@ const resources = {
       "growth_msg": "Ideal surplus. Your muscles will grow tonight.",
       "stagnation_title": "📉 You will stagnate...",
       "stagnation_msg": "Missing calories! Eat something before bed.",
+
+      // --- AJOUTS INTELLIGENCE KAYBEE ---
+      "intelligence_title": "Kaybee Intelligence",
+      "mode_accountability": "Accountability",
+      "mode_nutrition": "Nutrition",
+      "mode_training": "Training",
+      "focus_label": "Analysis",
+      "ai_thinking": "Kaybee AI is studying your habits..."
     }
   },
 
@@ -884,7 +900,7 @@ const resources = {
 "all": "Todo",
 "photos": "Fotos",
 "videos": "Videos",
-"compare": "Comparar",
+"compare": "Comparer",
 "cancel": "Cancelar",
 "new_media": "Nuevo Medio",
 "drag_drop_media": "Arrastrar foto o video",
@@ -988,7 +1004,7 @@ const resources = {
       "alert_surplus_title": "🛑 ¡Alerta Excedente!",
       "alert_surplus_msg": "Te sobran {{amount}} kcal. ¡Camina {{steps}} pasos para salvar el día!",
       "growth_title": "💪 Crecimiento activado",
-      "growth_msg": "Excedente ideal. Tus músculos crecerán esta noche.",
+      "growth_msg": "Excedente ideal. Tus msculos crecerán esta noche.",
       "stagnation_title": "📉 Te estancarás...",
       "stagnation_msg": "¡Faltan calorías! Come algo antes de dormir.",
       "calories": "Calorías",
@@ -999,7 +1015,7 @@ const resources = {
       "food_placeholder": "Ej: Un plátano, Big Mac, 200g pollo...",
       "ask_ai": "Preguntar a IA",
       "ai_analyzing": "Análisis IA...",
-      "manual_add": "Añadir Manual (Kcal)",
+      "manual_add": "Añadir Manuel (Kcal)",
       "ai_confirm": "IA estima: {{calories}} kcal ({{protein}}g Prot). ¿Añadir?",
       "ai_error": "No pude estimar este plato. Sé más específico.",
       // --- SALUD & TRACKER ---
@@ -1019,6 +1035,14 @@ const resources = {
       "steps_hint": "Consejo: Mira el podómetro de tu móvil.",
       "hydration": "Hidratación",
       "validate": "Validar",
+
+      // --- AJOUTS INTELLIGENCE KAYBEE (ESPAGNOL) ---
+      "intelligence_title": "Inteligencia Kaybee",
+      "mode_accountability": "Accountability",
+      "mode_nutrition": "Nutrición",
+      "mode_training": "Entrenamiento",
+      "focus_label": "Análisis",
+      "ai_thinking": "La IA Kaybee estudia tus hábitos..."
     }
   }
 };

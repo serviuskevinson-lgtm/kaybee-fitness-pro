@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Flame, Plus, ScanSearch, BellRing, X, Loader2 } from 'lucide-react';
-import { analyzeFoodWithGemini } from '@/lib/gemini'; // <--- GEMINI
+import { analyzeFoodWithGemini } from '@/lib/geminicalcul'; // <--- GEMINI
 import { getEveningAdvice } from '@/lib/coachingEngine';
 import { useAuth } from '@/context/AuthContext';
 import { useTranslation } from 'react-i18next'; 

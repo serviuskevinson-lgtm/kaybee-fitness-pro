@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { searchCoachesWithGemini } from '@/lib/gemini';
+import { searchCoachesWithGemini } from '@/lib/geminicoach';
 import { 
   collection, query, where, getDocs, doc, updateDoc, addDoc, orderBy 
 } from 'firebase/firestore';
