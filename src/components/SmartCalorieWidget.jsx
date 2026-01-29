@@ -47,10 +47,34 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
 
     useEffect(() => {
         if (!currentUser) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        const rtdbLiveRef = dbRef(rtdb, `users/${currentUser.uid}/live_data`);
         const nutritionRef = dbRef(rtdb, `users/${currentUser.uid}/live_data/nutrition`);
+
         const unsubscribe = onValue(nutritionRef, (snapshot) => {
             if (snapshot.exists()) {
                 const data = snapshot.val();
+
+                // Vérification du changement de jour pour le reset
+                if (data.date && data.date !== today) {
+                    update(rtdbLiveRef, {
+                        calories_consumed: 0,
+                        nutrition: {
+                            protein: 0,
+                            carbs: 0,
+                            fats: 0,
+                            fiber: 0,
+                            sugar: 0,
+                            calories: 0,
+                            meals: [],
+                            date: today,
+                            timestamp: Date.now()
+                        }
+                    });
+                    return;
+                }
+
                 setTodayMacros({
                     protein: Number(data.protein) || 0,
                     carbs: Number(data.carbs) || 0,
@@ -61,6 +85,9 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
                     meals: data.meals || []
                 });
                 setDailyMeals(data.meals || []);
+            } else {
+                // Initialiser la date si elle n'existe pas
+                update(nutritionRef, { date: today });
             }
         });
         return () => unsubscribe();
@@ -101,7 +128,7 @@ export default function SmartCalorieWidget({ userProfile, consumed = 0, burned =
                 meals: [...(historyData.meals || []), cleanData]
             };
             await setDoc(historyRef, updatedMacros);
-            await update(rtdbLiveRef, { calories_consumed: safeConsumed + cleanData.calories, nutrition: updatedMacros });
+            await update(rtdbLiveRef, { calories_consumed: (Number(todayMacros.calories) || 0) + cleanData.calories, nutrition: updatedMacros });
 
             setFoodInput("");
             setInputMode(false);

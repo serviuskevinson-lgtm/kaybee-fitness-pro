@@ -12,6 +12,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class PassiveDataReceiver : PassiveListenerService() {
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -47,24 +50,28 @@ class PassiveDataReceiver : PassiveListenerService() {
         val userId = prefs.getString("userId", null)
 
         if (userId == null) {
-            Log.e("KaybeeSync", "ERREUR: Synchronisation Firebase annulée : userId est NULL dans SharedPreferences.")
+            Log.e("KaybeeSync", "ERREUR: Synchronisation Firebase annulée : userId est NULL.")
             return
         }
 
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         val updates = mutableMapOf<String, Any>()
+        
         steps?.let { updates["steps"] = it }
         calories?.let { updates["calories_burned"] = it }
         distance?.let { updates["distance"] = it }
         heartRate?.let { updates["heart_rate"] = it }
+        
         updates["last_update"] = System.currentTimeMillis()
         updates["source"] = "watch"
+        updates["date"] = today // Important pour le reset quotidien sur le Dashboard
 
         database.child("users").child(userId).child("live_data").updateChildren(updates)
             .addOnSuccessListener { 
-                Log.d("KaybeeSync", "✅ Firebase : Données mises à jour pour l'utilisateur $userId") 
+                Log.d("KaybeeSync", "✅ Firebase : Données mises à jour pour $userId") 
             }
             .addOnFailureListener { e -> 
-                Log.e("KaybeeSync", "❌ Firebase : Échec de la mise à jour : ${e.message}") 
+                Log.e("KaybeeSync", "❌ Firebase Error: ${e.message}") 
             }
     }
 
@@ -72,10 +79,7 @@ class PassiveDataReceiver : PassiveListenerService() {
         scope.launch {
             try {
                 val nodes = Tasks.await(Wearable.getNodeClient(this@PassiveDataReceiver).connectedNodes)
-                if (nodes.isEmpty()) {
-                    Log.w("KaybeeSync", "⚠️ Bluetooth : Aucun téléphone trouvé à proximité.")
-                    return@launch
-                }
+                if (nodes.isEmpty()) return@launch
 
                 val json = JSONObject().apply {
                     put("type", "passive_update")
@@ -90,10 +94,9 @@ class PassiveDataReceiver : PassiveListenerService() {
                 for (node in nodes) {
                     Wearable.getMessageClient(this@PassiveDataReceiver)
                         .sendMessage(node.id, "/health-data", data)
-                    Log.d("KaybeeSync", "📡 Bluetooth : Message envoyé à ${node.displayName}")
                 }
             } catch (e: Exception) {
-                Log.e("KaybeeSync", "❌ Bluetooth : Erreur d'envoi : ${e.message}")
+                Log.e("KaybeeSync", "❌ Bluetooth Error: ${e.message}")
             }
         }
     }

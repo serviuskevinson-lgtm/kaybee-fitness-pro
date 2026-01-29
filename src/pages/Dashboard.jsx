@@ -21,7 +21,7 @@ import { Link } from 'react-router-dom';
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from 'react-i18next';
 import SmartCalorieWidget from '@/components/SmartCalorieWidget';
-import { startOfWeek, addWeeks, subWeeks, format, isSameDay, parseISO } from 'date-fns';
+import { startOfWeek, addWeeks, subWeeks, format, isSameDay, parseISO, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { generateDailyAccountability } from '@/lib/geminiadvice';
 
@@ -59,7 +59,7 @@ export default function Dashboard() {
 
   const [liveStats, setLiveStats] = useState({
       steps: 0, caloriesBurned: 0, caloriesConsumed: 0, water: 0, heartRate: 0, points: 0,
-      macros: { protein: 0, carbs: 0, fats: 0, fiber: 0, sugar: 0 }
+      macros: { protein: 0, carbs: 0, fats: 0, fiber: 0, sugar: 0, meals: [] }
   });
 
   const lastWatchUpdate = useRef(0);
@@ -96,8 +96,67 @@ export default function Dashboard() {
             const profileSnap = await getDoc(doc(db, "users", targetId));
             if (profileSnap.exists()) {
                 const data = profileSnap.data();
-                setUserProfile(data);
-                setLiveStats(prev => ({ ...prev, steps: Number(data.dailySteps) || 0, caloriesBurned: Number(data.dailyBurnedCalories) || 0, caloriesConsumed: Number(data.dailyCalories) || 0, water: Number(data.dailyWater) || 0, points: Number(data.points) || 0 }));
+                const today = getTodayString();
+
+                // RESET QUOTIDIEN & ARCHIVAGE NUTRITION
+                if (data.lastActiveDate && data.lastActiveDate !== today && !isCoachView) {
+
+                    // 1. Archiver les données de la veille avant le reset
+                    const historyRef = doc(db, "users", targetId, "nutrition_history", data.lastActiveDate);
+                    const historySnap = await getDoc(historyRef);
+
+                    // Si pas encore archivé dans nutrition_history, on le fait avec les données actuelles de l'utilisateur
+                    if (!historySnap.exists()) {
+                        await setDoc(historyRef, {
+                            calories: data.dailyCalories || 0,
+                            steps: data.dailySteps || 0,
+                            water: data.dailyWater || 0,
+                            burned: data.dailyBurnedCalories || 0,
+                            protein: liveStats.macros?.protein || 0,
+                            carbs: liveStats.macros?.carbs || 0,
+                            fats: liveStats.macros?.fats || 0,
+                            fiber: liveStats.macros?.fiber || 0,
+                            sugar: liveStats.macros?.sugar || 0,
+                            meals: liveStats.macros?.meals || [],
+                            date: data.lastActiveDate,
+                            timestamp: Date.now()
+                        });
+                    }
+
+                    // 2. Effectuer le reset pour aujourd'hui
+                    const updates = {
+                        dailySteps: 0,
+                        dailyBurnedCalories: 0,
+                        dailyCalories: 0,
+                        dailyWater: 0,
+                        lastActiveDate: today
+                    };
+                    await updateDoc(doc(db, "users", targetId), updates);
+
+                    await update(ref(rtdb, `users/${targetId}/live_data`), {
+                        steps: 0,
+                        calories_burned: 0,
+                        calories_consumed: 0,
+                        water: 0,
+                        date: today,
+                        nutrition: {
+                            protein: 0, carbs: 0, fats: 0, fiber: 0, sugar: 0, calories: 0, meals: [], date: today, timestamp: Date.now()
+                        }
+                    });
+
+                    setUserProfile({ ...data, ...updates });
+                    setLiveStats(prev => ({ ...prev, steps: 0, caloriesBurned: 0, caloriesConsumed: 0, water: 0 }));
+                } else {
+                    setUserProfile(data);
+                    setLiveStats(prev => ({
+                        ...prev,
+                        steps: Number(data.dailySteps) || 0,
+                        caloriesBurned: Number(data.dailyBurnedCalories) || 0,
+                        caloriesConsumed: Number(data.dailyCalories) || 0,
+                        water: Number(data.dailyWater) || 0,
+                        points: Number(data.points) || 0
+                    }));
+                }
                 fetchIntel(data, liveStats, intelMode);
             }
             if (!isCoachView) {
@@ -112,16 +171,29 @@ export default function Dashboard() {
     const unsubscribe = onValue(ref(rtdb, `users/${targetId}/live_data`), (snapshot) => {
         const data = snapshot.val();
         if (data) {
+            const today = getTodayString();
+
+            // Reset en temps réel si on change de jour pendant que l'app est ouverte
+            if (data.date && data.date !== today && !isCoachView) {
+                // On déclenche initData pour gérer l'archivage proprement
+                initData();
+                return;
+            }
+
             if (data.source === 'watch') lastWatchUpdate.current = Date.now();
             setLiveStats(prev => ({
                 ...prev,
                 steps: data.source === 'watch' ? Number(data.steps) : Math.max(prev.steps, Number(data.steps) || 0),
                 caloriesBurned: data.source === 'watch' ? Number(data.calories_burned) : Math.max(prev.caloriesBurned, Number(data.calories_burned) || 0),
-                caloriesConsumed: Number(data.calories_consumed) || prev.caloriesConsumed,
-                water: Number(data.water) || prev.water,
+                caloriesConsumed: Number(data.calories_consumed) || 0,
+                water: Number(data.water) || 0,
                 heartRate: Number(data.heart_rate) || 0,
                 macros: data.nutrition || prev.macros
             }));
+
+            if (!data.date && !isCoachView) {
+                update(ref(rtdb, `users/${targetId}/live_data`), { date: today });
+            }
         }
     });
     return () => unsubscribe();
