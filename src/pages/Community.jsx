@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
 import { searchCoachesWithGemini } from '@/lib/geminicoach';
-import { 
-  collection, query, where, getDocs, doc, updateDoc, addDoc, orderBy 
+import {
+  collection, query, where, getDocs, doc, updateDoc, addDoc, orderBy
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,8 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { 
-  MapPin, Search, Star, Globe, Loader2, CheckCircle, ExternalLink, 
+import {
+  MapPin, Search, Star, Globe, Loader2, CheckCircle, ExternalLink,
   Sparkles, Handshake, LayoutGrid, Play, Image as ImageIcon, Upload, Plus, MessageSquare,
   Calendar, Clock, CreditCard, Tag, Percent, User, Users, Laptop, Zap, Heart, Dumbbell, Flame, Activity
 } from 'lucide-react';
@@ -34,10 +34,10 @@ const SPORTS_LIST = [
 
 // --- SOUS-COMPOSANT : PROFIL COACH (Interne Kaybee) ---
 const CoachProfile = ({ coachData, isOwner, onHire }) => {
-  const { t } = useTranslation(); 
+  const { t } = useTranslation();
   const [profile, setProfile] = useState(coachData || {});
   const [posts, setPosts] = useState([]);
-  
+
   // États d'édition
   const [isEditing, setIsEditing] = useState(false);
   const [editBio, setEditBio] = useState(profile.bio || "");
@@ -151,7 +151,7 @@ const CoachProfile = ({ coachData, isOwner, onHire }) => {
                 </div>
             </div>
         </div>
-        
+
         {/* Zone Edition */}
         {isEditing && isOwner && (
             <div className="mb-8 p-6 bg-[#1a1a20]/60 rounded-3xl space-y-4 border border-gray-800 shadow-xl">
@@ -311,23 +311,23 @@ const CoachProfile = ({ coachData, isOwner, onHire }) => {
 export default function Community() {
   const { currentUser } = useAuth();
   const { t } = useTranslation(); 
-  
+
   const [coaches, setCoaches] = useState([]);
-  const [realWorldResults, setRealWorldResults] = useState([]); 
+  const [realWorldResults, setRealWorldResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [selectedCoach, setSelectedCoach] = useState(null);
   const [isHiring, setIsHiring] = useState(false);
-  
+
   // États Coach
   const [userRole, setUserRole] = useState(null);
   const [myProfileData, setMyProfileData] = useState(null);
 
   // --- FILTRES ---
   const [location, setLocation] = useState('');
-  const [budget, setBudget] = useState([150]); 
+  const [budget, setBudget] = useState([150]);
   const [selectedSport, setSelectedSport] = useState('all');
-  const [sessionType, setSessionType] = useState('private'); 
+  const [sessionType, setSessionType] = useState('private');
 
   const searchCoaches = useCallback(async () => {
     setIsLoading(true);
@@ -405,16 +405,16 @@ export default function Community() {
 
   const handleHireCoach = async (coachToHire) => {
     if (!currentUser) return;
-    const target = coachToHire || selectedCoach; 
+    const target = coachToHire || selectedCoach;
     if(!window.confirm(t('confirm_hire', { name: target.full_name || target.name }))) return;
     setIsHiring(true);
     try {
         await sendNotification(
-            target.id, 
-            currentUser.uid, 
-            myProfileData?.full_name || currentUser.email, 
-            "Demande de Coaching 🚀", 
-            "Un utilisateur souhaite vous engager.", 
+            target.id,
+            currentUser.uid,
+            myProfileData?.full_name || currentUser.email,
+            "Demande de Coaching 🚀",
+            "Un utilisateur souhaite vous engager.",
             "coach_request"
         );
         alert(t('request_sent')); setSelectedCoach(null);
@@ -458,7 +458,7 @@ export default function Community() {
         </div>
 
         <div className="lg:col-span-3 space-y-8">
-          
+
           {/* 1. RÉSULTATS KAYBEE (Toujours en premier) */}
           {coaches.length > 0 && (
             <div>
@@ -514,16 +514,16 @@ export default function Community() {
                                       <p className="text-xs text-gray-500 line-clamp-2">{result.bio}</p>
                                       <div className="flex flex-wrap gap-1 mt-2"><span className="text-[10px] bg-white/5 text-gray-300 px-1.5 py-0.5 rounded">{result.specialty}</span></div>
                                   </div>
-                                  
+
                                   <div className="flex justify-between items-end mt-4 pt-3 border-t border-white/5">
                                       <div className="text-left">
                                           <p className="text-[9px] text-gray-500">Tarif est.</p>
                                           <p className="text-[#00f5d4] font-black text-sm">{result.priceStart}$</p>
                                       </div>
                                       {result.website && result.website !== 'N/A' ? (
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline" 
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
                                             className="h-8 text-xs border-[#9d4edd] text-[#9d4edd] hover:bg-[#9d4edd] hover:text-white"
                                             onClick={() => window.open(result.website, '_blank')}
                                           >
@@ -542,11 +542,11 @@ export default function Community() {
                )}
             </div>
           )}
-          
+
           {coaches.length === 0 && realWorldResults.length === 0 && !isLoading && !isAiLoading && (<div className="p-12 text-center text-gray-500 bg-black/20 rounded-xl border border-dashed border-gray-800"><Search className="mx-auto mb-4 opacity-20" size={48} /><p>{t('search_prompt')}</p></div>)}
         </div>
       </div>
-      
+
       {/* MODAL PROFIL COACH INTERNE SEULEMENT */}
       <Dialog open={!!selectedCoach} onOpenChange={() => setSelectedCoach(null)}>
           <DialogContent className="bg-transparent border-none text-white max-w-5xl p-0 h-[85vh] overflow-hidden rounded-[2.5rem] shadow-2xl">
