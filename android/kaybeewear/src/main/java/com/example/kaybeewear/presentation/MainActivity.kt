@@ -98,8 +98,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             currentUserId = savedUserId
             healthManager.setUserId(savedUserId)
             startFirebaseSync()
-        } else {
-            generatePairingCode()
         }
 
         healthManager.monitorFirebaseConnection { connected -> firebaseSocketConnected = connected }
@@ -108,7 +106,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         setContent {
             val userId = currentUserId
             if (userId == null) {
-                PairingScreen(pairingCode)
+                // If no userId, showing a waiting screen instead of pairing code
+                WaitingForPhoneScreen()
             } else {
                 WearApp(
                     heartRate = heartRate, stepCount = stepCount.toInt(), calories = caloriesBurned.toInt(),
@@ -143,10 +142,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
             isPhoneConnected = nodes.isNotEmpty()
         }
-    }
-
-    private fun generatePairingCode() {
-        pairingCode = (100000..999999).random().toString()
     }
 
     private fun startFirebaseSync() {
@@ -185,15 +180,16 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     }
 
     @Composable
-    fun PairingScreen(code: String) {
+    fun WaitingForPhoneScreen() {
         Column(
             modifier = Modifier.fillMaxSize().background(DarkBg).padding(10.dp),
             verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("KAYBEE FITNESS", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 14.sp)
             Spacer(modifier = Modifier.height(10.dp))
-            Text(code, color = GreenAccent, fontSize = 32.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
-            Text("Entrez ce code sur votre téléphone", color = TextGray, fontSize = 9.sp, textAlign = TextAlign.Center)
+            CircularProgressIndicator(color = GreenAccent, modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("En attente du téléphone...", color = TextGray, fontSize = 9.sp, textAlign = TextAlign.Center)
         }
     }
 
@@ -221,16 +217,14 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         isPhoneConnected = true
         when (messageEvent.path) {
             "/pair" -> {
+                // Automatically pair if message received, bypass code check
                 val data = JSONObject(String(messageEvent.data))
-                val code = data.getString("pairingCode")
-                if (code == pairingCode) {
-                    val uid = data.getString("userId")
-                    currentUserId = uid
-                    getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
-                    healthManager.setUserId(uid)
-                    startFirebaseSync()
-                    Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", null)
-                }
+                val uid = data.getString("userId")
+                currentUserId = uid
+                getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
+                healthManager.setUserId(uid)
+                startFirebaseSync()
+                Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", null)
             }
         }
     }
@@ -292,7 +286,7 @@ fun DashboardPage(hr: Int, steps: Int, calories: Int, water: Double, onAddWater:
                 modifier = Modifier.pointerInput(Unit) { detectTapGestures(onLongPress = { onLongClick() }) }
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(50.dp).clip(CircleShape).background(CardBg)) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (hr > 0) "$hr" else "--", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
