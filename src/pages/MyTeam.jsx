@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Users, Ruler, Weight, Target, AlertCircle,
-  Clock, Save, Calendar, Camera, User
+  Clock, Save, Calendar, Camera, User, Goal
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -109,31 +109,44 @@ export default function MyTeam() {
                     <Target size={16} /> Profil Athlétique
                   </h4>
 
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="bg-black/40 p-3 rounded-lg border border-gray-800">
-                      <p className="text-[10px] text-gray-500 uppercase">Taille</p>
-                      <p className="font-bold text-white flex items-center gap-1"><Ruler size={14} className="text-[#9d4edd]"/> {client.height || '--'} cm</p>
+                  <div className="grid grid-cols-3 gap-2 mb-6">
+                    <div className="bg-black/40 p-2 rounded-lg border border-gray-800 text-center">
+                      <p className="text-[9px] text-gray-500 uppercase">Taille</p>
+                      <p className="text-sm font-bold text-white">{client.height || '--'} cm</p>
                     </div>
-                    <div className="bg-black/40 p-3 rounded-lg border border-gray-800">
-                      <p className="text-[10px] text-gray-500 uppercase">Poids</p>
-                      <p className="font-bold text-white flex items-center gap-1"><Weight size={14} className="text-[#9d4edd]"/> {client.weight || '--'} {client.weightUnit || 'kg'}</p>
+                    <div className="bg-black/40 p-2 rounded-lg border border-gray-800 text-center">
+                      <p className="text-[9px] text-gray-500 uppercase">Poids</p>
+                      <p className="text-sm font-bold text-white">{client.weight || '--'} {client.weightUnit || 'kg'}</p>
+                    </div>
+                    <div className="bg-black/40 p-2 rounded-lg border border-[#9d4edd]/30 text-center">
+                      <p className="text-[9px] text-[#9d4edd] uppercase">Cible</p>
+                      <p className="text-sm font-bold text-white">{client.targetWeight || '--'} {client.weightUnit || 'kg'}</p>
                     </div>
                   </div>
 
                   <div className="space-y-4">
                     <div>
                       <p className="text-xs font-bold text-gray-500 uppercase mb-1">Objectifs</p>
-                      <p className="text-sm text-gray-300 italic">"{client.goals || 'Non spécifié'}"</p>
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {client.selectedGoals?.map((g, i) => (
+                          <Badge key={i} className="text-[9px] bg-[#7b2cbf]/20 border-[#7b2cbf]/40">{g}</Badge>
+                        ))}
+                      </div>
+                      <p className="text-sm text-gray-300 italic leading-snug">"{client.goals || 'Non spécifié'}"</p>
                     </div>
                     <div>
                       <p className="text-xs font-bold text-gray-500 uppercase mb-1">Disponibilités</p>
-                      <p className="text-sm text-gray-300">{client.availability || 'À définir'}</p>
+                      <div className="flex gap-1">
+                        {client.availabilityDays?.map((day, i) => (
+                          <span key={i} className="text-[10px] px-1.5 py-0.5 bg-black/60 border border-gray-800 rounded text-[#00f5d4] font-bold">{day}</span>
+                        )) || <span className="text-xs text-gray-500 italic">Non défini</span>}
+                      </div>
                     </div>
                     <div>
                       <p className="text-xs font-bold text-red-400 uppercase mb-1 flex items-center gap-1">
                         <AlertCircle size={12} /> Santé / Blessures
                       </p>
-                      <p className="text-xs text-gray-400">{client.injuries || 'Aucune blessure signalée'}</p>
+                      <p className="text-xs text-gray-400 leading-tight">{client.injuries || 'Aucune blessure signalée'}</p>
                     </div>
                   </div>
                 </div>

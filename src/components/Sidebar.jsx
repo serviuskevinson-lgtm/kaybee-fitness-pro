@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useClient } from '@/context/ClientContext';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ClientSelector from '@/components/coach/ClientSelector';
@@ -37,6 +38,7 @@ import {
 export default function AppSidebar() {
   const location = useLocation();
   const { logout, currentUser } = useAuth();
+  const { isCoachView } = useClient();
   const navigate = useNavigate();
   const [isCoach, setIsCoach] = useState(false);
   const { t } = useTranslation();
@@ -62,7 +64,8 @@ export default function AppSidebar() {
     }
   };
 
-  const items = [
+  // Liste complète des items
+  const allItems = [
     { title: t('dashboard'), url: "/", icon: LayoutDashboard },
     { title: t('exercises'), url: "/exercises", icon: Dumbbell },
     { title: t('meals'), url: "/meals", icon: Utensils },
@@ -77,7 +80,14 @@ export default function AppSidebar() {
     { title: "Ma Montre", url: "/watch-pairing", icon: Watch },
   ];
 
-  if (isCoach) {
+  // Filtrage si on est en vue Coach sur un client
+  let items = allItems;
+  if (isCoach && isCoachView) {
+    const allowedUrls = ["/", "/exercises", "/meals", "/session", "/performance", "/nutrition"];
+    items = allItems.filter(item => allowedUrls.includes(item.url));
+  }
+
+  if (isCoach && !isCoachView) {
       items.push({ title: t('finance'), url: "/coach/payments", icon: CreditCard });
   }
 
@@ -134,14 +144,16 @@ export default function AppSidebar() {
 
       <SidebarFooter className="border-t border-[#7b2cbf]/20 p-4">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip={t('profile')} className="hover:bg-[#7b2cbf]/20 hover:text-white text-gray-300">
-                <Link to="/profile">
-                    <User />
-                    <span>{t('profile')}</span>
-                </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          {!isCoachView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip={t('profile')} className="hover:bg-[#7b2cbf]/20 hover:text-white text-gray-300">
+                  <Link to="/profile">
+                      <User />
+                      <span>{t('profile')}</span>
+                  </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
           
           <SidebarMenuItem>
             <SidebarMenuButton 

@@ -18,11 +18,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { 
   MapPin, Search, Star, Globe, Loader2, CheckCircle, ExternalLink, 
-  Sparkles, Handshake, LayoutGrid, Play, Image as ImageIcon, Upload, Plus, MessageSquare
+  Sparkles, Handshake, LayoutGrid, Play, Image as ImageIcon, Upload, Plus, MessageSquare,
+  Calendar, Clock, CreditCard, Tag, Percent, User, Users, Laptop, Zap, Heart, Dumbbell, Flame, Activity
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next'; 
 import { sendNotification } from '@/lib/notifications';
+import { calculateDiscountedPrice, getCurrencyFromLocation } from '@/lib/coachPrice';
+import { SERVICE_CATEGORIES, DAYS } from './Profile';
 
 const SPORTS_LIST = [
   "Musculation", "CrossFit", "Yoga", "Pilates", "Boxe", "MMA",
@@ -46,6 +49,8 @@ const CoachProfile = ({ coachData, isOwner, onHire }) => {
   const [uploadFile, setUploadFile] = useState(null);
   const [caption, setCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+
+  const currency = getCurrencyFromLocation(profile.location);
 
   // --- CHARGEMENT DES POSTS ---
   useEffect(() => {
@@ -113,25 +118,33 @@ const CoachProfile = ({ coachData, isOwner, onHire }) => {
 
   return (
     <div className="bg-[#0a0a0f] text-white h-full overflow-y-auto p-8 custom-scrollbar">
-        <div className="flex items-center gap-6">
-            <Avatar className="w-32 h-32 border-4 border-[#1a1a20] ring-2 ring-[#00f5d4]">
+        <div className="flex flex-col md:flex-row items-center gap-8 mb-8">
+            <Avatar className="w-32 h-32 border-4 border-[#1a1a20] ring-2 ring-[#00f5d4] shadow-[0_0_30px_rgba(0,245,212,0.2)]">
               <AvatarImage src={profile.avatar} className="object-cover"/>
-              <AvatarFallback className="bg-[#7b2cbf] text-2xl">{profile.full_name?.[0]}</AvatarFallback>
+              <AvatarFallback className="bg-[#7b2cbf] text-4xl font-black">{profile.full_name?.[0]}</AvatarFallback>
             </Avatar>
-            <div>
-                <h1 className="text-3xl font-black">{profile.full_name}</h1>
-                <p className="text-gray-400">{profile.city || "Ville inconnue"}</p>
-                <div className="flex gap-2 mt-4">
+            <div className="text-center md:text-left flex-1">
+                <h1 className="text-4xl font-black uppercase italic tracking-tighter">{profile.full_name}</h1>
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-2">
+                  <Badge className="bg-[#7b2cbf]/20 text-[#00f5d4] border-[#7b2cbf]/50 font-black">COACH ÉLITE</Badge>
+                  {profile.location?.city && (
+                    <div className="flex items-center gap-1 text-gray-400 text-xs font-bold uppercase">
+                      <MapPin size={12} className="text-red-500" /> {profile.location.city}, {profile.location.district}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2 mt-6 justify-center md:justify-start">
                     {isOwner ? (
-                       <Button onClick={() => setIsEditing(!isEditing)} className="bg-[#7b2cbf] text-white h-8 text-xs">{isEditing ? 'Annuler' : 'Modifier'}</Button>
+                       <Button onClick={() => setIsEditing(!isEditing)} className="bg-[#7b2cbf] hover:bg-[#9d4edd] text-white rounded-full px-6 transition-all duration-300 h-10">{isEditing ? 'Annuler' : 'Modifier'}</Button>
                     ) : (
-                       <Button onClick={onHire} className="bg-[#00f5d4] text-black font-bold h-8 text-xs hover:scale-105 transition"><Handshake size={14} className="mr-2"/> {t('hire')}</Button>
+                       <Button onClick={onHire} className="bg-[#00f5d4] text-black font-black uppercase italic px-8 h-10 rounded-full hover:scale-105 transition shadow-[0_0_20px_rgba(0,245,212,0.3)]"><Handshake size={18} className="mr-2"/> {t('hire')}</Button>
                     )}
                     {isOwner && (
                         <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-                            <DialogTrigger asChild><Button size="sm" className="bg-[#00f5d4] text-black h-8 text-xs font-bold"><Upload size={14} className="mr-2"/> Post</Button></DialogTrigger>
-                            <DialogContent className="bg-[#1a1a20] border-gray-800 text-white"><DialogHeader><DialogTitle>{t('new_post')}</DialogTitle></DialogHeader>
-                                <div className="space-y-4 py-4"><div className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer relative"><input type="file" className="absolute inset-0 opacity-0" onChange={(e) => setUploadFile(e.target.files[0])} /><Upload className="mx-auto mb-2 text-gray-500"/><p className="text-sm text-gray-400">{uploadFile ? uploadFile.name : t('drag_drop_media')}</p></div><Input placeholder={t('caption_placeholder')} value={caption} onChange={(e) => setCaption(e.target.value)} className="bg-black border-gray-700"/><Button onClick={handleDirectUpload} disabled={!uploadFile || isUploading} className="w-full bg-[#00f5d4] text-black font-bold">{t('publish')}</Button></div>
+                            <DialogTrigger asChild><Button size="sm" className="bg-white/10 hover:bg-white/20 text-white h-10 px-6 rounded-full font-bold"><Plus size={18} className="mr-2"/> Nouveau Post</Button></DialogTrigger>
+                            <DialogContent className="bg-[#1a1a20] border-gray-800 text-white shadow-2xl rounded-3xl"><DialogHeader><DialogTitle className="text-2xl font-black italic uppercase tracking-tighter">{t('new_post')}</DialogTitle></DialogHeader>
+                                <div className="space-y-4 py-4"><div className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer relative hover:border-[#00f5d4]/50 transition-colors"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setUploadFile(e.target.files[0])} /><Upload className="mx-auto mb-2 text-gray-500"/><p className="text-sm text-gray-400 font-bold uppercase tracking-widest">{uploadFile ? uploadFile.name : t('drag_drop_media')}</p></div><Input placeholder={t('caption_placeholder')} value={caption} onChange={(e) => setCaption(e.target.value)} className="bg-black/50 border-gray-700 rounded-xl h-12"/><Button onClick={handleDirectUpload} disabled={!uploadFile || isUploading} className="w-full bg-[#00f5d4] text-black font-black uppercase italic h-12 rounded-xl shadow-[0_0_20px_rgba(0,245,212,0.2)]">{isUploading ? <Loader2 className="animate-spin" /> : t('publish')}</Button></div>
                             </DialogContent>
                         </Dialog>
                     )}
@@ -141,29 +154,154 @@ const CoachProfile = ({ coachData, isOwner, onHire }) => {
         
         {/* Zone Edition */}
         {isEditing && isOwner && (
-            <div className="mt-4 p-4 bg-black/30 rounded-xl space-y-4 border border-gray-800">
-                <Textarea value={editBio} onChange={e => setEditBio(e.target.value)} className="bg-black text-white" placeholder="Bio..."/>
-                <div className="flex gap-4">
-                    <Input value={editSpecialties} onChange={e => setEditSpecialties(e.target.value)} className="bg-black text-white" placeholder="Spécialités"/>
-                    <Input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="bg-black text-white" placeholder="Prix"/>
+            <div className="mb-8 p-6 bg-[#1a1a20]/60 rounded-3xl space-y-4 border border-gray-800 shadow-xl">
+                <label className="text-[10px] text-gray-500 uppercase font-black">Bio Professionnelle</label>
+                <Textarea value={editBio} onChange={e => setEditBio(e.target.value)} className="bg-black/40 border-gray-800 text-white rounded-xl min-h-[100px]" placeholder="Présentez-vous..."/>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-500 uppercase font-black">Spécialités (séparées par virgules)</label>
+                      <Input value={editSpecialties} onChange={e => setEditSpecialties(e.target.value)} className="bg-black/40 border-gray-800 text-white rounded-xl h-12" placeholder="Musculation, Perte de poids..."/>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-500 uppercase font-black">Prix d'appel ({currency})</label>
+                      <Input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="bg-black/40 border-gray-800 text-white rounded-xl h-12" placeholder="Ex: 50"/>
+                    </div>
                 </div>
-                <Button onClick={handleSaveProfile} className="w-full bg-[#00f5d4] text-black font-bold">Sauvegarder</Button>
+                <Button onClick={handleSaveProfile} className="w-full bg-[#00f5d4] text-black font-black uppercase italic h-12 rounded-xl">Sauvegarder les modifications</Button>
             </div>
         )}
 
-        <div className="mt-8 border-t border-gray-800 pt-8">
-            <h3 className="text-lg font-bold mb-2">À propos</h3>
-            <p className="text-gray-300 whitespace-pre-wrap">{profile.bio || "Pas de description."}</p>
-        </div>
-        
-        {/* Feed Posts */}
-        <div className="mt-8 grid grid-cols-3 gap-2">
-            {posts.map(post => (
-                <div key={post.id} className="aspect-square bg-gray-900 overflow-hidden relative group">
-                    {post.type === 'video' ? <video src={post.mediaUrl} className="w-full h-full object-cover"/> : <img src={post.mediaUrl} className="w-full h-full object-cover"/>}
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-2 text-xs text-white text-center">{post.caption}</div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-8">
+                {/* BIO */}
+                <section>
+                    <h3 className="text-lg font-black italic uppercase text-gray-400 mb-4 flex items-center gap-2"><Activity size={18} className="text-[#00f5d4]"/> À propos</h3>
+                    <div className="bg-[#1a1a20]/40 p-6 rounded-3xl border border-gray-800">
+                      <p className="text-gray-300 whitespace-pre-wrap leading-relaxed">{profile.bio || "Pas de description."}</p>
+                    </div>
+                </section>
+
+                {/* TARIFS DÉTAILLÉS */}
+                {profile.pricing && profile.pricing.length > 0 && (
+                  <section>
+                    <h3 className="text-lg font-black italic uppercase text-gray-400 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-[#00f5d4]"/> Tarifs & Services</h3>
+                    <div className="grid grid-cols-1 gap-4">
+                      {profile.pricing.map((tier) => (
+                        <div key={tier.id} className="p-5 bg-[#1a1a20]/40 rounded-3xl border border-gray-800 flex flex-col md:flex-row justify-between items-center gap-4 group hover:border-[#00f5d4]/30 transition-all">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-[#00f5d4]/10 rounded-2xl flex items-center justify-center shrink-0">
+                              {SERVICE_CATEGORIES.find(c => c.id === tier.category)?.icon ?
+                                React.createElement(SERVICE_CATEGORIES.find(c => c.id === tier.category).icon, { size: 20, className: "text-[#00f5d4]" }) :
+                                <Zap size={20} className="text-[#00f5d4]"/>
+                              }
+                            </div>
+                            <div>
+                              <p className="font-black uppercase italic tracking-tighter text-white">{tier.description || "Offre Personnalisée"}</p>
+                              <div className="flex gap-2 mt-1">
+                                <Badge variant="outline" className="text-[9px] uppercase font-black border-[#00f5d4]/20 text-[#00f5d4] bg-[#00f5d4]/5">
+                                  {SERVICE_CATEGORIES.find(c => c.id === tier.category)?.label || tier.category}
+                                </Badge>
+                                <Badge variant="outline" className="text-[9px] uppercase font-black border-gray-700 text-gray-400">
+                                  {tier.type === 'subscription' ? 'Mensuel' : 'Séance'}
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-4 text-right">
+                            {tier.discount?.value > 0 ? (
+                              <div className="flex flex-col items-end">
+                                <span className="text-gray-600 line-through text-xs font-bold">{tier.price}{currency}</span>
+                                <span className="text-[#00f5d4] font-black text-2xl tracking-tighter">
+                                  {calculateDiscountedPrice(tier.price, tier.discount).toFixed(2)}{currency}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-white font-black text-2xl tracking-tighter">{tier.price}{currency}</span>
+                            )}
+                            <div className="h-10 w-px bg-gray-800 hidden md:block" />
+                            <Button size="sm" variant="ghost" className="text-xs font-black uppercase text-gray-500 hover:text-[#00f5d4] hover:bg-transparent">Détails</Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* SHOWCASE POSTS */}
+                <section>
+                    <h3 className="text-lg font-black italic uppercase text-gray-400 mb-4 flex items-center gap-2"><ImageIcon size={18} className="text-[#00f5d4]"/> Galerie Pro</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {posts.map(post => (
+                            <div key={post.id} className="aspect-[3/4] bg-[#1a1a20] rounded-2xl overflow-hidden relative group border border-gray-800 shadow-xl">
+                                {post.type === 'video' ? <video src={post.mediaUrl} className="w-full h-full object-cover"/> : <img src={post.mediaUrl} className="w-full h-full object-cover" loading="lazy" />}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                                  <p className="text-xs text-white font-medium line-clamp-2">{post.caption}</p>
+                                </div>
+                            </div>
+                        ))}
+                        {posts.length === 0 && (
+                          <div className="col-span-full py-12 text-center border-2 border-dashed border-gray-800 rounded-3xl opacity-30">
+                            <ImageIcon size={40} className="mx-auto mb-2"/>
+                            <p className="text-xs uppercase font-black">Aucun post public</p>
+                          </div>
+                        )}
+                    </div>
+                </section>
+            </div>
+
+            <div className="space-y-8">
+              {/* DISPONIBILITÉS */}
+              <section>
+                <h3 className="text-sm font-black italic uppercase text-gray-500 mb-4 flex items-center gap-2"><Calendar size={16} className="text-[#9d4edd]"/> Disponibilités</h3>
+                <div className="bg-[#1a1a20]/40 p-6 rounded-3xl border border-gray-800">
+                  <div className="flex flex-wrap gap-2">
+                    {DAYS.map(day => {
+                      const isAvailable = profile.availabilityDays?.includes(day);
+                      return (
+                        <div key={day} className={`w-10 h-10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase border-2 transition-all ${isAvailable ? 'bg-[#9d4edd]/20 border-[#9d4edd] text-white shadow-[0_0_15px_rgba(157,78,221,0.2)]' : 'bg-black/20 border-gray-800 text-gray-700'}`}>
+                          {day}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-4 uppercase font-bold tracking-widest text-center">Jours d'entraînement privilégiés</p>
                 </div>
-            ))}
+              </section>
+
+              {/* LOCALISATION CARD */}
+              <section>
+                <h3 className="text-sm font-black italic uppercase text-gray-500 mb-4 flex items-center gap-2"><MapPin size={16} className="text-red-500"/> Zone d'activité</h3>
+                <div className="bg-[#1a1a20]/40 p-6 rounded-3xl border border-gray-800 space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-red-500/10 rounded-full flex items-center justify-center shrink-0">
+                        <MapPin size={20} className="text-red-500" />
+                      </div>
+                      <div>
+                        <p className="text-white font-black italic">{profile.location?.city || "Non spécifié"}</p>
+                        <p className="text-[10px] text-gray-500 uppercase font-black tracking-widest">{profile.location?.district || profile.location?.country}</p>
+                      </div>
+                    </div>
+                    {profile.location?.formattedAddress && (
+                      <div className="pt-4 border-t border-gray-800/50">
+                        <p className="text-[10px] text-gray-500 leading-relaxed uppercase font-bold">{profile.location.formattedAddress}</p>
+                      </div>
+                    )}
+                </div>
+              </section>
+
+              {/* SPECIALTIES */}
+              <section>
+                <h3 className="text-sm font-black italic uppercase text-gray-500 mb-4 flex items-center gap-2"><Star size={16} className="text-[#fdcb6e]"/> Expertises</h3>
+                <div className="flex flex-wrap gap-2">
+                  {profile.specialties?.map((s, i) => (
+                    <Badge key={i} className="bg-[#7b2cbf]/10 text-[#00f5d4] border border-[#7b2cbf]/30 px-3 py-1 rounded-full text-[10px] font-black uppercase italic tracking-wider">
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
+              </section>
+            </div>
         </div>
     </div>
   );
@@ -206,21 +344,17 @@ export default function Community() {
         internalResults = internalResults.filter(c => c.specialties && c.specialties.includes(selectedSport));
       }
       if (location) {
-        internalResults = internalResults.filter(c => c.city && c.city.toLowerCase().includes(location.toLowerCase()));
+        internalResults = internalResults.filter(c => c.location?.city?.toLowerCase().includes(location.toLowerCase()) || c.city?.toLowerCase().includes(location.toLowerCase()));
       }
       internalResults = internalResults.filter(c => (c.priceStart || 0) <= budget[0]);
 
       setCoaches(internalResults);
 
       // 2. Recherche Externe (Google Places via Gemini)
-      // On lance la recherche externe si une localisation est fournie,
-      // même s'il y a des résultats internes pour enrichir l'offre,
-      // ou spécifiquement si aucun coach interne n'est trouvé.
       if (location && location.length > 2) {
         const sportTerm = selectedSport === 'all' ? 'Fitness' : selectedSport;
         const results = await searchCoachesWithGemini(location, sportTerm, budget[0], sessionType, internalResults);
 
-        // On filtre pour ne garder que ceux marqués 'isExternal' pour l'affichage séparé
         const externalOnly = results.filter(r => r.isExternal).map((c, i) => ({
           ...c,
           coverImage: c.coverImage || `https://source.unsplash.com/random/800x600?${sportTerm},gym&sig=${i}`
@@ -292,7 +426,6 @@ export default function Community() {
     if ("geolocation" in navigator) {
       setIsLoading(true);
       navigator.geolocation.getCurrentPosition(async (position) => {
-        // Simulé pour l'instant ou on pourrait utiliser une API de reverse geocoding
         setTimeout(() => { setLocation("Montréal"); setIsLoading(false); alert(t('geo_simulated')); }, 800);
       }, () => { alert(t('error')); setIsLoading(false); });
     } else { alert("N/A"); }
@@ -334,10 +467,22 @@ export default function Community() {
                 {coaches.map((coach) => (
                   <motion.div key={coach.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
                     <Card className="kb-card bg-[#1a1a20] border-gray-800 hover:border-[#7b2cbf] transition-all cursor-pointer group overflow-hidden h-full" onClick={() => setSelectedCoach(coach)}>
-                      <div className="h-32 bg-gray-800 relative"><img src={coach.coverImage || "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80"} className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" /><div className="absolute top-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[#00f5d4] font-black text-sm">{coach.priceStart ? `${t('rate_start')} ${coach.priceStart}$` : "Sur devis"}</div></div>
+                      <div className="h-32 bg-gray-800 relative">
+                        <img src={coach.coverImage || "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80"} className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" />
+                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[#00f5d4] font-black text-sm">
+                          {coach.priceStart ? `${t('rate_start')} ${coach.priceStart}${getCurrencyFromLocation(coach.location)}` : "Sur devis"}
+                        </div>
+                      </div>
                       <CardContent className="relative pt-0 px-4 pb-4">
-                        <div className="flex justify-between items-end -mt-10 mb-3"><Avatar className="w-20 h-20 border-4 border-[#1a1a20]"><AvatarImage src={coach.avatar} /><AvatarFallback className="bg-[#7b2cbf] text-white font-black">{coach.full_name?.[0] || "C"}</AvatarFallback></Avatar><div className="flex gap-1 flex-wrap justify-end">{coach.specialties?.slice(0, 2).map(s => (<Badge key={s} className="bg-white/10 text-white hover:bg-[#7b2cbf] border-none">{s}</Badge>))}</div></div>
-                        <div><div className="flex justify-between items-center mb-1"><h3 className="text-xl font-bold text-white group-hover:text-[#00f5d4] transition-colors">{coach.full_name || coach.name}</h3><div className="flex items-center text-[#ffd700] text-sm font-bold"><Star size={14} className="fill-[#ffd700] mr-1"/> {coach.rating || "5.0"}</div></div><p className="text-gray-400 text-xs flex items-center gap-1 mb-3"><MapPin size={12}/> {coach.city || "N/A"}</p><p className="text-sm text-gray-300 line-clamp-2">{coach.bio || "..."}</p></div>
+                        <div className="flex justify-between items-end -mt-10 mb-3"><Avatar className="w-20 h-20 border-4 border-[#1a1a20]"><AvatarImage src={coach.avatar} className="object-cover"/><AvatarFallback className="bg-[#7b2cbf] text-white font-black">{coach.full_name?.[0] || "C"}</AvatarFallback></Avatar><div className="flex gap-1 flex-wrap justify-end">{coach.specialties?.slice(0, 2).map(s => (<Badge key={s} className="bg-white/10 text-white hover:bg-[#7b2cbf] border-none text-[10px] uppercase font-black">{s}</Badge>))}</div></div>
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <h3 className="text-xl font-black italic text-white group-hover:text-[#00f5d4] transition-colors uppercase tracking-tighter">{coach.full_name || coach.name}</h3>
+                            <div className="flex items-center text-[#ffd700] text-sm font-bold"><Star size={14} className="fill-[#ffd700] mr-1"/> {coach.rating || "5.0"}</div>
+                          </div>
+                          <p className="text-gray-400 text-[10px] font-black uppercase flex items-center gap-1 mb-3 tracking-widest"><MapPin size={10} className="text-red-500"/> {coach.location?.city || coach.city || "N/A"}</p>
+                          <p className="text-sm text-gray-300 line-clamp-2 italic">{coach.bio || "..."}</p>
+                        </div>
                       </CardContent>
                     </Card>
                   </motion.div>
@@ -370,7 +515,6 @@ export default function Community() {
                                       <div className="flex flex-wrap gap-1 mt-2"><span className="text-[10px] bg-white/5 text-gray-300 px-1.5 py-0.5 rounded">{result.specialty}</span></div>
                                   </div>
                                   
-                                  {/* BOUTON SITE WEB AU LIEU DE HIRE */}
                                   <div className="flex justify-between items-end mt-4 pt-3 border-t border-white/5">
                                       <div className="text-left">
                                           <p className="text-[9px] text-gray-500">Tarif est.</p>
@@ -405,7 +549,7 @@ export default function Community() {
       
       {/* MODAL PROFIL COACH INTERNE SEULEMENT */}
       <Dialog open={!!selectedCoach} onOpenChange={() => setSelectedCoach(null)}>
-          <DialogContent className="bg-transparent border-none text-white max-w-5xl p-0 h-[85vh] overflow-hidden rounded-3xl">
+          <DialogContent className="bg-transparent border-none text-white max-w-5xl p-0 h-[85vh] overflow-hidden rounded-[2.5rem] shadow-2xl">
             {selectedCoach && !selectedCoach.isExternal && (
                 <CoachProfile coachData={selectedCoach} isOwner={false} onHire={() => handleHireCoach(selectedCoach)}/>
             )}
