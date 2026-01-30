@@ -2,14 +2,11 @@ package com.example.kaybeewear.presentation
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.BatteryManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -42,6 +39,9 @@ import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.firebase.database.DataSnapshot
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,7 +77,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private var activeWorkout by mutableStateOf<WorkoutData?>(null)
     private var isCoach by mutableStateOf(false)
     private var currentUserId by mutableStateOf<String?>(null)
-    private var pairingCode by mutableStateOf("")
 
     private lateinit var sensorManager: SensorManager
     private lateinit var healthManager: HealthManager
@@ -98,29 +97,36 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             currentUserId = savedUserId
             healthManager.setUserId(savedUserId)
             startFirebaseSync()
+        } else {
+            requestAutoPairing()
         }
 
         healthManager.monitorFirebaseConnection { connected -> firebaseSocketConnected = connected }
         checkConnection()
 
         setContent {
-            val userId = currentUserId
-            if (userId == null) {
-                // If no userId, showing a waiting screen instead of pairing code
-                WaitingForPhoneScreen()
-            } else {
-                WearApp(
-                    heartRate = heartRate, stepCount = stepCount.toInt(), calories = caloriesBurned.toInt(),
-                    nutrition = todayNutrition, water = waterLevel,
-                    weeklySummary = weeklySummary, monthlySummary = monthlySummary,
-                    activeWorkout = activeWorkout, isCoach = isCoach,
-                    isPhoneConnected = isPhoneConnected, firebaseSocketConnected = firebaseSocketConnected,
-                    firebaseDataFound = firebaseDataFound, lastSync = lastFirebaseSync, currentUid = currentUserId ?: "N/A",
-                    onAddWater = { healthManager.addWater(0.25) }
-                )
-            }
+            WearApp(
+                heartRate = heartRate, stepCount = stepCount.toInt(), calories = caloriesBurned.toInt(),
+                nutrition = todayNutrition, water = waterLevel,
+                weeklySummary = weeklySummary, monthlySummary = monthlySummary,
+                activeWorkout = activeWorkout, isCoach = isCoach,
+                isPhoneConnected = isPhoneConnected, firebaseSocketConnected = firebaseSocketConnected,
+                firebaseDataFound = firebaseDataFound, lastSync = lastFirebaseSync, currentUid = currentUserId ?: "N/A",
+                onAddWater = { healthManager.addWater(0.25) }
+            )
         }
         checkAndRequestPermissions()
+    }
+
+    private fun requestAutoPairing() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val nodes = Tasks.await(Wearable.getNodeClient(this@MainActivity).connectedNodes)
+                for (node in nodes) {
+                    Wearable.getMessageClient(this@MainActivity).sendMessage(node.id, "/request-pair", null)
+                }
+            } catch (e: Exception) { Log.e("KaybeeWear", "Request pair error", e) }
+        }
     }
 
     private fun checkAndRequestPermissions() {
@@ -141,6 +147,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private fun checkConnection() {
         Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
             isPhoneConnected = nodes.isNotEmpty()
+            if (isPhoneConnected && currentUserId == null) requestAutoPairing()
         }
     }
 
@@ -176,21 +183,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 )
             }
             isCoach = snapshot.child("role").getValue(String::class.java) == "coach"
-        } catch (e: Exception) { Log.e("MainActivity", "Error update UI", e) }
-    }
-
-    @Composable
-    fun WaitingForPhoneScreen() {
-        Column(
-            modifier = Modifier.fillMaxSize().background(DarkBg).padding(10.dp),
-            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("KAYBEE FITNESS", color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(10.dp))
-            CircularProgressIndicator(color = GreenAccent, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.height(10.dp))
-            Text("En attente du téléphone...", color = TextGray, fontSize = 9.sp, textAlign = TextAlign.Center)
-        }
+        } catch (e: Exception) { Log.e("KaybeeWear", "Error update UI", e) }
     }
 
     private fun startHealthMonitoring() {
@@ -217,20 +210,23 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         isPhoneConnected = true
         when (messageEvent.path) {
             "/pair" -> {
-                // Automatically pair if message received, bypass code check
-                val data = JSONObject(String(messageEvent.data))
-                val uid = data.getString("userId")
-                currentUserId = uid
-                getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
-                healthManager.setUserId(uid)
-                startFirebaseSync()
-                Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", null)
+                try {
+                    val data = JSONObject(String(messageEvent.data))
+                    val uid = data.getString("userId")
+                    currentUserId = uid
+                    getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
+                    healthManager.setUserId(uid)
+                    startFirebaseSync()
+                    Wearable.getMessageClient(this).sendMessage(messageEvent.sourceNodeId, "/pair-success", "OK".toByteArray())
+                } catch (e: Exception) { Log.e("KaybeeWear", "Pairing error", e) }
             }
         }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event?.sensor?.type == Sensor.TYPE_HEART_RATE) heartRate = event.values[0].toInt()
+        if (event?.sensor?.type == Sensor.TYPE_HEART_RATE && event.values.isNotEmpty()) {
+            heartRate = event.values[0].toInt()
+        }
     }
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }

@@ -6,7 +6,7 @@ import { doc, getDoc, updateDoc, arrayUnion, increment } from 'firebase/firestor
 import { 
   Timer, CheckCircle, ChevronDown, ChevronUp, 
   Play, RotateCcw, Dumbbell, AlertCircle, XCircle, Save, 
-  Trophy, CalendarClock, ArrowRight, Activity
+  Trophy, CalendarClock, ArrowRight, Activity, Flame // J'ai ajouté l'import de Flame ici
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -224,7 +224,8 @@ export default function Session() {
         </div>
 
         <div className="space-y-4">
-            {exercises.map((exo, idx) => {
+            {/* CORRECTION ICI : utilisation de workout.exercises au lieu de exercises */}
+            {workout.exercises.map((exo, idx) => {
                 const isExpanded = expandedExo === idx;
                 const numSets = parseInt(exo.sets) || 0;
                 return (
