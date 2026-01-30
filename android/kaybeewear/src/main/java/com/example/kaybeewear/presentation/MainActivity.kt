@@ -354,9 +354,255 @@ fun StatItem(icon: String, value: String, label: String, color: Color) {
 
 @Composable
 fun SessionPage(workout: WorkoutData?) {
-    Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
-        Text("SESSION", color = Color.White)
+    // Couleurs (Identiques au Web)
+val PurplePrimary = Color(0xFF9d4edd)
+val GreenAccent = Color(0xFF00f5d4)
+val DarkBg = Color(0xFF0a0a0f)
+val CardBg = Color(0xFF1a1a20)
+
+class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
+
+    // État de la session active
+    private var activeSession by mutableStateOf<SessionData?>(null)
+    private var sessionDurationSeconds by mutableLongStateOf(0L)
+    private var isSessionRunning by mutableStateOf(false)
+    
+    // Timer de repos
+    private var restTimeLeft by mutableStateOf(0)
+    private var isResting by mutableStateOf(false)
+    private var restTimer: CountDownTimer? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        Wearable.getMessageClient(this).addListener(this)
+
+        // Timer Global de la séance (1 seconde)
+        Thread {
+            while (true) {
+                Thread.sleep(1000)
+                if (isSessionRunning) {
+                    sessionDurationSeconds++
+                }
+            }
+        }.start()
+
+        setContent {
+            WearApp(
+                activeSession = activeSession,
+                sessionDuration = sessionDurationSeconds,
+                restTime = restTimeLeft,
+                isResting = isResting,
+                onStartRest = { duration -> startRestTimer(duration) },
+                onStopSession = { stopSession() },
+                onUpdateSet = { exoIdx, setIdx, weight, reps, done -> updateSetData(exoIdx, setIdx, weight, reps, done) }
+            )
+        }
     }
+
+    // --- GESTION DES MESSAGES (SYNC WEB -> MONTRE) ---
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        if (messageEvent.path == "/start-session") {
+            val jsonString = String(messageEvent.data)
+            parseSessionData(jsonString)
+        } else if (messageEvent.path == "/stop-session") {
+            stopSession()
+        }
+    }
+
+    private fun parseSessionData(json: String) {
+        try {
+            val root = JSONObject(json)
+            val name = root.optString("name", "Séance")
+            val exosArray = root.getJSONArray("exercises")
+            val exercisesList = mutableListOf<SessionExercise>()
+
+            for (i in 0 until exosArray.length()) {
+                val exo = exosArray.getJSONObject(i)
+                val setsCount = exo.optInt("sets", 3)
+                val setsList = mutableListOf<SessionSet>()
+                for (j in 0 until setsCount) {
+                    setsList.add(SessionSet(
+                        weight = exo.optDouble("weight", 0.0).toFloat(),
+                        reps = exo.optInt("reps", 10)
+                    ))
+                }
+                exercisesList.add(SessionExercise(
+                    name = exo.optString("name", "Exercice"),
+                    sets = setsList
+                ))
+            }
+            
+            // Lancement de la séance
+            activeSession = SessionData(name, exercisesList)
+            sessionDurationSeconds = 0
+            isSessionRunning = true
+            
+        } catch (e: Exception) { Log.e("Session", "Error parsing", e) }
+    }
+
+    private fun updateSetData(exoIdx: Int, setIdx: Int, weight: Float, reps: Int, done: Boolean) {
+        activeSession?.let { session ->
+            val exo = session.exercises[exoIdx]
+            val set = exo.sets[setIdx]
+            // Mise à jour de l'état (Compose recomposera l'UI)
+            exo.sets[setIdx] = set.copy(weight = weight, reps = reps, isDone = done)
+        }
+    }
+
+    private fun startRestTimer(duration: Int) {
+        restTimer?.cancel()
+        isResting = true
+        restTimeLeft = duration
+        restTimer = object : CountDownTimer((duration * 1000).toLong(), 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                restTimeLeft = (millisUntilFinished / 1000).toInt()
+            }
+            override fun onFinish() {
+                isResting = false
+                restTimeLeft = 0
+            }
+        }.start()
+    }
+
+    private fun stopSession() {
+        isSessionRunning = false
+        activeSession = null
+        restTimer?.cancel()
+        isResting = false
+    }
+}
+
+// --- DONNÉES (Data Models) ---
+data class SessionData(val name: String, val exercises: List<SessionExercise>)
+data class SessionExercise(val name: String, val sets: MutableList<SessionSet>) // MutableList pour modif dynamique
+data class SessionSet(val weight: Float, val reps: Int, val isDone: Boolean = false)
+
+// --- INTERFACE GRAPHIQUE (UI) ---
+
+@Composable
+fun WearApp(
+    activeSession: SessionData?,
+    sessionDuration: Long,
+    restTime: Int,
+    isResting: Boolean,
+    onStartRest: (Int) -> Unit,
+    onStopSession: () -> Unit,
+    onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit
+) {
+    Scaffold(
+        timeText = { TimeText() }
+    ) {
+        if (activeSession == null) {
+            // Écran d'attente (Pas de séance)
+            Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(10.dp)) {
+                    Text("PRÊT À L'ACTION", color = GreenAccent, fontWeight = FontWeight.Bold)
+                    Text("Lance une séance depuis ton téléphone", color = Color.Gray, fontSize = 10.sp, textAlign = TextAlign.Center)
+                }
+            }
+        } else {
+            // SÉANCE EN COURS
+            ScalingLazyColumn(
+                modifier = Modifier.fillMaxSize().background(DarkBg),
+                anchorType = androidx.wear.compose.foundation.lazy.ScalingLazyListAnchorType.ItemStart
+            ) {
+                // Header: Timer Global + Titre
+                item {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        Text(activeSession.name, color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        Text(
+                            formatDuration(sessionDuration),
+                            color = GreenAccent, fontSize = 24.sp, fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                        if (isResting) {
+                            Button(onClick = {}, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3b82f6)), modifier = Modifier.height(30.dp)) {
+                                Text("REPOS: ${restTime}s", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                // Liste des Exercices
+                itemsIndexed(activeSession.exercises) { exoIdx, exo ->
+                    var isExpanded by remember { mutableStateOf(false) }
+
+                    Card(
+                        onClick = { isExpanded = !isExpanded },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        backgroundPainter = CardDefaults.cardBackgroundPainter(contentColor = CardBg)
+                    ) {
+                        Column {
+                            Text(exo.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            
+                            if (isExpanded) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                exo.sets.forEachIndexed { setIdx, set ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        // Indicateur Set
+                                        Text("${setIdx + 1}", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(15.dp))
+
+                                        // Contrôles Poids / Reps (Simplifiés pour montre)
+                                        // On utilise une logique de Tap pour incrémenter ou appui long pour décrémenter (ou simple UI)
+                                        // Ici version compacte : Bouton Validation change la couleur
+                                        
+                                        CompactSetInput(
+                                            weight = set.weight,
+                                            reps = set.reps,
+                                            isDone = set.isDone,
+                                            onToggle = { 
+                                                onUpdateSet(exoIdx, setIdx, set.weight, set.reps, !set.isDone) 
+                                                if (!set.isDone) onStartRest(90) // Auto rest 90s
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Button(
+                        onClick = onStopSession,
+                        colors = ButtonDefaults.buttonColors(backgroundColor = Color.Red),
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    ) {
+                        Text("TERMINER LA SÉANCE")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactSetInput(weight: Float, reps: Int, isDone: Boolean, onToggle: () -> Unit) {
+    Button(
+        onClick = onToggle,
+        modifier = Modifier.fillMaxWidth().height(35.dp),
+        colors = ButtonDefaults.buttonColors(backgroundColor = if (isDone) GreenAccent else CardBg)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically, 
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("${weight.toInt()}kg", fontSize = 10.sp, color = if(isDone) Color.Black else Color.White)
+            Text("${reps} reps", fontSize = 10.sp, color = if(isDone) Color.Black else Color.White)
+            Text(if(isDone) "OK" else "GO", fontWeight = FontWeight.Black, fontSize = 10.sp, color = if(isDone) Color.Black else PurplePrimary)
+        }
+    }
+}
+
+fun formatDuration(seconds: Long): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return "%02d:%02d".format(m, s)
 }
 
 @Composable

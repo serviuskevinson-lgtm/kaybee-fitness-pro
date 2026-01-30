@@ -62,7 +62,29 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         
         Log.d("WearPlugin", "Plugin Loaded. Step Sensor available: " + (stepCounterSensor != null));
     }
+@Override
+    public void load() {
+        super.load();
+        Wearable.getMessageClient(getContext()).addListener(this);
+    }
 
+    @Override
+    public void onMessageReceived(MessageEvent messageEvent) {
+        String path = messageEvent.getPath();
+        
+        // --- NOUVEAU : Réception de la séance depuis le Web ---
+        if (path.equals("/start-session")) {
+            String dataString = new String(messageEvent.getData());
+            try {
+                // On notifie l'UI Android via un événement broadcast ou un listener
+                // Ici, on simule un event que MainActivity.kt écoutera
+                JSObject ret = new JSObject();
+                ret.put("sessionData", dataString); 
+                notifyListeners("onSessionStart", ret);
+            } catch (Exception e) {
+                Log.e("WearPlugin", "Erreur parsing session", e);
+            }
+        }
     // --- GESTION DE LA CONNEXION MONTRE ---
 
     private void checkWatchConnection() {

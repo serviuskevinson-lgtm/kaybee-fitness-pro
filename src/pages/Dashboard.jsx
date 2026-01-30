@@ -28,7 +28,7 @@ import { generateDailyAccountability } from '@/lib/geminiadvice';
 // --- IMPORTS NATIFS & PLUGINS ---
 import { Capacitor } from '@capacitor/core';
 import { Motion } from '@capacitor/motion';
-import { WearConnectivity } from '@/lib/wear';
+import { WearConnectivity } from '@/lib/wear'; // Assure-toi que ce fichier exporte bien ton plugin
 
 const safe = (val) => (val === null || val === undefined || typeof val === 'object' ? "" : String(val));
 const getTodayString = () => new Date().toISOString().split('T')[0];
@@ -47,7 +47,7 @@ export default function Dashboard() {
   const [hasPendingInvoices, setHasPendingInvoices] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Intelligence dynamique connectée à geminiadvice.js
+  // Intelligence dynamique
   const [intelMode, setIntelMode] = useState("accountability");
   const [isIntelLoading, setIsIntelLoading] = useState(false);
   const [accountability, setAccountability] = useState({
@@ -87,6 +87,28 @@ export default function Dashboard() {
       finally { setIsIntelLoading(false); }
   };
 
+  // --- 1. INITIALISATION DU COMPTEUR NATIF & JUMELAGE MONTRE ---
+  useEffect(() => {
+    if (currentUser?.uid && !isCoachView) {
+        try {
+            console.log("Configuration des périphériques pour :", currentUser.uid);
+
+            // 1. Configurer le TÉLÉPHONE (Mode Fallback)
+            // Permet au téléphone de compter les pas si la montre est absente
+            WearConnectivity.setUserId({ userId: currentUser.uid });
+
+            // 2. Configurer la MONTRE (Jumelage)
+            // Envoie l'ID utilisateur à la montre via Bluetooth pour qu'elle puisse écrire dans Firebase
+            WearConnectivity.pairWatch({ userId: currentUser.uid })
+                .then(() => console.log("Demande de jumelage envoyée à la montre"))
+                .catch(err => console.warn("La montre n'est peut-être pas à portée pour le jumelage immédiat:", err));
+
+        } catch (error) {
+            console.error("Erreur activation Native Plugin:", error);
+        }
+    }
+  }, [currentUser, isCoachView]);
+
   useEffect(() => {
     if (!currentUser) return;
     const targetId = targetUserId || currentUser.uid;
@@ -98,14 +120,10 @@ export default function Dashboard() {
                 const data = profileSnap.data();
                 const today = getTodayString();
 
-                // RESET QUOTIDIEN & ARCHIVAGE NUTRITION
                 if (data.lastActiveDate && data.lastActiveDate !== today && !isCoachView) {
-
-                    // 1. Archiver les données de la veille avant le reset
                     const historyRef = doc(db, "users", targetId, "nutrition_history", data.lastActiveDate);
                     const historySnap = await getDoc(historyRef);
 
-                    // Si pas encore archivé dans nutrition_history, on le fait avec les données actuelles de l'utilisateur
                     if (!historySnap.exists()) {
                         await setDoc(historyRef, {
                             calories: data.dailyCalories || 0,
@@ -123,7 +141,6 @@ export default function Dashboard() {
                         });
                     }
 
-                    // 2. Effectuer le reset pour aujourd'hui
                     const updates = {
                         dailySteps: 0,
                         dailyBurnedCalories: 0,
@@ -168,26 +185,28 @@ export default function Dashboard() {
     };
     initData();
 
+    // --- ÉCOUTE DE FIREBASE POUR L'AFFICHAGE ---
     const unsubscribe = onValue(ref(rtdb, `users/${targetId}/live_data`), (snapshot) => {
         const data = snapshot.val();
         if (data) {
             const today = getTodayString();
 
-            // Reset en temps réel si on change de jour pendant que l'app est ouverte
             if (data.date && data.date !== today && !isCoachView) {
-                // On déclenche initData pour gérer l'archivage proprement
                 initData();
                 return;
             }
 
             if (data.source === 'watch') lastWatchUpdate.current = Date.now();
+            
+            // C'est ICI que les chiffres arrivent dans tes widgets
             setLiveStats(prev => ({
                 ...prev,
+                // Priorité à la montre, sinon on prend le max (pour inclure le téléphone)
                 steps: data.source === 'watch' ? Number(data.steps) : Math.max(prev.steps, Number(data.steps) || 0),
                 caloriesBurned: data.source === 'watch' ? Number(data.calories_burned) : Math.max(prev.caloriesBurned, Number(data.calories_burned) || 0),
                 caloriesConsumed: Number(data.calories_consumed) || 0,
                 water: Number(data.water) || 0,
-                heartRate: Number(data.heart_rate) || 0,
+                heartRate: Number(data.heart_rate) || 0, // 0 si téléphone seul (géré par le code Java)
                 macros: data.nutrition || prev.macros
             }));
 
@@ -256,11 +275,13 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* WIDGET POIDS */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#00f5d4] shadow-xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#00f5d4]/5 rounded-full blur-3xl"></div>
                     <div className="flex justify-between items-start mb-4"><div className="flex items-center gap-2"><Target className="text-[#00f5d4]" size={20}/><h3 className="font-bold text-gray-200">{safe(t('weight'))}</h3></div><Badge className={`border-none ${weightDiff < 0 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{Math.abs(weightDiff).toFixed(1)} {safe(userProfile?.weightUnit)}</Badge></div>
                     <div className="flex items-end justify-between"><div><p className="text-4xl font-black text-white">{currentWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{safe(t('current'))}</span></div><div className="text-right"><p className="text-4xl font-black text-[#00f5d4]">{targetWeight}</p><span className="text-xs text-gray-500 uppercase font-bold">{safe(t('target'))}</span></div></div>
                 </div>
+                {/* WIDGET NUTRITION */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border-l-4 border-l-[#7b2cbf] shadow-xl">
                     <div className="flex justify-between items-start mb-4"><div className="flex items-center gap-2"><Utensils className="text-[#7b2cbf]" size={20}/><h3 className="font-bold text-gray-200">Nutrition</h3></div><Badge className="bg-[#7b2cbf]/20 text-[#7b2cbf] border-none">{liveStats.caloriesConsumed} Kcal</Badge></div>
                     <Progress value={(liveStats.caloriesConsumed / 2500) * 100} className="h-2 bg-gray-800 [&>div]:bg-[#7b2cbf]" />
@@ -292,6 +313,7 @@ export default function Dashboard() {
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* WIDGET CALORIES BRÛLÉES (Connecté à liveStats.caloriesBurned) */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 flex items-center justify-between shadow-xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/5 rounded-full blur-3xl group-hover:bg-yellow-500/10 transition-colors"></div>
                     <div className="relative z-10">
@@ -301,6 +323,8 @@ export default function Dashboard() {
                     </div>
                     <Flame className="text-yellow-500 w-10 h-10 group-hover:scale-110 transition-transform relative z-10" />
                 </div>
+                
+                {/* WIDGET POULS (Connecté à liveStats.heartRate) */}
                 <div className="bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 flex items-center justify-between shadow-xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl group-hover:bg-blue-500/10 transition-colors"></div>
                     <div className="relative z-10"><p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Pouls en Direct (⌚)</p><h3 className="text-3xl font-black text-white">{liveStats.heartRate > 0 ? liveStats.heartRate : "--"} <span className="text-sm font-normal text-gray-500">BPM</span></h3></div>
@@ -309,6 +333,7 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* WIDGET PAS (Connecté à liveStats.steps) */}
                 <Card className="bg-[#1a1a20] border-gray-800 shadow-xl"><CardHeader className="pb-2"><CardTitle className="text-white flex items-center gap-2 text-sm font-bold uppercase tracking-widest"><Footprints className="text-[#7b2cbf]"/> {safe(t('steps'))}</CardTitle></CardHeader>
                     <CardContent><h3 className="text-4xl font-black text-white tracking-tighter mb-2">{liveStats.steps.toLocaleString()}</h3><Progress value={(liveStats.steps / 10000) * 100} className="h-2 bg-gray-800 [&>div]:bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4]" /></CardContent>
                 </Card>
