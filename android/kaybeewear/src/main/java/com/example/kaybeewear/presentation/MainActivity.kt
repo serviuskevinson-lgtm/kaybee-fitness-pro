@@ -139,7 +139,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 onAddWater = { healthManager.addWater(0.25) },
                 onStartRest = { duration -> startRestTimer(duration) },
                 onStopSession = { stopSession() },
-                onUpdateSet = { exoIdx, setIdx, weight, reps, done -> updateSetData(exoIdx, setIdx, weight, reps, done) }
+                onUpdateSet = { exoIdx, setIdx, weight, reps, done -> updateSetData(exoIdx, setIdx, weight, reps, done) },
+                onRetryPair = { requestAutoPairing() }
             )
         }
         checkAndRequestPermissions()
@@ -229,26 +230,41 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }
     }
 
+    // Remplace ta fonction onMessageReceived par celle-ci :
     override fun onMessageReceived(messageEvent: MessageEvent) {
+        // LOG 1 : On prouve que le message est physiquement arrivé
+        Log.d("KaybeeWear", "📩 MESSAGE REÇU ! Chemin: ${messageEvent.path}")
+        
         isPhoneConnected = true
+        
         when (messageEvent.path) {
             "/pair" -> {
                 try {
-                    val uid = JSONObject(String(messageEvent.data)).getString("userId")
-                    currentUserId = uid
-                    getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
-                    healthManager.setUserId(uid)
-                    startFirebaseSync()
-                } catch (e: Exception) { Log.e("KaybeeWear", "Pairing error", e) }
+                    val rawData = String(messageEvent.data)
+                    // LOG 2 : On voit ce que le téléphone a envoyé
+                    Log.d("KaybeeWear", "🔑 Données reçues: $rawData")
+
+                    val uid = JSONObject(rawData).getString("userId")
+                    
+                    if (uid.isNotEmpty()) {
+                        Log.d("KaybeeWear", "✅ UID trouvé: $uid")
+                        currentUserId = uid
+                        
+                        // Sauvegarde
+                        getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE)
+                            .edit().putString("userId", uid).apply()
+                            
+                        healthManager.setUserId(uid)
+                        startFirebaseSync()
+                    }
+                } catch (e: Exception) { 
+                    Log.e("KaybeeWear", "❌ Erreur lecture UID", e) 
+                }
             }
-            "/health-data" -> {
-                try {
-                    val data = JSONObject(String(messageEvent.data))
-                    if (data.has("steps")) stepCount = data.getLong("steps")
-                    if (data.has("heart_rate")) heartRate = data.getInt("heart_rate")
-                } catch (e: Exception) { Log.e("KaybeeWear", "Health msg error", e) }
+            "/start-session" -> {
+                Log.d("KaybeeWear", "🏋️ Session reçue")
+                parseSessionData(String(messageEvent.data))
             }
-            "/start-session" -> parseSessionData(String(messageEvent.data))
             "/stop-session" -> stopSession()
         }
     }
@@ -298,19 +314,33 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         isResting = false
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
+   override fun onSensorChanged(event: SensorEvent?) {
         when (event?.sensor?.type) {
-            Sensor.TYPE_HEART_RATE -> if (event.values.isNotEmpty()) heartRate = event.values[0].toInt()
-            Sensor.TYPE_STEP_DETECTOR -> stepCount++
+            Sensor.TYPE_HEART_RATE -> if (event.values.isNotEmpty()) {
+                heartRate = event.values[0].toInt()
+                // On envoie aussi le rythme cardiaque en direct
+                healthManager.syncHeartRateToFirebase(heartRate) 
+            }
+            
+            Sensor.TYPE_STEP_DETECTOR -> {
+                stepCount++
+                // C'EST ICI LE FIX : On crie le nouveau score à Firebase immédiatement !
+                healthManager.syncStepsToFirebase(stepCount)
+            }
+            
             Sensor.TYPE_ACCELEROMETER -> if (event.values.size >= 3) {
                 accelX = event.values[0]
                 accelY = event.values[1]
                 accelZ = event.values[2]
-                healthManager.syncAccelerometerToFirebase(accelX, accelY, accelZ)
+                // (Optionnel) Evite de saturer le réseau avec l'accéléromètre si tu ne t'en sers pas pour le debug
+                // healthManager.syncAccelerometerToFirebase(accelX, accelY, accelZ)
             }
         }
     }
-    override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Not used
+    }
 }
 
 data class ScheduleDay(val day: String, val workout: String)
@@ -326,9 +356,11 @@ fun WearApp(
     activeSession: SessionData?, sessionDuration: Long, restTime: Int, isResting: Boolean,
     isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean,
     lastSync: String, currentUid: String, accel: Triple<Float, Float, Float>,
-    onAddWater: () -> Unit, onStartRest: (Int) -> Unit, onStopSession: () -> Unit, onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit
+    onAddWater: () -> Unit, onStartRest: (Int) -> Unit, onStopSession: () -> Unit,
+    onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit,
+    onRetryPair: () -> Unit
 ) {
-    val pageCount = if (isCoach) 5 else 4 
+    val pageCount = if (isCoach) 5 else 4
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var showDebug by remember { mutableStateOf(false) }
 
@@ -345,7 +377,16 @@ fun WearApp(
             }
             if (showDebug) {
                 Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
-                    ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid, accel) { showDebug = false }
+                    ConnectionDebugPage(
+                        isPhoneConnected,
+                        firebaseSocketConnected,
+                        firebaseDataFound,
+                        lastSync,
+                        currentUid,
+                        accel,
+                        onRetryPair,
+                        onClose = { showDebug = false }
+                    )
                 }
             }
         }
@@ -485,7 +526,16 @@ fun SetItem(exoIdx: Int, setIdx: Int, set: SessionSet, onStartRest: (Int) -> Uni
 }
 
 @Composable
-fun ConnectionDebugPage(isPhone: Boolean, firebaseSocket: Boolean, firebaseData: Boolean, lastSync: String, uid: String, accel: Triple<Float, Float, Float>, onClose: () -> Unit) {
+fun ConnectionDebugPage(
+    isPhone: Boolean, 
+    firebaseSocket: Boolean, 
+    firebaseData: Boolean, 
+    lastSync: String, 
+    uid: String, 
+    accel: Triple<Float, Float, Float>, 
+    onRetryPair: () -> Unit,
+    onClose: () -> Unit
+) {
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg).padding(8.dp)) {
         item { Text("DEBUG CONNEXION", color = GreenAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
         item { DebugRow("Téléphone", isPhone) }
@@ -498,7 +548,12 @@ fun ConnectionDebugPage(isPhone: Boolean, firebaseSocket: Boolean, firebaseData:
                 fontSize = 8.sp, color = PurplePrimary) 
         }
         item {
-            Button(onClick = onClose, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Button(onClick = onRetryPair, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(backgroundColor = PurplePrimary)) {
+                Text("RE-PAIRER", fontSize = 10.sp)
+            }
+        }
+        item {
+            Button(onClick = onClose, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 Text("FERMER", fontSize = 10.sp)
             }
         }

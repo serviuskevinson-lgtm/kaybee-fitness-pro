@@ -19,8 +19,11 @@ import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Node;
 import com.google.android.gms.wearable.Wearable;
 import com.google.firebase.FirebaseApp;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -38,19 +41,20 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     
     private String currentUserId = null;
     private boolean isWatchConnected = false;
+    private ValueEventListener firebaseListener;
     
-    // Pour la logique de calcul journalier
+    // --- VARIABLE ANTI-YOYO ---
+    private long lastFirebaseSteps = 0; 
+
     private SharedPreferences prefs;
     private static final String PREF_NAME = "KaybeePhoneSteps";
     private static final String KEY_OFFSET = "day_offset_steps";
     private static final String KEY_DATE = "last_step_date";
-    private static final String KEY_USER_ID = "userId";
 
     @Override
     public void load() {
         super.load();
         
-        // 1. Init Firebase
         try {
             if (FirebaseApp.getApps(getContext()).isEmpty()) {
                 FirebaseApp.initializeApp(getContext());
@@ -60,95 +64,82 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             Log.e("WearPlugin", "Firebase init error", e);
         }
 
-        // 2. Init SharedPreferences pour sauvegarder les pas
         prefs = getContext().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        this.currentUserId = prefs.getString(KEY_USER_ID, null);
-
-        // 3. Init Capteurs
         sensorManager = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
         
         Wearable.getMessageClient(getContext()).addListener(this);
         checkWatchConnection();
-        
-        Log.d("WearPlugin", "Plugin Loaded. Step Sensor available: " + (stepCounterSensor != null));
     }
 
-    // --- MESSAGERIE (C'est ici que la magie opère) ---
+    // --- ÉCOUTE INTELLIGENTE FIREBASE ---
+    private void startListeningToFirebase() {
+        if (currentUserId == null || firebaseDb == null || firebaseListener != null) return;
 
-    @Override
-    public void onMessageReceived(MessageEvent messageEvent) {
-        if (!isWatchConnected) {
-            isWatchConnected = true;
-            stopPhoneStepCounting();
-        }
-        
-        String path = messageEvent.getPath();
+        firebaseListener = new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                try {
+                    Object stepsVal = snapshot.child("steps").getValue();
+                    // 1. On mémorise la "Vérité" de Firebase pour ne pas l'écraser plus tard
+                    if (stepsVal != null) {
+                        lastFirebaseSteps = ((Number) stepsVal).longValue();
+                    }
 
-        // CAS 1 : La montre demande "C'est qui l'utilisateur ?"
-        if (path.equals("/request-pair")) {
-            if (this.currentUserId != null) {
-                // On répond immédiatement
-                replyWithUserId(messageEvent.getSourceNodeId());
-            } else {
-                // On dit au JS qu'il faut se connecter
-                notifyListeners("onRequestPair", new JSObject());
+                    // 2. On envoie les données à l'interface JS
+                    Object heartVal = snapshot.child("heart_rate").getValue();
+                    JSObject ret = new JSObject();
+                    if (stepsVal != null) ret.put("steps", stepsVal);
+                    if (heartVal != null) ret.put("heart_rate", heartVal);
+                    
+                    notifyListeners("onHealthUpdate", ret);
+                } catch (Exception e) { Log.e("WearPlugin", "Parse Error", e); }
             }
-        }
-        // CAS 2 : Données de session
-        else if (path.equals("/start-session")) {
-             String dataString = new String(messageEvent.getData());
-             JSObject ret = new JSObject();
-             ret.put("sessionData", dataString); 
-             notifyListeners("onSessionStart", ret);
-        }
-        // CAS 3 : Données Santé
-        else if (path.equals("/health-data")) {
-            try {
-                String dataString = new String(messageEvent.getData());
-                JSObject ret = new JSObject(dataString);
-                notifyListeners("onHealthUpdate", ret);
-            } catch (Exception e) {}
-        }
+
+            @Override
+            public void onCancelled(DatabaseError error) {}
+        };
+
+        firebaseDb.child("users").child(currentUserId).child("live_data")
+                  .addValueEventListener(firebaseListener);
     }
 
-    // Petite fonction d'aide pour répondre à la montre
-    private void replyWithUserId(String nodeId) {
-        JSObject data = new JSObject();
-        data.put("userId", this.currentUserId);
-        String dataString = data.toString();
-
-        new Thread(() -> {
-            try {
-                Tasks.await(Wearable.getMessageClient(getContext())
-                        .sendMessage(nodeId, "/pair", dataString.getBytes()));
-                Log.d("WearPlugin", "Auto-paired sent to watch: " + this.currentUserId);
-            } catch (Exception e) { Log.e("WearPlugin", "Pair error", e); }
-        }).start();
-    }
-
-    // --- LOGIQUE PODOMÈTRE TÉLÉPHONE ---
-
-    private void startPhoneStepCounting() {
-        if (stepCounterSensor != null) {
-            sensorManager.registerListener(this, stepCounterSensor, SensorManager.SENSOR_DELAY_NORMAL);
-        }
-    }
-
-    private void stopPhoneStepCounting() {
-        if (sensorManager != null) {
-            sensorManager.unregisterListener(this);
-        }
-    }
+    // --- PODOMÈTRE TÉLÉPHONE SÉCURISÉ ---
 
     @Override
     public void onSensorChanged(SensorEvent event) {
+        if (isWatchConnected) return; // Si montre là, on ne touche à rien
+        
         if (event.sensor.getType() == Sensor.TYPE_STEP_COUNTER) {
             long rawSensorSteps = (long) event.values[0];
             long todaySteps = calculateDailySteps(rawSensorSteps);
             syncPhoneStepsToFirebase(todaySteps);
         }
     }
+
+    private void syncPhoneStepsToFirebase(long steps) {
+        if (currentUserId == null || firebaseDb == null || isWatchConnected) return;
+
+        // --- SÉCURITÉ ANTI-YOYO ---
+        // Si le téléphone veut envoyer moins de pas que ce qu'il y a déjà, on bloque !
+        // (Sauf si c'est un nouveau jour et qu'on repart à zéro)
+        if (steps < lastFirebaseSteps && lastFirebaseSteps > 100) {
+            Log.d("WearPlugin", "⛔ Ignoré: Téléphone (" + steps + ") < Firebase (" + lastFirebaseSteps + ")");
+            return;
+        }
+        // --------------------------
+
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
+        Map<String, Object> updates = new HashMap<>();
+        updates.put("steps", steps);
+        updates.put("source", "phone");
+        updates.put("date", today);
+        updates.put("last_update", System.currentTimeMillis());
+
+        firebaseDb.child("users").child(currentUserId).child("live_data").updateChildren(updates);
+    }
+
+    // --- AUTRES FONCTIONS (Standard) ---
 
     private long calculateDailySteps(long rawSteps) {
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
@@ -168,26 +159,17 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         return rawSteps - offset;
     }
 
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
-
-    // --- FIREBASE SYNC ---
-
-    private void syncPhoneStepsToFirebase(long steps) {
-        if (currentUserId == null || firebaseDb == null) return;
-        if (isWatchConnected) return; 
-
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
-        Map<String, Object> updates = new HashMap<>();
-        updates.put("steps", steps);
-        updates.put("source", "phone");
-        updates.put("date", today);
-        updates.put("last_update", System.currentTimeMillis());
-
-        firebaseDb.child("users").child(currentUserId).child("live_data").updateChildren(updates);
+    private void startPhoneStepCounting() {
+        if (stepCounterSensor != null && !isWatchConnected) {
+            sensorManager.registerListener(this, stepCounterSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
     }
 
-    // --- GESTION CONNEXION ---
+    private void stopPhoneStepCounting() {
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
+    }
 
     private void checkWatchConnection() {
         Wearable.getNodeClient(getContext()).getConnectedNodes()
@@ -195,69 +177,72 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
                 boolean wasConnected = isWatchConnected;
                 isWatchConnected = !nodes.isEmpty();
                 
-                if (wasConnected && !isWatchConnected) {
-                    startPhoneStepCounting();
-                    resetFirebaseBpm();
-                } else if (!wasConnected && isWatchConnected) {
+                if (isWatchConnected) {
                     stopPhoneStepCounting();
-                } else if (!isWatchConnected && currentUserId != null) {
+                } else if (currentUserId != null) {
                     startPhoneStepCounting();
                 }
             });
     }
 
-    private void resetFirebaseBpm() {
-        if (currentUserId == null || firebaseDb == null) return;
-        Map<String, Object> updates = new HashMap<>();
-        updates.put("heart_rate", 0); 
-        updates.put("source", "phone_fallback");
-        firebaseDb.child("users").child(currentUserId).child("live_data").updateChildren(updates);
+    @Override
+    public void onMessageReceived(MessageEvent messageEvent) {
+        if (!isWatchConnected) {
+            isWatchConnected = true;
+            stopPhoneStepCounting();
+        }
+        
+        String path = messageEvent.getPath();
+        if (path.equals("/request-pair")) {
+            if (this.currentUserId != null) replyWithUserId(messageEvent.getSourceNodeId());
+            else notifyListeners("onRequestPair", new JSObject());
+        }
     }
-
-    // --- EXPORTS POUR JS ---
 
     @PluginMethod
     public void setUserId(PluginCall call) {
-        String userId = call.getString("userId");
-        if (userId != null) {
-            this.currentUserId = userId;
-            prefs.edit().putString(KEY_USER_ID, userId).apply();
-        }
+        this.currentUserId = call.getString("userId");
         call.resolve();
-        checkWatchConnection(); 
+        checkWatchConnection();
+        startListeningToFirebase(); // Démarrage de l'écoute
     }
-    
+
     @PluginMethod
     public void pairWatch(PluginCall call) {
         String userId = call.getString("userId");
-        if (userId == null) { call.reject("User ID required"); return; }
-        
+        if (userId == null) { call.reject("ID requis"); return; }
         this.currentUserId = userId; 
-        prefs.edit().putString(KEY_USER_ID, userId).apply();
+        startListeningToFirebase(); // On écoute aussi ici par sécurité
         
         JSObject data = new JSObject();
         data.put("userId", userId);
-        String dataString = data.toString();
-
         new Thread(() -> {
             try {
                 List<Node> nodes = Tasks.await(Wearable.getNodeClient(getContext()).getConnectedNodes());
-                if (nodes.isEmpty()) { call.reject("No watch"); return; }
                 for (Node node : nodes) {
                     Tasks.await(Wearable.getMessageClient(getContext())
-                            .sendMessage(node.getId(), "/pair", dataString.getBytes()));
+                            .sendMessage(node.getId(), "/pair", data.toString().getBytes()));
                 }
                 call.resolve();
             } catch (Exception e) { call.reject(e.getMessage()); }
         }).start();
     }
     
+    private void replyWithUserId(String nodeId) {
+        JSObject data = new JSObject();
+        data.put("userId", this.currentUserId);
+        new Thread(() -> {
+            try {
+                Tasks.await(Wearable.getMessageClient(getContext())
+                        .sendMessage(nodeId, "/pair", data.toString().getBytes()));
+            } catch (Exception e) {}
+        }).start();
+    }
+
     @PluginMethod
     public void sendDataToWatch(PluginCall call) {
         String path = call.getString("path");
         String data = call.getString("data");
-        if (path == null || data == null) { call.reject("Args missing"); return; }
-
         new Thread(() -> {
             try {
                 List<Node> nodes = Tasks.await(Wearable.getNodeClient(getContext()).getConnectedNodes());
@@ -269,4 +254,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             } catch (Exception e) { call.reject(e.getMessage()); }
         }).start();
     }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 }
