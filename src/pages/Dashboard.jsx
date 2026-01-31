@@ -28,7 +28,7 @@ import { generateDailyAccountability } from '@/lib/geminiadvice';
 // --- IMPORTS NATIFS & PLUGINS ---
 import { Capacitor } from '@capacitor/core';
 import { Motion } from '@capacitor/motion';
-import { WearConnectivity } from '@/lib/wear'; // Assure-toi que ce fichier exporte bien ton plugin
+import { WearPlugin } from '@/lib/wear'; // Assure-toi que ce fichier exporte bien ton plugin
 
 const safe = (val) => (val === null || val === undefined || typeof val === 'object' ? "" : String(val));
 const getTodayString = () => new Date().toISOString().split('T')[0];
@@ -95,11 +95,11 @@ export default function Dashboard() {
 
             // 1. Configurer le TÉLÉPHONE (Mode Fallback)
             // Permet au téléphone de compter les pas si la montre est absente
-            WearConnectivity.setUserId({ userId: currentUser.uid });
+            WearPlugin.setUserId({ userId: currentUser.uid });
 
             // 2. Configurer la MONTRE (Jumelage)
             // Envoie l'ID utilisateur à la montre via Bluetooth pour qu'elle puisse écrire dans Firebase
-            WearConnectivity.pairWatch({ userId: currentUser.uid })
+            WearPlugin.pairWatch({ userId: currentUser.uid })
                 .then(() => console.log("Demande de jumelage envoyée à la montre"))
                 .catch(err => console.warn("La montre n'est peut-être pas à portée pour le jumelage immédiat:", err));
 
