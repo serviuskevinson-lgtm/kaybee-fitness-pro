@@ -1,4 +1,6 @@
 apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 android {
     namespace "com.kaybeefitness.app"
@@ -19,26 +21,45 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-}
 
-repositories {
-    flatDir{
-        dirs 'libs'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    buildFeatures {
+        compose true
     }
 }
 
 dependencies {
-    implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation project(':shared')
     implementation project(':capacitor-android')
-    testImplementation "junit:junit:$junitVersion"
-    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
-    implementation 'com.google.android.gms:play-services-wearable:18.1.0'
+    
+    // Added missing appcompat and core-ktx dependencies
+    implementation "androidx.appcompat:appcompat:$rootProject.ext.androidxAppCompatVersion"
+    implementation "androidx.core:core-ktx:$rootProject.ext.androidxCoreVersion"
 
-    // Firebase SDK
-    implementation platform('com.google.firebase:firebase-bom:34.8.0')
-    implementation 'com.google.firebase:firebase-database'
+    // Force version of Activity to avoid compileSdk 35 requirement
+    implementation 'androidx.activity:activity-compose:1.8.2'
+    implementation 'androidx.activity:activity-ktx:1.8.2'
+    implementation 'androidx.activity:activity:1.8.2'
+
+    // Compose
+    implementation platform('androidx.compose:compose-bom:2024.09.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.7.0'
+
+    implementation 'com.google.android.gms:play-services-wearable:18.1.0'
+    implementation platform('com.google.firebase:firebase-bom:32.7.2')
+    implementation 'com.google.firebase:firebase-database-ktx'
+    implementation 'com.google.firebase:firebase-auth-ktx'
 }
 
 apply from: 'capacitor.build.gradle'
@@ -50,11 +71,4 @@ try {
     }
 } catch(Exception e) {
     logger.warn("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
-}
-
-configurations.all {
-    resolutionStrategy {
-        force 'androidx.activity:activity:1.9.0'
-        force 'androidx.activity:activity-ktx:1.9.0'
-    }
 }

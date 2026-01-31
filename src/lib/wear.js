@@ -1,14 +1,16 @@
 import { registerPlugin } from '@capacitor/core';
 
 // On enregistre le plugin UNE SEULE FOIS ici
-let WearConnectivity;
+let WearPlugin;
 try {
-    WearConnectivity = registerPlugin('WearConnectivity');
+    WearPlugin = registerPlugin('WearPlugin');
 } catch (e) {
-    console.warn("WearConnectivity non disponible");
-    WearConnectivity = {
-        sendDataToWatch: async () => { console.log("Simulated watch data send"); }
+    console.warn("WearPlugin non disponible");
+    WearPlugin = {
+        sendDataToWatch: async () => { console.log("Simulated watch data send"); },
+        setUserId: async () => { console.log("Simulated setUserId"); },
+        pairWatch: async () => { console.log("Simulated pairWatch"); }
     };
 }
 
-export { WearConnectivity };
+export { WearPlugin };

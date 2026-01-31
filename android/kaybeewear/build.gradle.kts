@@ -43,6 +43,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation("com.google.android.gms:play-services-wearable:18.1.0")
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.compose.ui:ui")

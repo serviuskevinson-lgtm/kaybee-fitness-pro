@@ -33,22 +33,30 @@ class HealthManager(private val context: Context) {
     
     private var database: DatabaseReference? = null
     private var userId: String? = null
+    
+    private var lastAccelSync = 0L
+    private val ACCEL_SYNC_INTERVAL_MS = 200L
 
     init {
         try {
-            if (FirebaseApp.getApps(context).isNotEmpty()) {
-                val fbInstance = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/")
-                database = fbInstance.reference
-                fbInstance.goOnline()
+            // CORRECTION : Si Firebase n'est pas initialisé, on le force !
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
             }
+
+            // Maintenant on est sûr que ça existe, on se connecte
+            val fbInstance = FirebaseDatabase.getInstance("https://kaybee-fitness-default-rtdb.firebaseio.com/")
+            database = fbInstance.reference
+            fbInstance.goOnline()
+
+            Log.d("HealthManager", "Firebase initialisé avec succès")
         } catch (e: Exception) {
-            Log.e("HealthManager", "Failed to initialize Firebase Database", e)
+            Log.e("HealthManager", "Erreur critique Firebase", e)
         }
     }
 
     fun setUserId(id: String) {
         this.userId = id
-        // On laisse Firebase gérer la connexion normalement sans forcer le mode de synchro brute
     }
 
     private val heartRateCallback = object : MeasureCallback {
@@ -72,6 +80,31 @@ class HealthManager(private val context: Context) {
             "heart_rate" to bpm,
             "source" to "watch",
             "timestamp" to ServerValue.TIMESTAMP
+        )
+        database?.child("users")?.child(uid)?.child("live_data")?.updateChildren(updates)
+    }
+
+    fun syncAccelerometerToFirebase(x: Float, y: Float, z: Float) {
+        val uid = userId ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastAccelSync < ACCEL_SYNC_INTERVAL_MS) return
+        
+        lastAccelSync = now
+        val updates = mapOf(
+            "accel_x" to x,
+            "accel_y" to y,
+            "accel_z" to z,
+            "last_update" to ServerValue.TIMESTAMP
+        )
+        database?.child("users")?.child(uid)?.child("live_data")?.updateChildren(updates)
+    }
+
+    fun syncStepsToFirebase(steps: Long) {
+        val uid = userId ?: return
+        val updates = mapOf(
+            "steps" to steps,
+            "source" to "watch",
+            "last_update" to ServerValue.TIMESTAMP
         )
         database?.child("users")?.child(uid)?.child("live_data")?.updateChildren(updates)
     }
