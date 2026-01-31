@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useTranslation } from 'react-i18next';
-import { WearConnectivity } from '@/lib/wear';
+import { WearPlugin } from '@/lib/wear';
 import { format, isSameDay, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -106,7 +106,7 @@ export default function Session() {
                 weight: parseFloat(e.weight || 0)
             }))
         };
-        try { await WearConnectivity.sendDataToWatch({ path: "/start-session", data: JSON.stringify(watchData) }); } catch (e) {}
+        try { await WearPlugin.sendDataToWatch({ path: "/start-session", data: JSON.stringify(watchData) }); } catch (e) {}
     }
   };
 
@@ -153,7 +153,7 @@ export default function Session() {
         const historyItem = { id: Date.now().toString(), name: workout.name, date: new Date().toISOString(), duration: sessionStats.time, volume: sessionStats.volume, calories: sessionStats.calories, totalSets: sessionStats.sets, type: 'workout', logs: sessionLogs };
         const userRef = doc(db, "users", currentUser.uid);
         await updateDoc(userRef, { history: arrayUnion(historyItem), workoutsCompleted: increment(1), points: increment(sessionStats.sets * 5 + 50), totalVolume: increment(sessionStats.volume), dailyBurnedCalories: increment(sessionStats.calories), lastActiveDate: format(new Date(), 'yyyy-MM-dd') });
-        try { await WearConnectivity.sendDataToWatch({ path: "/stop-session", data: "{}" }); } catch(e){}
+        try { await WearPlugin.sendDataToWatch({ path: "/stop-session", data: "{}" }); } catch(e){}
         navigate('/dashboard'); 
     } catch (e) { console.error(e); setIsSaving(false); }
   };

@@ -26,7 +26,7 @@ import { useNavigate } from 'react-router-dom';
 import { autoBuildWorkoutsWithGemini } from '@/lib/geminiexercices';
 import { format, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { WearConnectivity } from '@/lib/wear';
+import { WearPlugin } from '@/lib/wear';
 
 // --- CONFIGURATION ---
 const ITEMS_PER_PAGE = 24;
@@ -275,7 +275,7 @@ export default function Exercises() {
 
         if (workout.date === todayStr) {
             try {
-                await WearConnectivity.sendDataToWatch({
+                await WearPlugin.sendDataToWatch({
                     path: "/update-complex-data",
                     data: JSON.stringify({
                         calendar: [{ day: "Aujourd'hui", workout: workout.name }],

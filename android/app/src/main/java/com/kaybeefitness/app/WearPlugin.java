@@ -44,6 +44,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     private static final String PREF_NAME = "KaybeePhoneSteps";
     private static final String KEY_OFFSET = "day_offset_steps";
     private static final String KEY_DATE = "last_step_date";
+    private static final String KEY_USER_ID = "userId";
 
     @Override
     public void load() {
@@ -61,6 +62,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
         // 2. Init SharedPreferences pour sauvegarder les pas
         prefs = getContext().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        this.currentUserId = prefs.getString(KEY_USER_ID, null);
 
         // 3. Init Capteurs
         sensorManager = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
@@ -216,7 +218,11 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
     @PluginMethod
     public void setUserId(PluginCall call) {
-        this.currentUserId = call.getString("userId");
+        String userId = call.getString("userId");
+        if (userId != null) {
+            this.currentUserId = userId;
+            prefs.edit().putString(KEY_USER_ID, userId).apply();
+        }
         call.resolve();
         checkWatchConnection(); 
     }
@@ -227,6 +233,8 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         if (userId == null) { call.reject("User ID required"); return; }
         
         this.currentUserId = userId; 
+        prefs.edit().putString(KEY_USER_ID, userId).apply();
+        
         JSObject data = new JSObject();
         data.put("userId", userId);
         String dataString = data.toString();
