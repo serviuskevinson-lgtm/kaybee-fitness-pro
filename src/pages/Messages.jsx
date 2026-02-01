@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
+import { useNavigate } from 'react-router-dom';
 import { db, storage, auth, app } from '@/lib/firebase';
 import { 
   collection, query, where, getDocs, addDoc, updateDoc, 
-  onSnapshot, orderBy, doc, limit, serverTimestamp, getDoc
+  onSnapshot, orderBy, doc, limit, serverTimestamp, getDoc, or
 } from 'firebase/firestore';
 import { getDatabase, ref as dbRef, onValue, set, update } from "firebase/database";
 import { ref as sRef, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -26,8 +27,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Messages() {
   const { currentUser } = useAuth();
-  const { isCoachView, targetUserId } = useClient();
+  const { isCoachView, targetUserId, setTargetUserId } = useClient();
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const rtdb = getDatabase(app);
 
   // Interface States
@@ -48,6 +50,7 @@ export default function Messages() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // --- LIVE SYNC POUR LE COACH ---
@@ -61,26 +64,46 @@ export default function Messages() {
     }
   }, [isCoachView, targetUserId]);
 
-  // --- 1. RECHERCHE LIVE (ULTRA RÉACTIVE) ---
+  // --- 1. RECHERCHE LIVE (ULTRA RÉACTIVE & ROBUSTE) ---
   useEffect(() => {
     const performSearch = async () => {
-      if (searchTerm.trim().length >= 2) {
-        const q = query(
-          collection(db, "users"),
-          where("full_name", ">=", searchTerm),
-          where("full_name", "<=", searchTerm + '\uf8ff'),
-          limit(10)
-        );
-        const snap = await getDocs(q);
-        const results = snap.docs
-          .map(d => ({ uid: d.id, ...d.data() }))
-          .filter(u => u.uid !== currentUser.uid);
-        setSearchResults(results);
+      const term = searchTerm.trim().toLowerCase();
+      if (term.length >= 2) {
+        try {
+          // Recherche par nom complet
+          const qName = query(
+            collection(db, "users"),
+            where("full_name", ">=", term.toUpperCase()),
+            where("full_name", "<=", term.toUpperCase() + '\uf8ff'),
+            limit(10)
+          );
+          // Recherche par pseudo
+          const qUser = query(
+            collection(db, "users"),
+            where("username", ">=", term),
+            where("username", "<=", term + '\uf8ff'),
+            limit(10)
+          );
+
+          const [snapName, snapUser] = await Promise.all([getDocs(qName), getDocs(qUser)]);
+
+          const results = [];
+          snapName.forEach(d => results.push({ uid: d.id, ...d.data() }));
+          snapUser.forEach(d => results.push({ uid: d.id, ...d.data() }));
+
+          // Déduplication et filtrage de l'utilisateur actuel
+          const uniqueResults = [...new Map(results.map(u => [u.uid, u])).values()]
+            .filter(u => u.uid !== currentUser.uid);
+
+          setSearchResults(uniqueResults);
+        } catch (err) {
+          console.error("Erreur recherche:", err);
+        }
       } else {
         setSearchResults([]);
       }
     };
-    const timeoutId = setTimeout(performSearch, 150);
+    const timeoutId = setTimeout(performSearch, 300);
     return () => clearTimeout(timeoutId);
   }, [searchTerm, currentUser]);
 
@@ -88,17 +111,14 @@ export default function Messages() {
   useEffect(() => {
     if (!currentUser) return;
 
-    // Écouter les requêtes d'amis
     const unsubFriendReqs = onSnapshot(query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "pending")), (snap) => {
       setFriendRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // Écouter les demandes de coaching
     const unsubCoachReqs = onSnapshot(query(collection(db, "notifications"), where("recipientId", "==", currentUser.uid), where("type", "==", "coach_request"), where("status", "==", "unread")), (snap) => {
       setCoachRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // Contacts Update
     const updateAllContacts = async () => {
       try {
         const [s1, s2, sClients, sMe] = await Promise.all([
@@ -126,7 +146,6 @@ export default function Messages() {
     updateAllContacts();
     const unsubMe = onSnapshot(doc(db, "users", currentUser.uid), updateAllContacts);
 
-    // Messages d'inconnus
     const unsubUnknown = onSnapshot(query(collection(db, "messages"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
       const allMsgs = snap.docs.map(d => d.data());
       const unknown = [];
@@ -157,15 +176,15 @@ export default function Messages() {
   }, [selectedFriend, currentUser]);
 
   // --- ACTIONS ---
-  const sendMessage = async (txt = messageText, img = null) => {
-    if ((!txt.trim() && !img) || !selectedFriend || !currentUser) return;
+  const sendMessage = async (txt = messageText, img = null, file = null) => {
+    if ((!txt.trim() && !img && !file) || !selectedFriend || !currentUser) return;
     const conversationId = [currentUser.uid, selectedFriend.uid].sort().join('_');
     const meSnap = await getDoc(doc(db, "users", currentUser.uid));
     const myAvatar = meSnap.data()?.avatar || "";
 
     await addDoc(collection(db, "messages"), {
       conversationId, senderId: currentUser.uid, senderName: currentUser.displayName || "Moi",
-      senderAvatar: myAvatar, text: txt, mediaUrl: img, createdAt: serverTimestamp(), read: false
+      senderAvatar: myAvatar, text: txt, mediaUrl: img, fileUrl: file, createdAt: serverTimestamp(), read: false
     });
     await sendNotification(selectedFriend.uid, currentUser.uid, currentUser.displayName || "Moi", "Message 💬", txt.substring(0, 30), "message");
     setMessageText('');
@@ -182,15 +201,17 @@ export default function Messages() {
     alert("Demande envoyée !");
   };
 
-  const handleFileUpload = async (e) => {
+  const handleFileUpload = async (e, type = 'image') => {
     const file = e.target.files[0];
     if (!file) return;
     setIsUploading(true);
     try {
-      const storageRef = sRef(storage, `chat/${currentUser.uid}/${Date.now()}_${file.name}`);
+      const folder = type === 'image' ? 'chat_images' : 'chat_files';
+      const storageRef = sRef(storage, `${folder}/${currentUser.uid}/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
-      sendMessage("Image", url);
+      if (type === 'image') sendMessage("Image", url);
+      else sendMessage(`Fichier: ${file.name}`, null, url);
     } catch (err) { console.error(err); }
     setIsUploading(false);
   };
@@ -206,6 +227,12 @@ export default function Messages() {
       !friendRequests.some(r => r.fromId === res.uid)
     );
   }, [searchResults, friendList, friendRequests]);
+
+  const openPerformance = () => {
+    if (!selectedFriend) return;
+    setTargetUserId(selectedFriend.uid);
+    navigate('/performance');
+  };
 
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col md:flex-row gap-6 pb-6 animate-in fade-in duration-700">
@@ -244,7 +271,6 @@ export default function Messages() {
                />
            </div>
 
-           {/* SYNC BUTTONS */}
            <div className="grid grid-cols-2 gap-2">
                 <Button variant="outline" size="sm" onClick={() => startSync('Facebook')} className="h-10 bg-blue-600/10 border-blue-600/30 text-blue-400 hover:bg-blue-600 hover:text-white rounded-xl gap-2 text-[10px] font-black uppercase">
                     <Facebook size={14}/> Facebook
@@ -316,7 +342,7 @@ export default function Messages() {
             </div>
           </TabsContent>
 
-          <TabsContent value="requests" className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+          <TabsContent value="requests" className="flex-1 overflow-y-auto px-4 py-4 space-y-6 custom-scrollbar">
             {/* MESSAGES D'INCONNUS */}
             {unknownConversations.length > 0 && (
                 <div className="space-y-3">
@@ -377,7 +403,7 @@ export default function Messages() {
                                 <p className="font-black text-white text-xs uppercase italic tracking-tighter">{req.fromName}</p>
                             </div>
                             <div className="flex gap-1">
-                                <Button size="icon" variant="ghost" className="text-green-400 hover:bg-green-400/20 rounded-full h-9 w-9" onClick={() => acceptFriend(req.id)}><Check size={20}/></Button>
+                                <Button size="icon" variant="ghost" className="text-green-400 hover:bg-green-400/20 rounded-full h-9 w-9" onClick={() => updateDoc(doc(db, "friend_requests", req.id), { status: "accepted" })}><Check size={20}/></Button>
                                 <Button size="icon" variant="ghost" className="text-red-400 hover:bg-red-400/20 rounded-full h-9 w-9"><X size={20}/></Button>
                             </div>
                         </div>
@@ -409,8 +435,8 @@ export default function Messages() {
                 </div>
               </div>
               <div className="flex gap-3">
-                  <Button variant="ghost" size="icon" className="text-gray-500 hover:text-white rounded-xl h-10 w-10 bg-white/5 border border-white/5"><Activity size={18}/></Button>
-                  <Button variant="ghost" size="icon" className="text-gray-500 hover:text-white rounded-xl h-10 w-10 bg-white/5 border border-white/5"><Sparkles size={18}/></Button>
+                  <Button variant="ghost" size="icon" onClick={openPerformance} title="Performance & Santé" className="text-gray-500 hover:text-white rounded-xl h-10 w-10 bg-white/5 border border-white/5 transition-all hover:bg-[#00f5d4]/10 hover:border-[#00f5d4]/30"><Activity size={18}/></Button>
+                  <Button variant="ghost" size="icon" title="AI Coaching Insight" className="text-gray-500 hover:text-white rounded-xl h-10 w-10 bg-white/5 border border-white/5 transition-all hover:bg-[#7b2cbf]/10 hover:border-[#7b2cbf]/30"><Sparkles size={18}/></Button>
               </div>
             </div>
 
@@ -430,12 +456,18 @@ export default function Messages() {
                     {!isMe && !showAvatar && <div className="w-8" />}
 
                     <div className={`max-w-[70%] group relative ${isMe ? 'items-end' : 'items-start'}`}>
-                        <div className={`p-4 rounded-[1.5rem] shadow-2xl transition-all hover:scale-[1.02] ${isMe ? 'bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] text-white rounded-br-none' : 'bg-[#1a1a20] border border-gray-800 text-white rounded-bl-none'}`}>
+                        <div className={`p-4 rounded-[1.5rem] shadow-2xl transition-all hover:scale-[1.02] ${isMe ? 'bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] text-white rounded-br-none shadow-[#7b2cbf]/20' : 'bg-[#1a1a20] border border-gray-800 text-white rounded-bl-none shadow-black/40'}`}>
                           {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
                           {msg.mediaUrl && (
                               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 shadow-xl group-hover:brightness-110 transition-all cursor-pointer" onClick={() => window.open(msg.mediaUrl, '_blank')}>
                                 <img src={msg.mediaUrl} className="max-h-80 w-auto object-cover" alt="Media"/>
                               </div>
+                          )}
+                          {msg.fileUrl && (
+                              <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="mt-3 flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-all">
+                                  <Paperclip size={16} className="text-[#00f5d4]"/>
+                                  <span className="text-[10px] font-black uppercase truncate">{msg.text.replace('Fichier: ', '')}</span>
+                              </a>
                           )}
                           <p className={`text-[8px] mt-2 font-black uppercase opacity-40 tracking-widest ${isMe ? 'text-right' : 'text-left'}`}>
                             {msg.createdAt ? format(msg.createdAt.toDate(), 'HH:mm') : '...'}
@@ -449,12 +481,20 @@ export default function Messages() {
             </div>
 
             <div className="p-5 border-t border-gray-800/50 bg-black/40 backdrop-blur-md">
-              <div className="flex items-center gap-3 bg-[#1a1a20] p-2 rounded-[2rem] border border-gray-700/50 focus-within:border-[#00f5d4] transition-all shadow-inner">
-                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                <Button size="icon" variant="ghost" onClick={() => fileInputRef.current.click()} className="h-10 w-10 rounded-full text-gray-500 hover:text-[#00f5d4] hover:bg-[#00f5d4]/10 shrink-0">
+              <div className="flex items-center gap-3 bg-[#1a1a20] p-2 rounded-[2rem] border border-gray-700/50 focus-within:border-[#00f5d4] transition-all shadow-inner relative">
+
+                {/* Image Upload Input */}
+                <input type="file" ref={imageInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'image')} />
+                {/* File Upload Input */}
+                <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'file')} />
+
+                <Button size="icon" variant="ghost" onClick={() => imageInputRef.current.click()} className="h-10 w-10 rounded-full text-gray-500 hover:text-[#00f5d4] hover:bg-[#00f5d4]/10 shrink-0 transition-colors">
                     {isUploading ? <Loader2 size={20} className="animate-spin text-[#00f5d4]"/> : <ImageIcon size={20}/>}
                 </Button>
-                <Button size="icon" variant="ghost" className="h-10 w-10 rounded-full text-gray-500 hover:text-[#7b2cbf] hover:bg-[#7b2cbf]/10 shrink-0"><Paperclip size={20}/></Button>
+
+                <Button size="icon" variant="ghost" onClick={() => fileInputRef.current.click()} className="h-10 w-10 rounded-full text-gray-500 hover:text-[#7b2cbf] hover:bg-[#7b2cbf]/10 shrink-0 transition-colors">
+                    <Paperclip size={20}/>
+                </Button>
 
                 <input
                   value={messageText}
@@ -464,7 +504,7 @@ export default function Messages() {
                   className="flex-1 bg-transparent border-none text-white focus:ring-0 placeholder:text-gray-600 font-medium px-2 py-3 text-sm focus:outline-none"
                 />
 
-                <Button onClick={() => sendMessage()} disabled={!messageText.trim() && !isUploading} className="bg-[#00f5d4] text-black h-12 w-12 rounded-full shadow-[0_0_20px_rgba(0,245,212,0.4)] hover:scale-110 active:scale-95 transition-all shrink-0">
+                <Button onClick={() => sendMessage()} disabled={(!messageText.trim() && !isUploading)} className="bg-[#00f5d4] text-black h-12 w-12 rounded-full shadow-[0_0_20px_rgba(0,245,212,0.4)] hover:scale-110 active:scale-95 transition-all shrink-0">
                     <Send size={20} className="ml-1"/>
                 </Button>
               </div>
