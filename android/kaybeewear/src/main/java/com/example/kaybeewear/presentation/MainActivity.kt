@@ -10,6 +10,8 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,10 +41,12 @@ import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.ServerValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -55,31 +59,26 @@ val CardBg = Color(0xFF1a1a20)
 
 class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener, SensorEventListener {
 
-    // Données Santé
     private var heartRate by mutableIntStateOf(0)
     private var stepCount by mutableLongStateOf(0L)
     private var caloriesBurned by mutableDoubleStateOf(0.0)
     private var waterLevel by mutableDoubleStateOf(0.0)
     private var todayNutrition by mutableStateOf(NutritionData())
 
-    // Accéléromètre (Debug)
     private var accelX by mutableFloatStateOf(0f)
     private var accelY by mutableFloatStateOf(0f)
     private var accelZ by mutableFloatStateOf(0f)
     
-    // État Connexion
     private var isPhoneConnected by mutableStateOf(false)
     private var lastFirebaseSync by mutableStateOf("Jamais")
     private var firebaseSocketConnected by mutableStateOf(false)
     private var firebaseDataFound by mutableStateOf(false)
 
-    // Agenda
     private val defaultWeekly = listOf(
         ScheduleDay("Lundi", "Repos"), ScheduleDay("Mardi", "Repos"), ScheduleDay("Mercredi", "Repos"),
         ScheduleDay("Jeudi", "Repos"), ScheduleDay("Vendredi", "Repos"), ScheduleDay("Samedi", "Repos"), ScheduleDay("Dimanche", "Repos")
     )
     private var weeklySummary by mutableStateOf<List<ScheduleDay>>(defaultWeekly)
-    private var monthlySummary by mutableStateOf<List<ScheduleDay>>(emptyList())
     private var isCoach by mutableStateOf(false)
     private var currentUserId by mutableStateOf<String?>(null)
 
@@ -117,19 +116,11 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         healthManager.monitorFirebaseConnection { connected -> firebaseSocketConnected = connected }
         checkConnection()
 
-        // Timer de session
-        CoroutineScope(Dispatchers.Default).launch {
-            while (true) {
-                delay(1000)
-                if (isSessionRunning) sessionDurationSeconds++
-            }
-        }
-
         setContent {
             WearApp(
                 heartRate = heartRate, stepCount = stepCount.toInt(), calories = caloriesBurned.toInt(),
                 nutrition = todayNutrition, water = waterLevel,
-                weeklySummary = weeklySummary, monthlySummary = monthlySummary,
+                weeklySummary = weeklySummary,
                 isCoach = isCoach,
                 activeSession = activeSession, sessionDuration = sessionDurationSeconds,
                 restTime = restTimeLeft, isResting = isResting,
@@ -138,8 +129,9 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 accel = Triple(accelX, accelY, accelZ),
                 onAddWater = { healthManager.addWater(0.25) },
                 onStartRest = { duration -> startRestTimer(duration) },
-                onStopSession = { stopSession() },
+                onStopSession = { stopSessionLocally() },
                 onUpdateSet = { exoIdx, setIdx, weight, reps, done -> updateSetData(exoIdx, setIdx, weight, reps, done) },
+                onAdjustWeight = { exoIdx, setIdx, delta -> adjustWeight(exoIdx, setIdx, delta) },
                 onRetryPair = { requestAutoPairing() }
             )
         }
@@ -147,10 +139,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     }
 
     private fun checkAndRequestPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.BODY_SENSORS,
-            Manifest.permission.ACTIVITY_RECOGNITION
-        )
+        val permissions = mutableListOf(Manifest.permission.BODY_SENSORS, Manifest.permission.ACTIVITY_RECOGNITION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.BODY_SENSORS_BACKGROUND)
         }
@@ -183,6 +172,38 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             heartRate = (liveData.child("heart_rate").value as? Number)?.toInt() ?: heartRate
             waterLevel = (liveData.child("water").value as? Number)?.toDouble() ?: waterLevel
             
+            // Sync Session de la RTDB
+            val sessionSnap = liveData.child("session")
+            if (sessionSnap.exists() && sessionSnap.child("active").getValue(Boolean::class.java) == true) {
+                isSessionRunning = true
+                sessionDurationSeconds = (sessionSnap.child("elapsedSeconds").value as? Number)?.toLong() ?: 0L
+                
+                val workoutName = sessionSnap.child("workoutName").getValue(String::class.java) ?: "Séance"
+                val exosSnap = sessionSnap.child("exercises")
+                val logsSnap = sessionSnap.child("logs")
+                
+                val exercisesList = mutableListOf<SessionExercise>()
+                exosSnap.children.forEachIndexed { exoIdx, eSnap ->
+                    val setsCount = (eSnap.child("sets").value as? Number)?.toInt() ?: 3
+                    val repsDefault = (eSnap.child("reps").value as? Number)?.toInt() ?: 10
+                    val weightDefault = (eSnap.child("weight").value as? Number)?.toFloat() ?: 0f
+                    
+                    val setsList = mutableListOf<SessionSet>()
+                    for (setIdx in 0 until setsCount) {
+                        val logKey = "$exoIdx-$setIdx"
+                        val logSnap = logsSnap.child(logKey)
+                        val isDone = logSnap.child("done").getValue(Boolean::class.java) ?: false
+                        val weight = (logSnap.child("weight").value as? Number)?.toFloat() ?: weightDefault
+                        val reps = (logSnap.child("reps").value as? Number)?.toInt() ?: repsDefault
+                        setsList.add(SessionSet(weight, reps, isDone))
+                    }
+                    exercisesList.add(SessionExercise(eSnap.child("name").getValue(String::class.java) ?: "Exo", setsList, (eSnap.child("rest").value as? Number)?.toInt() ?: 60))
+                }
+                activeSession = SessionData(workoutName, exercisesList)
+            } else if (isSessionRunning) {
+                stopSessionLocally()
+            }
+
             val nutrition = liveData.child("nutrition")
             if (nutrition.exists()) {
                 todayNutrition = NutritionData(
@@ -199,13 +220,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     override fun onResume() {
         super.onResume()
         Wearable.getMessageClient(this).addListener(this)
-        
         val sensors = listOf(Sensor.TYPE_HEART_RATE, Sensor.TYPE_STEP_DETECTOR, Sensor.TYPE_ACCELEROMETER)
-        sensors.forEach { type ->
-            sensorManager.getDefaultSensor(type)?.let { 
-                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) 
-            }
-        }
+        sensors.forEach { type -> sensorManager.getDefaultSensor(type)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) } }
         checkConnection()
     }
 
@@ -216,9 +232,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     }
 
     private fun checkConnection() {
-        Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
-            isPhoneConnected = nodes.isNotEmpty()
-        }
+        Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes -> isPhoneConnected = nodes.isNotEmpty() }
     }
 
     private fun requestAutoPairing() {
@@ -230,71 +244,45 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }
     }
 
-    // Remplace ta fonction onMessageReceived par celle-ci :
     override fun onMessageReceived(messageEvent: MessageEvent) {
-        // LOG 1 : On prouve que le message est physiquement arrivé
-        Log.d("KaybeeWear", "📩 MESSAGE REÇU ! Chemin: ${messageEvent.path}")
-        
         isPhoneConnected = true
-        
         when (messageEvent.path) {
             "/pair" -> {
                 try {
-                    val rawData = String(messageEvent.data)
-                    // LOG 2 : On voit ce que le téléphone a envoyé
-                    Log.d("KaybeeWear", "🔑 Données reçues: $rawData")
-
-                    val uid = JSONObject(rawData).getString("userId")
-                    
+                    val uid = JSONObject(String(messageEvent.data)).getString("userId")
                     if (uid.isNotEmpty()) {
-                        Log.d("KaybeeWear", "✅ UID trouvé: $uid")
                         currentUserId = uid
-                        
-                        // Sauvegarde
-                        getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE)
-                            .edit().putString("userId", uid).apply()
-                            
+                        getSharedPreferences("kaybee_prefs", Context.MODE_PRIVATE).edit().putString("userId", uid).apply()
                         healthManager.setUserId(uid)
                         startFirebaseSync()
                     }
-                } catch (e: Exception) { 
-                    Log.e("KaybeeWear", "❌ Erreur lecture UID", e) 
-                }
+                } catch (e: Exception) { Log.e("KaybeeWear", "Pair Error", e) }
             }
-            "/start-session" -> {
-                Log.d("KaybeeWear", "🏋️ Session reçue")
-                parseSessionData(String(messageEvent.data))
-            }
-            "/stop-session" -> stopSession()
+            "/start-session" -> { /* La session est maintenant gérée via RTDB pour plus de fiabilité */ }
+            "/stop-session" -> stopSessionLocally()
         }
-    }
-
-    private fun parseSessionData(json: String) {
-        try {
-            val root = JSONObject(json)
-            val exercisesList = mutableListOf<SessionExercise>()
-            val exosArray = root.getJSONArray("exercises")
-            for (i in 0 until exosArray.length()) {
-                val exo = exosArray.getJSONObject(i)
-                val setsList = mutableListOf<SessionSet>()
-                val setsCount = exo.optInt("sets", 3)
-                for (j in 0 until setsCount) {
-                    setsList.add(SessionSet(exo.optDouble("weight", 0.0).toFloat(), exo.optInt("reps", 10)))
-                }
-                exercisesList.add(SessionExercise(exo.optString("name", "Exo"), setsList))
-            }
-            activeSession = SessionData(root.optString("name", "Séance"), exercisesList)
-            sessionDurationSeconds = 0
-            isSessionRunning = true
-        } catch (e: Exception) { Log.e("KaybeeWear", "Session Parse Error", e) }
     }
 
     private fun updateSetData(exoIdx: Int, setIdx: Int, weight: Float, reps: Int, done: Boolean) {
-        activeSession?.let { session ->
-            val exo = session.exercises[exoIdx]
-            exo.sets[setIdx] = exo.sets[setIdx].copy(weight = weight, reps = reps, isDone = done)
-            activeSession = session.copy()
+        val uid = currentUserId ?: return
+        val logKey = "$exoIdx-$setIdx"
+        val updates = mapOf(
+            "done" to done,
+            "weight" to weight,
+            "reps" to reps,
+            "timestamp" to ServerValue.TIMESTAMP
+        )
+        healthManager.updateSessionLog(uid, logKey, updates)
+        
+        if (done) {
+            val restDuration = activeSession?.exercises?.getOrNull(exoIdx)?.rest ?: 60
+            startRestTimer(restDuration)
         }
+    }
+
+    private fun adjustWeight(exoIdx: Int, setIdx: Int, delta: Float) {
+        val set = activeSession?.exercises?.getOrNull(exoIdx)?.sets?.getOrNull(setIdx) ?: return
+        updateSetData(exoIdx, setIdx, (set.weight + delta).coerceAtLeast(0f), set.reps, set.isDone)
     }
 
     private fun startRestTimer(duration: Int) {
@@ -303,11 +291,24 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         restTimeLeft = duration
         restTimer = object : CountDownTimer((duration * 1000).toLong(), 1000) {
             override fun onTick(ms: Long) { restTimeLeft = (ms / 1000).toInt() }
-            override fun onFinish() { isResting = false; restTimeLeft = 0 }
+            override fun onFinish() { 
+                isResting = false; restTimeLeft = 0
+                vibrate(500)
+            }
         }.start()
     }
 
-    private fun stopSession() {
+    private fun vibrate(duration: Long) {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(duration)
+        }
+    }
+
+    private fun stopSessionLocally() {
         isSessionRunning = false
         activeSession = null
         restTimer?.cancel()
@@ -318,50 +319,40 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         when (event?.sensor?.type) {
             Sensor.TYPE_HEART_RATE -> if (event.values.isNotEmpty()) {
                 heartRate = event.values[0].toInt()
-                // On envoie aussi le rythme cardiaque en direct
                 healthManager.syncHeartRateToFirebase(heartRate) 
             }
-            
             Sensor.TYPE_STEP_DETECTOR -> {
                 stepCount++
-                // C'EST ICI LE FIX : On crie le nouveau score à Firebase immédiatement !
                 healthManager.syncStepsToFirebase(stepCount)
             }
-            
             Sensor.TYPE_ACCELEROMETER -> if (event.values.size >= 3) {
-                accelX = event.values[0]
-                accelY = event.values[1]
-                accelZ = event.values[2]
-                // (Optionnel) Evite de saturer le réseau avec l'accéléromètre si tu ne t'en sers pas pour le debug
-                // healthManager.syncAccelerometerToFirebase(accelX, accelY, accelZ)
+                accelX = event.values[0]; accelY = event.values[1]; accelZ = event.values[2]
             }
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // Not used
-    }
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
 
 data class ScheduleDay(val day: String, val workout: String)
 data class NutritionData(val calories: Int = 0, val protein: Int = 0, val carbs: Int = 0, val fats: Int = 0)
 data class SessionData(val name: String, val exercises: List<SessionExercise>)
-data class SessionExercise(val name: String, val sets: MutableList<SessionSet>)
+data class SessionExercise(val name: String, val sets: List<SessionSet>, val rest: Int = 60)
 data class SessionSet(val weight: Float, val reps: Int, val isDone: Boolean = false)
 
 @Composable
 fun WearApp(
     heartRate: Int, stepCount: Int, calories: Int, nutrition: NutritionData, water: Double,
-    weeklySummary: List<ScheduleDay>, monthlySummary: List<ScheduleDay>, isCoach: Boolean,
+    weeklySummary: List<ScheduleDay>, isCoach: Boolean,
     activeSession: SessionData?, sessionDuration: Long, restTime: Int, isResting: Boolean,
     isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean,
     lastSync: String, currentUid: String, accel: Triple<Float, Float, Float>,
     onAddWater: () -> Unit, onStartRest: (Int) -> Unit, onStopSession: () -> Unit,
     onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit,
+    onAdjustWeight: (Int, Int, Float) -> Unit,
     onRetryPair: () -> Unit
 ) {
-    val pageCount = if (isCoach) 5 else 4
-    val pagerState = rememberPagerState(pageCount = { pageCount })
+    val pagerState = rememberPagerState(pageCount = { if (isCoach) 4 else 3 })
     var showDebug by remember { mutableStateOf(false) }
 
     Scaffold(timeText = { TimeText() }) {
@@ -369,24 +360,14 @@ fun WearApp(
             HorizontalPager(state = pagerState) { page ->
                 when (page) {
                     0 -> DashboardPage(heartRate, stepCount, calories, water, onAddWater, onLongClick = { showDebug = true })
-                    1 -> NutritionPage(nutrition)
-                    2 -> SessionPage(activeSession, sessionDuration, restTime, isResting, onStartRest, onStopSession, onUpdateSet)
-                    3 -> SchedulePage("AGENDA HEBDO", weeklySummary)
-                    4 -> SchedulePage("AGENDA MENSUEL", monthlySummary)
+                    1 -> SessionPage(activeSession, sessionDuration, restTime, isResting, onUpdateSet, onAdjustWeight)
+                    2 -> NutritionPage(nutrition)
+                    3 -> SchedulePage("AGENDA", weeklySummary)
                 }
             }
             if (showDebug) {
                 Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
-                    ConnectionDebugPage(
-                        isPhoneConnected,
-                        firebaseSocketConnected,
-                        firebaseDataFound,
-                        lastSync,
-                        currentUid,
-                        accel,
-                        onRetryPair,
-                        onClose = { showDebug = false }
-                    )
+                    ConnectionDebugPage(isPhoneConnected, firebaseSocketConnected, firebaseDataFound, lastSync, currentUid, accel, onRetryPair, onClose = { showDebug = false })
                 }
             }
         }
@@ -409,8 +390,7 @@ fun DashboardPage(hr: Int, steps: Int, calories: Int, water: Double, onAddWater:
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(onClick = onAddWater, modifier = Modifier.size(40.dp), colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3b82f6))) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("💧", fontSize = 12.sp)
-                        Text("${water}L", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        Text("💧", fontSize = 12.sp); Text("${water}L", fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -474,33 +454,36 @@ fun SchedulePage(title: String, schedule: List<ScheduleDay>) {
 @Composable
 fun SessionPage(
     session: SessionData?, duration: Long, restTime: Int, isResting: Boolean,
-    onStartRest: (Int) -> Unit, onStopSession: () -> Unit, onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit
+    onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit,
+    onAdjustWeight: (Int, Int, Float) -> Unit
 ) {
     if (session == null) {
         Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
-            Text("AUCUNE SÉANCE\nACTIVE", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 12.sp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(imageVector = Icons.Default.Timer, contentColors = Color.Gray, modifier = Modifier.size(32.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("SÉANCE EN ATTENTE", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Lancez la séance sur le téléphone", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 8.sp)
+            }
         }
     } else {
         ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg)) {
             item {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text(session.name.uppercase(), color = PurplePrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text(formatDuration(duration), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(session.name.uppercase(), color = PurplePrimary, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                    Text(formatDuration(duration), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
                     if (isResting) {
-                        Text("REPOS: ${restTime}s", color = GreenAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Box(modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(GreenAccent).padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text("REPOS: ${restTime}s", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
             itemsIndexed(session.exercises) { exoIdx, exo ->
-                Text(exo.name, color = GreenAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                Text(exo.name.uppercase(), color = GreenAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                 exo.sets.forEachIndexed { setIdx, set ->
-                    SetItem(exoIdx, setIdx, set, onStartRest, onUpdateSet)
-                }
-            }
-            item {
-                Button(onClick = onStopSession, modifier = Modifier.fillMaxWidth().padding(top = 16.dp), colors = ButtonDefaults.buttonColors(backgroundColor = Color.Red)) {
-                    Text("TERMINER", color = Color.White, fontWeight = FontWeight.Bold)
+                    SetCard(exoIdx, setIdx, set, onUpdateSet, onAdjustWeight)
                 }
             }
         }
@@ -508,34 +491,35 @@ fun SessionPage(
 }
 
 @Composable
-fun SetItem(exoIdx: Int, setIdx: Int, set: SessionSet, onStartRest: (Int) -> Unit, onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit) {
-    ToggleChip(
-        checked = set.isDone,
-        onCheckedChange = { 
-            onUpdateSet(exoIdx, setIdx, set.weight, set.reps, it)
-            if (it) onStartRest(60)
-        },
-        label = { Text("Série ${setIdx + 1}: ${set.weight}kg x ${set.reps}", fontSize = 10.sp) },
-        toggleControl = { Icon(imageVector = if (set.isDone) ToggleChipDefaults.checkboxIcon(true) else ToggleChipDefaults.checkboxIcon(false), contentDescription = null) },
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        colors = ToggleChipDefaults.toggleChipColors(
-            checkedStartBackgroundColor = Color(0xFF065f46),
-            uncheckedStartBackgroundColor = CardBg
-        )
-    )
+fun SetCard(exoIdx: Int, setIdx: Int, set: SessionSet, onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit, onAdjustWeight: (Int, Int, Float) -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(if (set.isDone) Color(0xFF065f46) else CardBg).padding(8.dp)) {
+        Column {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("SÉRIE ${setIdx + 1}", color = if (set.isDone) Color.White else Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Checkbox(checked = set.isDone, onCheckedChange = { onUpdateSet(exoIdx, setIdx, set.weight, set.reps, it) }, modifier = Modifier.size(24.dp))
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onAdjustWeight(exoIdx, setIdx, -5f) }, modifier = Modifier.size(32.dp)) { Text("-", color = Color.White, fontSize = 20.sp) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${set.weight.toInt()}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text("LBS", color = Color.Gray, fontSize = 8.sp)
+                }
+                IconButton(onClick = { onAdjustWeight(exoIdx, setIdx, 5f) }, modifier = Modifier.size(32.dp)) { Text("+", color = Color.White, fontSize = 20.sp) }
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${set.reps}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text("REPS", color = Color.Gray, fontSize = 8.sp)
+                }
+            }
+        }
+    }
 }
 
 @Composable
-fun ConnectionDebugPage(
-    isPhone: Boolean, 
-    firebaseSocket: Boolean, 
-    firebaseData: Boolean, 
-    lastSync: String, 
-    uid: String, 
-    accel: Triple<Float, Float, Float>, 
-    onRetryPair: () -> Unit,
-    onClose: () -> Unit
-) {
+fun ConnectionDebugPage(isPhone: Boolean, firebaseSocket: Boolean, firebaseData: Boolean, lastSync: String, uid: String, accel: Triple<Float, Float, Float>, onRetryPair: () -> Unit, onClose: () -> Unit) {
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg).padding(8.dp)) {
         item { Text("DEBUG CONNEXION", color = GreenAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
         item { DebugRow("Téléphone", isPhone) }
@@ -543,20 +527,8 @@ fun ConnectionDebugPage(
         item { DebugRow("Data Firebase", firebaseData) }
         item { Text("Last Sync: $lastSync", fontSize = 8.sp, color = Color.Gray) }
         item { Text("UID: ${uid.take(10)}...", fontSize = 8.sp, color = Color.Gray) }
-        item { 
-            Text(String.format("Accel: %.1f, %.1f, %.1f", accel.first, accel.second, accel.third), 
-                fontSize = 8.sp, color = PurplePrimary) 
-        }
-        item {
-            Button(onClick = onRetryPair, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(backgroundColor = PurplePrimary)) {
-                Text("RE-PAIRER", fontSize = 10.sp)
-            }
-        }
-        item {
-            Button(onClick = onClose, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text("FERMER", fontSize = 10.sp)
-            }
-        }
+        item { Button(onClick = onRetryPair, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(backgroundColor = PurplePrimary)) { Text("RE-PAIRER", fontSize = 10.sp) } }
+        item { Button(onClick = onClose, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("FERMER", fontSize = 10.sp) } }
     }
 }
 

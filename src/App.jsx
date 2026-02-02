@@ -30,7 +30,6 @@ import Performance from '@/pages/Performance';
 import Gallery from '@/pages/Gallery';
 import Messages from '@/pages/Messages';
 import Challenges from '@/pages/Challenges';
-import WatchPairing from '@/pages/WatchPairing';
 import MyTeam from '@/pages/MyTeam'; // Nouvelle page
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -65,7 +64,6 @@ const AppContent = () => {
     if (path === '/' || path === '/dashboard') return 'Tableau de Bord';
     if (path.includes('payments')) return 'Finance';
     if (path.includes('coach-onboarding')) return 'Configuration Coach';
-    if (path.includes('watch-pairing')) return 'Connexion Montre';
     if (path.includes('nutrition')) return 'Nutrition & Macros';
     if (path.includes('my-team')) return 'Mon Équipe';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
@@ -109,7 +107,6 @@ const AppContent = () => {
               <Route path="/my-team" element={<MyTeam />} />
               <Route path="/coach/payments" element={<Payments />} />
               <Route path="/privacy" element={<Privacy />} />
-              <Route path="/watch-pairing" element={<WatchPairing />} />
               <Route path="/unauthorized" element={<UserNotRegisteredError />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

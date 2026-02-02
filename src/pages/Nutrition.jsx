@@ -19,16 +19,17 @@ export default function Nutrition() {
   const [history, setHistory] = useState([]);
   const [liveMacros, setLiveMacros] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState(null);
 
   const targetId = targetUserId || currentUser?.uid;
   const rtdb = getDatabase(app);
 
-  // Objectifs par défaut
+  // Objectifs par défaut ou venant du profil
   const goals = {
-    calories: 2000,
-    protein: 150,
-    carbs: 200,
-    fats: 70,
+    calories: userProfile?.dailyCaloriesGoal || 2000,
+    protein: userProfile?.dailyProteinGoal || 150,
+    carbs: userProfile?.dailyCarbsGoal || 200,
+    fats: userProfile?.dailyFatsGoal || 70,
     fiber: 30,
     sugar: 50
   };
@@ -38,7 +39,11 @@ export default function Nutrition() {
       if (!targetId) return;
       setLoading(true);
       try {
-        // 1. Historique Firestore
+        // 1. Profil pour les objectifs
+        const userSnap = await getDoc(doc(db, "users", targetId));
+        if (userSnap.exists()) setUserProfile(userSnap.data());
+
+        // 2. Historique Firestore
         const q = query(
           collection(db, "users", targetId, "nutrition_history"),
           orderBy("timestamp", "desc"),
@@ -47,7 +52,7 @@ export default function Nutrition() {
         const snap = await getDocs(q);
         setHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-        // 2. Live Data RTDB (pour voir ce que le client mange AUJOURD'HUI)
+        // 3. Live Data RTDB (pour voir ce que le client mange AUJOURD'HUI)
         const nutritionRef = ref(rtdb, `users/${targetId}/live_data/nutrition`);
         onValue(nutritionRef, (snapshot) => {
             if (snapshot.exists()) {
@@ -62,7 +67,7 @@ export default function Nutrition() {
       }
     };
     fetchData();
-  }, [targetId]);
+  }, [targetId, rtdb]);
 
   if (loading) return <div className="p-8 text-white">{t('loading')}...</div>;
 
@@ -108,7 +113,7 @@ export default function Nutrition() {
                 <div className="flex flex-col md:flex-row">
                   <div className="p-6 bg-black/20 md:w-48 flex flex-col justify-center items-center text-center border-b md:border-b-0 md:border-r border-gray-800">
                     <p className="text-xs font-bold text-[#7b2cbf] uppercase mb-1">
-                      {format(new Date(day.date), 'EEEE d MMMM', { locale: fr })}
+                      {day.date ? format(new Date(day.date), 'EEEE d MMMM', { locale: fr }) : "Date inconnue"}
                     </p>
                     <p className="text-3xl font-black text-white">{Math.round(day.calories || 0)}</p>
                     <p className="text-[10px] font-bold text-gray-500 uppercase">KCAL</p>
@@ -131,7 +136,7 @@ export default function Nutrition() {
 }
 
 function MacroProgress({ label, value = 0, goal, color, icon: Icon }) {
-  const percent = Math.min(100, (value / goal) * 100);
+  const percent = Math.min(100, (value / (goal || 1)) * 100);
   return (
     <div className="space-y-2">
       <div className="flex justify-between items-center">

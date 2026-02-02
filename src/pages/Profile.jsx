@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { useClient } from '@/context/ClientContext';
 import { db, storage } from '@/lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -39,6 +40,7 @@ export const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 export default function Profile() {
   const { currentUser } = useAuth();
+  const { isCoachView, targetUserId } = useClient();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -89,9 +91,10 @@ export default function Profile() {
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (currentUser) {
+      const targetId = targetUserId || currentUser?.uid;
+      if (targetId) {
         try {
-          const docRef = doc(db, "users", currentUser.uid);
+          const docRef = doc(db, "users", targetId);
           const docSnap = await getDoc(docRef);
 
           if (docSnap.exists()) {
@@ -136,7 +139,7 @@ export default function Profile() {
       setLoading(false);
     };
     fetchUserData();
-  }, [currentUser]);
+  }, [currentUser, targetUserId]);
 
   // --- GESTION LOCALISATION ---
   const handleAddressSearch = async (val) => {
@@ -163,7 +166,7 @@ export default function Profile() {
   const currency = getCurrencyFromLocation ? getCurrencyFromLocation(formData.location) : '€';
 
   const toggleGoal = (goalId) => {
-    if (!isEditing) return;
+    if (!isEditing || isCoachView) return;
     setFormData(prev => ({
       ...prev,
       selectedGoals: prev.selectedGoals.includes(goalId)
@@ -173,7 +176,7 @@ export default function Profile() {
   };
 
   const toggleDay = (day) => {
-    if (!isEditing) return;
+    if (!isEditing || isCoachView) return;
     setFormData(prev => ({
       ...prev,
       availability: prev.availability.includes(day)
@@ -234,14 +237,16 @@ export default function Profile() {
   };
 
   const handleAvatarChange = async (e) => {
+    if (isCoachView) return;
     const file = e.target.files[0];
     if (!file) return;
     setAvatarUploading(true);
+    const targetId = currentUser?.uid;
     try {
-        const storageRef = ref(storage, `avatars/${currentUser.uid}_${Date.now()}`);
+        const storageRef = ref(storage, `avatars/${targetId}_${Date.now()}`);
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", currentUser.uid), { avatar: downloadURL });
+        await updateDoc(doc(db, "users", targetId), { avatar: downloadURL });
         setFormData(prev => ({ ...prev, avatar: downloadURL }));
     } catch (error) {
         console.error(error);
@@ -249,14 +254,16 @@ export default function Profile() {
   };
 
   const handleCoachPhotoUpload = async (e) => {
+    if (isCoachView) return;
     const file = e.target.files[0];
     if (!file) return;
     setCoachPhotoUploading(true);
+    const targetId = targetUserId || currentUser?.uid;
     try {
-        const storageRef = ref(storage, `coach_updates/${currentUser.uid}_${Date.now()}`);
+        const storageRef = ref(storage, `coach_updates/${targetId}_${Date.now()}`);
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", currentUser.uid), { coachUpdatePhoto: downloadURL });
+        await updateDoc(doc(db, "users", targetId), { coachUpdatePhoto: downloadURL });
         setFormData(prev => ({ ...prev, coachUpdatePhoto: downloadURL }));
     } catch (error) {
         console.error(error);
@@ -265,13 +272,15 @@ export default function Profile() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isCoachView) return;
     if (formData.role === 'coach' && formData.pricing.length === 0) {
       return alert("En tant que coach, vous devez impérativement définir au moins un tarif.");
     }
 
     setSaving(true);
+    const targetId = currentUser?.uid;
     try {
-      const docRef = doc(db, "users", currentUser.uid);
+      const docRef = doc(db, "users", targetId);
       await updateDoc(docRef, {
         height: formData.height,
         weight: formData.weight,
@@ -322,15 +331,16 @@ export default function Profile() {
       {/* --- TOP PROFILE HEADER --- */}
       <div className="relative pt-6">
         <div className="flex flex-col md:flex-row items-center gap-8 bg-gradient-to-br from-[#1a1a20] to-black/40 p-8 rounded-[2rem] border border-gray-800 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-6">
-              <Button
-                  onClick={() => setIsEditing(!isEditing)}
-                  variant={isEditing ? "destructive" : "outline"}
-                  className={`gap-2 rounded-full px-6 transition-all duration-300 ${!isEditing ? "border-[#7b2cbf] hover:bg-[#7b2cbf] text-white" : ""}`}
-              >
-                  {isEditing ? <><X size={16}/> Annuler</> : <><Edit2 size={16}/> Modifier</>}
-              </Button>
-          </div>
+          {!isCoachView && (
+            <div className="absolute top-0 right-0 p-6">
+                <Button
+                    onClick={() => setIsEditing(!isEditing)}
+                    className={`gap-2 rounded-full px-6 transition-all duration-300 font-black uppercase italic ${isEditing ? "bg-red-500 hover:bg-red-600 text-white" : "bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black shadow-[0_0_15px_rgba(0,245,212,0.3)]"}`}
+                >
+                    {isEditing ? <><X size={16}/> Annuler</> : <><Edit2 size={16}/> Modifier</>}
+                </Button>
+            </div>
+          )}
 
           <div className="relative group">
             <motion.div
@@ -344,12 +354,14 @@ export default function Profile() {
                     </AvatarFallback>
                 </Avatar>
             </motion.div>
-            <button
-              onClick={() => fileInputRef.current.click()}
-              className="absolute bottom-0 right-0 bg-[#00f5d4] text-black p-2.5 rounded-full border-4 border-[#0a0a0f] shadow-xl hover:scale-110 transition"
-            >
-                {avatarUploading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Camera size={18} />}
-            </button>
+            {!isCoachView && (
+              <button
+                onClick={() => fileInputRef.current.click()}
+                className="absolute bottom-0 right-0 bg-[#00f5d4] text-black p-2.5 rounded-full border-4 border-[#0a0a0f] shadow-xl hover:scale-110 transition"
+              >
+                  {avatarUploading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Camera size={18} />}
+              </button>
+            )}
             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarChange} />
           </div>
 
@@ -397,7 +409,7 @@ export default function Profile() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isEditing ? (
+              {isEditing && !isCoachView ? (
                 <div className="space-y-2 relative">
                   <label className="text-[10px] text-gray-500 uppercase font-bold">Chercher ma zone d'habitation</label>
                   <div className="relative">
@@ -454,29 +466,29 @@ export default function Profile() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[10px] text-gray-500 uppercase font-bold">Prénom</label>
-                  <Input value={formData.firstName} onChange={(e)=>setFormData({...formData, firstName:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
+                  <Input value={formData.firstName} onChange={(e)=>setFormData({...formData, firstName:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] text-gray-500 uppercase font-bold">Nom</label>
-                  <Input value={formData.lastName} onChange={(e)=>setFormData({...formData, lastName:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
+                  <Input value={formData.lastName} onChange={(e)=>setFormData({...formData, lastName:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
                 </div>
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-500 uppercase font-bold">Pseudo</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9d4edd] font-black">@</span>
-                  <Input value={formData.username} onChange={(e)=>setFormData({...formData, username:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 pl-8 focus:border-[#00f5d4] h-10"/>
+                  <Input value={formData.username} onChange={(e)=>setFormData({...formData, username:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 pl-8 focus:border-[#00f5d4] h-10"/>
                 </div>
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-500 uppercase font-bold">Date de naissance</label>
-                <Input type="date" value={formData.birthDate} onChange={(e)=>setFormData({...formData, birthDate:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-10 text-xs text-white"/>
+                <Input type="date" value={formData.birthDate} onChange={(e)=>setFormData({...formData, birthDate:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 h-10 text-xs text-white"/>
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-500 uppercase font-bold">Sexe</label>
                 <div className="flex gap-2">
                   {['male', 'female'].map(s => (
-                    <button key={s} type="button" onClick={() => isEditing && setFormData({...formData, sex: s})} className={`flex-1 py-3 rounded-xl border-2 transition-all font-black text-xs uppercase ${formData.sex === s ? 'border-[#9d4edd] bg-[#9d4edd]/10 text-white shadow-[0_0_15px_rgba(157,78,221,0.2)]' : 'border-gray-800 bg-black/20 text-gray-500'}`}>
+                    <button key={s} type="button" onClick={() => isEditing && !isCoachView && setFormData({...formData, sex: s})} className={`flex-1 py-3 rounded-xl border-2 transition-all font-black text-xs uppercase ${formData.sex === s ? 'border-[#9d4edd] bg-[#9d4edd]/10 text-white shadow-[0_0_15px_rgba(157,78,221,0.2)]' : 'border-gray-800 bg-black/20 text-gray-500'}`}>
                       {s === 'male' ? 'Homme' : 'Femme'}
                     </button>
                   ))}
@@ -496,14 +508,14 @@ export default function Profile() {
                 <div className="bg-black/40 p-4 rounded-2xl border border-gray-800 text-center relative overflow-hidden group">
                   <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">Taille</label>
                   <div className="flex items-center justify-center gap-1">
-                    <input type="number" value={formData.height} onChange={(e)=>setFormData({...formData, height:e.target.value})} disabled={!isEditing} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
+                    <input type="number" value={formData.height} onChange={(e)=>setFormData({...formData, height:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
                     <span className="text-xs text-[#00f5d4] font-bold">cm</span>
                   </div>
                 </div>
                 <div className="bg-black/40 p-4 rounded-2xl border border-gray-800 text-center relative overflow-hidden group">
                   <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">Poids Actuel</label>
                   <div className="flex items-center justify-center gap-1">
-                    <input type="number" value={formData.weight} onChange={(e)=>setFormData({...formData, weight:e.target.value})} disabled={!isEditing} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
+                    <input type="number" value={formData.weight} onChange={(e)=>setFormData({...formData, weight:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
                     <span className="text-xs text-[#00f5d4] font-bold">{formData.weightUnit}</span>
                   </div>
                 </div>
@@ -511,11 +523,11 @@ export default function Profile() {
               <div className="bg-black/40 p-4 rounded-2xl border-2 border-dashed border-[#9d4edd]/30 text-center relative overflow-hidden group">
                 <label className="text-[10px] text-[#9d4edd] uppercase font-black mb-2 block flex items-center justify-center gap-1"><Goal size={12} /> Poids Cible</label>
                 <div className="flex items-center justify-center gap-1">
-                  <input type="number" value={formData.targetWeight} onChange={(e)=>setFormData({...formData, targetWeight:e.target.value})} disabled={!isEditing} className="bg-transparent text-3xl font-black text-white w-24 text-center focus:outline-none placeholder:text-gray-800" placeholder="--"/>
+                  <input type="number" value={formData.targetWeight} onChange={(e)=>setFormData({...formData, targetWeight:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-24 text-center focus:outline-none placeholder:text-gray-800" placeholder="--"/>
                   <span className="text-xs text-[#9d4edd] font-bold">{formData.weightUnit}</span>
                 </div>
               </div>
-              {isEditing && (
+              {isEditing && !isCoachView && (
                 <div className="flex justify-center p-1 bg-black/60 rounded-full border border-gray-800 w-fit mx-auto">
                   {['kg', 'lbs'].map(unit => (
                     <button key={unit} type="button" onClick={() => setFormData({...formData, weightUnit: unit})} className={`px-6 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${formData.weightUnit === unit ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}>{unit}</button>
@@ -529,7 +541,7 @@ export default function Profile() {
         <div className="lg:col-span-8 space-y-6">
 
           {/* --- SECTION TARIFS (COACH SEULEMENT) --- */}
-          {formData.role === 'coach' && (
+          {formData.role === 'coach' && !isCoachView && (
             <Card className="kb-card border-[#00f5d4]/30 bg-black/20 overflow-hidden shadow-[0_0_30px_rgba(0,245,212,0.05)]">
               <CardHeader className="bg-gradient-to-r from-[#00f5d4]/10 to-transparent flex flex-row items-center justify-between border-b border-[#00f5d4]/10">
                 <div>
@@ -732,7 +744,7 @@ export default function Profile() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-xl flex items-center gap-3 text-white italic uppercase font-black tracking-tighter">
-                    <Sparkles className="text-[#00f5d4]" size={24} /> Mes Objectifs Élite
+                    <Sparkles className="text-[#00f5d4]" size={24} /> {isCoachView ? "Ses Objectifs Élite" : "Mes Objectifs Élite"}
                   </CardTitle>
                   <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold tracking-widest">Cliquez pour définir vos priorités</p>
                 </div>
@@ -748,8 +760,8 @@ export default function Profile() {
                     <motion.button
                       key={goal.id}
                       type="button"
-                      whileHover={isEditing ? { scale: 1.05, y: -2 } : {}}
-                      whileTap={isEditing ? { scale: 0.95 } : {}}
+                      whileHover={isEditing && !isCoachView ? { scale: 1.05, y: -2 } : {}}
+                      whileTap={isEditing && !isCoachView ? { scale: 0.95 } : {}}
                       onClick={() => toggleGoal(goal.id)}
                       className={`relative flex flex-col items-center justify-center aspect-square p-4 rounded-[1.5rem] border-2 transition-all duration-300 ${
                         isSelected
@@ -774,7 +786,7 @@ export default function Profile() {
                 <label className="text-xs text-gray-400 uppercase font-black flex items-center gap-2">
                   <Edit2 size={12} className="text-[#9d4edd]" /> Précisions pour votre coach
                 </label>
-                <Textarea value={formData.customGoals} onChange={(e)=>setFormData({...formData, customGoals:e.target.value})} disabled={!isEditing} placeholder="Décrivez vos attentes, vos motivations ou vos dates clés..." className="bg-black/60 border-gray-800 focus:border-[#00f5d4] min-h-[120px] rounded-2xl text-sm p-4"/>
+                <Textarea value={formData.customGoals} onChange={(e)=>setFormData({...formData, customGoals:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Décrivez vos attentes, vos motivations ou vos dates clés..." className="bg-black/60 border-gray-800 focus:border-[#00f5d4] min-h-[120px] rounded-2xl text-sm p-4"/>
               </div>
             </CardContent>
           </Card>
@@ -809,18 +821,18 @@ export default function Profile() {
               <CardContent className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-[10px] text-red-400/70 uppercase font-black">Blessures / Limites</label>
-                  <Input value={formData.injuries} onChange={(e)=>setFormData({...formData, injuries:e.target.value})} disabled={!isEditing} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-red-500/50"/>
+                  <Input value={formData.injuries} onChange={(e)=>setFormData({...formData, injuries:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-red-500/50"/>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] text-yellow-500/70 uppercase font-black">Allergies</label>
-                  <Input value={formData.allergies} onChange={(e)=>setFormData({...formData, allergies:e.target.value})} disabled={!isEditing} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-yellow-500/50"/>
+                  <Input value={formData.allergies} onChange={(e)=>setFormData({...formData, allergies:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-yellow-500/50"/>
                 </div>
               </CardContent>
             </Card>
           </div>
 
           <AnimatePresence>
-            {isEditing && (
+            {isEditing && !isCoachView && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="flex justify-center pt-6">
                 <Button onClick={handleSubmit} disabled={saving} className="bg-gradient-to-r from-[#00f5d4] to-[#00d1b5] text-black font-black uppercase italic px-16 py-7 rounded-[1.5rem] shadow-[0_10px_30px_rgba(0,245,212,0.3)] hover:scale-105 transition-all flex items-center gap-3 text-lg tracking-tighter">
                   {saving ? <Loader2 className="animate-spin" /> : <><Save size={24}/> Enregistrer mon profil</>}
@@ -829,7 +841,7 @@ export default function Profile() {
             )}
           </AnimatePresence>
 
-          {formData.coachId && !isEditing && (
+          {(formData.coachId || isCoachView) && !isEditing && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-10">
               <div className="flex items-center gap-3 mb-4">
                 <div className="h-px flex-1 bg-gray-800" />
@@ -844,7 +856,7 @@ export default function Profile() {
                     <div className="w-32 h-44 bg-black rounded-[1.5rem] border-2 border-dashed border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-[#00f5d4]/40">
                       {formData.coachUpdatePhoto ? <img src={formData.coachUpdatePhoto} className="w-full h-full object-cover" alt="Evolution" /> : <ImageIcon size={40} className="text-gray-800" />}
                     </div>
-                    <button onClick={() => coachPhotoInputRef.current.click()} className="absolute -bottom-2 -right-2 bg-[#00f5d4] text-black p-2.5 rounded-2xl shadow-xl hover:scale-110 transition"><Camera size={20} /></button>
+                    {!isCoachView && <button onClick={() => coachPhotoInputRef.current.click()} className="absolute -bottom-2 -right-2 bg-[#00f5d4] text-black p-2.5 rounded-2xl shadow-xl hover:scale-110 transition"><Camera size={20} /></button>}
                     <input type="file" ref={coachPhotoInputRef} className="hidden" accept="image/*" onChange={handleCoachPhotoUpload} />
                   </div>
                   <div className="flex-1 space-y-4 text-center sm:text-left">

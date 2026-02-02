@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ClientSelector from '@/components/coach/ClientSelector';
 import { useTranslation } from 'react-i18next';
-import { UserCheck, Watch, Apple } from 'lucide-react';
+import { UserCheck, Apple } from 'lucide-react';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -77,7 +77,6 @@ export default function AppSidebar() {
     { title: t('challenges'), url: "/challenges", icon: Trophy },
     { title: t('community'), url: "/community", icon: Users },
     { title: isCoach ? "Mon Équipe" : t('my_coach'), url: isCoach ? "/my-team" : "/mon-coach", icon: isCoach ? Users : UserCheck },
-    { title: "Ma Montre", url: "/watch-pairing", icon: Watch },
   ];
 
   // Filtrage si on est en vue Coach sur un client

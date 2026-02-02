@@ -424,7 +424,6 @@ export default function Messages() {
                             <div key={user.uid} className="p-4 bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-[1.5rem] flex items-center justify-between hover:border-[#00f5d4]/50 transition-all shadow-2xl">
                                 <div className="flex items-center gap-4">
                                     <Avatar className="h-12 w-12 border-2 border-[#00f5d4]/30 shadow-lg">
-                                        <AvatarImage src={user.avatar} className="object-cover"/>
                                         <AvatarFallback className="bg-black text-[#00f5d4] text-sm font-black">{user.full_name?.[0] || '?'}</AvatarFallback>
                                     </Avatar>
                                     <div className="overflow-hidden"><p className="font-black text-white text-sm truncate uppercase italic">{user.full_name}</p><p className="text-[10px] text-gray-500 font-bold tracking-widest">@{user.username || 'athlete'}</p></div>
@@ -443,10 +442,7 @@ export default function Messages() {
                     <div className="relative">
                         <Avatar className={`h-14 w-14 border-2 shadow-2xl ${selectedFriend?.uid === friend.uid ? 'border-[#7b2cbf]' : 'border-gray-800'} overflow-hidden`}>
                             {friend.isGroup ? <GroupAvatar members={friend.memberIds} customAvatar={friend.avatar} groupMessages={messages} /> : (
-                                <>
-                                    <AvatarImage src={friend.avatar} className="object-cover"/>
-                                    <AvatarFallback className="bg-[#7b2cbf] text-white font-black text-lg">{friend.name?.[0] || '?'}</AvatarFallback>
-                                </>
+                                <AvatarFallback className="bg-[#7b2cbf] text-white font-black text-lg">{friend.name?.[0] || '?'}</AvatarFallback>
                             )}
                         </Avatar>
                         {!friend.isGroup && <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-[#00f5d4] border-[3px] border-[#1a1a20] rounded-full shadow-[0_0_10px_#00f5d4]" />}
@@ -467,7 +463,7 @@ export default function Messages() {
                         <div key={m.uid} className="p-5 bg-orange-500/10 border-2 border-orange-500/20 rounded-[1.5rem] flex items-center justify-between shadow-2xl backdrop-blur-md">
                             <div className="cursor-pointer flex-1" onClick={() => setSelectedFriend({ uid: m.uid, name: m.name, avatar: m.avatar, type: 'unknown' })}>
                                 <div className="flex items-center gap-4 mb-3">
-                                    <Avatar className="h-10 w-10 border-2 border-orange-500/30 shadow-lg"><AvatarImage src={m.avatar}/><AvatarFallback className="bg-orange-500 text-white text-xs font-black">{m.name?.[0] || '?'}</AvatarFallback></Avatar>
+                                    <Avatar className="h-10 w-10 border-2 border-orange-500/30 shadow-lg"><AvatarFallback className="bg-orange-500 text-white text-xs font-black">{m.name?.[0] || '?'}</AvatarFallback></Avatar>
                                     <p className="font-black text-white text-sm uppercase italic tracking-wider">{m.name}</p>
                                 </div>
                                 <p className="text-[11px] text-orange-200/70 truncate italic font-medium bg-black/20 p-2 rounded-xl border border-orange-500/10">"{m.lastMsg}"</p>
@@ -490,7 +486,6 @@ export default function Messages() {
              <div key={req.id} className="p-5 bg-[#00f5d4]/10 border-2 border-[#00f5d4]/20 rounded-[1.5rem] flex items-center justify-between shadow-2xl">
                  <div className="flex items-center gap-4">
                      <Avatar className="border-2 border-[#00f5d4]/30 h-12 w-12 shadow-lg">
-                         <AvatarImage src={req.fromAvatar} />
                          <AvatarFallback className="bg-[#00f5d4] text-black font-black text-sm">
                              {req.fromName ? req.fromName[0] : '?'}
                          </AvatarFallback>
@@ -523,8 +518,11 @@ export default function Messages() {
               <div className="flex items-center gap-5">
                 <div className="relative group/group-avatar cursor-pointer">
                     <Avatar className="border-2 border-[#00f5d4] h-14 w-14 shadow-xl overflow-hidden">
-                        <GroupAvatar members={selectedFriend.memberIds} customAvatar={selectedFriend.avatar} groupMessages={messages} />
-                        <AvatarFallback className="bg-[#7b2cbf] text-white font-black text-xl">{selectedFriend.name?.[0] || '?'}</AvatarFallback>
+                        {selectedFriend.isGroup ? (
+                            <GroupAvatar members={selectedFriend.memberIds} customAvatar={selectedFriend.avatar} groupMessages={messages} />
+                        ) : (
+                            <AvatarFallback className="bg-[#7b2cbf] text-white font-black text-xl">{selectedFriend.name?.[0] || '?'}</AvatarFallback>
+                        )}
                     </Avatar>
                     {selectedFriend.isGroup && (
                         <div onClick={() => editGroupAvatarInputRef.current.click()} className="absolute inset-0 bg-black/60 opacity-0 group-hover/group-avatar:opacity-100 flex items-center justify-center transition-opacity rounded-full">
@@ -566,7 +564,6 @@ export default function Messages() {
                         </motion.div>
                     )}</AnimatePresence>
                   </div>
-                  {!selectedFriend.isGroup && <Button variant="ghost" size="icon" onClick={openPerformance} className="text-gray-400 hover:text-[#00f5d4] rounded-2xl h-12 w-12 bg-white/5 border border-white/10 transition-all hover:bg-[#00f5d4]/10 hover:border-[#00f5d4]/50 shadow-xl"><Activity size={24}/></Button>}
               </div>
             </div>
 
@@ -579,7 +576,7 @@ export default function Messages() {
                 return (
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} key={msg.id} className={`flex items-end gap-4 ${isMe ? 'justify-end' : 'justify-start'}`}>
                     {!isMe && showAvatar && (
-                        <Avatar className="h-10 w-10 border-2 border-[#00f5d4]/30 shadow-xl"><AvatarImage src={msg.senderAvatar}/><AvatarFallback className="bg-gray-800 text-white text-[10px] font-black">{msg.senderName?.[0] || '?'}</AvatarFallback></Avatar>
+                        <Avatar className="h-10 w-10 border-2 border-[#00f5d4]/30 shadow-xl"><AvatarFallback className="bg-gray-800 text-white text-[10px] font-black">{msg.senderName?.[0] || '?'}</AvatarFallback></Avatar>
                     )}
                     {!isMe && !showAvatar && <div className="w-10" />}
 
@@ -675,7 +672,7 @@ export default function Messages() {
                     <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2 p-2 bg-black/20 rounded-2xl border border-white/5">
                         {friendList.filter(f => !f.isGroup).map(friend => (
                             <div key={friend.uid} onClick={() => setSelectedMembers(prev => prev.includes(friend.uid) ? prev.filter(id => id !== friend.uid) : (prev.length < 29 ? [...prev, friend.uid] : prev))} className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${selectedMembers.includes(friend.uid) ? 'bg-[#7b2cbf]/20 border-[#7b2cbf]' : 'bg-transparent border-white/5 hover:bg-white/5'}`}>
-                                <Avatar className="h-8 w-8"><AvatarImage src={friend.avatar}/><AvatarFallback className="bg-gray-800 text-white font-black text-[10px]">{friend.name?.[0]}</AvatarFallback></Avatar>
+                                <Avatar className="h-8 w-8"><AvatarFallback className="bg-gray-800 text-white font-black text-[10px]">{friend.name?.[0]}</AvatarFallback></Avatar>
                                 <span className="text-xs font-bold text-white uppercase">{friend.name}</span>
                                 {selectedMembers.includes(friend.uid) && <Check size={14} className="ml-auto text-[#00f5d4]"/>}
                             </div>
