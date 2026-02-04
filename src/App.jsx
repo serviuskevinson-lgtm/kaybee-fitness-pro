@@ -23,6 +23,7 @@ import Coach from '@/pages/Coach';
 import Community from '@/pages/Community';
 import Profile from '@/pages/Profile';
 import Exercises from '@/pages/Exercises';
+import Run from '@/pages/Run';
 import Meals from '@/pages/Meals';
 import Nutrition from '@/pages/Nutrition';
 import Session from '@/pages/Session';
@@ -66,6 +67,7 @@ const AppContent = () => {
     if (path.includes('coach-onboarding')) return 'Configuration Coach';
     if (path.includes('nutrition')) return 'Nutrition & Macros';
     if (path.includes('my-team')) return 'Mon Équipe';
+    if (path.includes('run')) return 'Course';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
   };
 
@@ -96,6 +98,7 @@ const AppContent = () => {
               <Route path="/community" element={<Community />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/exercises" element={<Exercises />} />
+              <Route path="/run" element={<Run />} />
               <Route path="/meals" element={<Meals />} />
               <Route path="/nutrition" element={<Nutrition />} />
               <Route path="/session" element={<Session />} />

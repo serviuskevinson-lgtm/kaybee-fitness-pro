@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ClientSelector from '@/components/coach/ClientSelector';
 import { useTranslation } from 'react-i18next';
-import { UserCheck, Apple } from 'lucide-react';
+import { UserCheck, Apple, Navigation } from 'lucide-react';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -68,6 +68,7 @@ export default function AppSidebar() {
   const allItems = [
     { title: t('dashboard'), url: "/", icon: LayoutDashboard },
     { title: t('exercises'), url: "/exercises", icon: Dumbbell },
+    { title: "Course", url: "/run", icon: Navigation }, // Ajout de Course ici
     { title: t('meals'), url: "/meals", icon: Utensils },
     { title: t('session_active'), url: "/session", icon: Timer },
     { title: t('history'), url: "/performance", icon: LineChart },
@@ -82,7 +83,7 @@ export default function AppSidebar() {
   // Filtrage si on est en vue Coach sur un client
   let items = allItems;
   if (isCoach && isCoachView) {
-    const allowedUrls = ["/", "/exercises", "/meals", "/session", "/performance", "/nutrition"];
+    const allowedUrls = ["/", "/exercises", "/run", "/meals", "/session", "/performance", "/nutrition"];
     items = allItems.filter(item => allowedUrls.includes(item.url));
   }
 

@@ -1,6 +1,7 @@
 package com.example.kaybeewear.presentation
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
@@ -12,6 +13,7 @@ import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +25,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +50,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -258,7 +261,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                     }
                 } catch (e: Exception) { Log.e("KaybeeWear", "Pair Error", e) }
             }
-            "/start-session" -> { /* La session est maintenant gérée via RTDB pour plus de fiabilité */ }
+            "/start-session" -> { /* Sync via RTDB */ }
             "/stop-session" -> stopSessionLocally()
         }
     }
@@ -298,8 +301,16 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }.start()
     }
 
+    @SuppressLint("MissingPermission")
     private fun vibrate(duration: Long) {
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
         } else {
@@ -460,7 +471,7 @@ fun SessionPage(
     if (session == null) {
         Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(imageVector = Icons.Default.Timer, contentColors = Color.Gray, modifier = Modifier.size(32.dp))
+                Icon(imageVector = Icons.Default.Timer, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("SÉANCE EN ATTENTE", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text("Lancez la séance sur le téléphone", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 8.sp)
@@ -500,12 +511,12 @@ fun SetCard(exoIdx: Int, setIdx: Int, set: SessionSet, onUpdateSet: (Int, Int, F
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onAdjustWeight(exoIdx, setIdx, -5f) }, modifier = Modifier.size(32.dp)) { Text("-", color = Color.White, fontSize = 20.sp) }
+                Button(onClick = { onAdjustWeight(exoIdx, setIdx, -5f) }, modifier = Modifier.size(32.dp)) { Text("-", color = Color.White, fontSize = 20.sp) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${set.weight.toInt()}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Text("LBS", color = Color.Gray, fontSize = 8.sp)
                 }
-                IconButton(onClick = { onAdjustWeight(exoIdx, setIdx, 5f) }, modifier = Modifier.size(32.dp)) { Text("+", color = Color.White, fontSize = 20.sp) }
+                Button(onClick = { onAdjustWeight(exoIdx, setIdx, 5f) }, modifier = Modifier.size(32.dp)) { Text("+", color = Color.White, fontSize = 20.sp) }
                 
                 Spacer(modifier = Modifier.width(8.dp))
                 
@@ -519,14 +530,14 @@ fun SetCard(exoIdx: Int, setIdx: Int, set: SessionSet, onUpdateSet: (Int, Int, F
 }
 
 @Composable
-fun ConnectionDebugPage(isPhone: Boolean, firebaseSocket: Boolean, firebaseData: Boolean, lastSync: String, uid: String, accel: Triple<Float, Float, Float>, onRetryPair: () -> Unit, onClose: () -> Unit) {
+fun ConnectionDebugPage(isPhone: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean, lastSync: String, currentUid: String, accel: Triple<Float, Float, Float>, onRetryPair: () -> Unit, onClose: () -> Unit) {
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(DarkBg).padding(8.dp)) {
         item { Text("DEBUG CONNEXION", color = GreenAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
         item { DebugRow("Téléphone", isPhone) }
-        item { DebugRow("Socket Firebase", firebaseSocket) }
-        item { DebugRow("Data Firebase", firebaseData) }
+        item { DebugRow("Socket Firebase", firebaseSocketConnected) }
+        item { DebugRow("Data Firebase", firebaseDataFound) }
         item { Text("Last Sync: $lastSync", fontSize = 8.sp, color = Color.Gray) }
-        item { Text("UID: ${uid.take(10)}...", fontSize = 8.sp, color = Color.Gray) }
+        item { Text("UID: ${currentUid.take(10)}...", fontSize = 8.sp, color = Color.Gray) }
         item { Button(onClick = onRetryPair, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(backgroundColor = PurplePrimary)) { Text("RE-PAIRER", fontSize = 10.sp) } }
         item { Button(onClick = onClose, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("FERMER", fontSize = 10.sp) } }
     }

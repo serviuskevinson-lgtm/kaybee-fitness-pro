@@ -17,8 +17,8 @@ android {
         applicationId = "com.kaybeefitness.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 4
+        versionName = "4.0"
     }
 
     buildTypes {
@@ -50,6 +50,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material:material")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
     
     val wearComposeVersion = "1.4.0"
     implementation("androidx.wear.compose:compose-material:$wearComposeVersion")

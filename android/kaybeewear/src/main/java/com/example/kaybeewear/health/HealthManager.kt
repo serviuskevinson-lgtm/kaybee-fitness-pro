@@ -118,6 +118,10 @@ class HealthManager(private val context: Context) {
         }
     }
 
+    fun updateSessionLog(uid: String, logKey: String, updates: Map<String, Any>) {
+        database?.child("users")?.child(uid)?.child("live_data")?.child("session")?.child("logs")?.child(logKey)?.updateChildren(updates)
+    }
+
     fun startPassiveMonitoring() {
         val config = PassiveListenerConfig.builder()
             .setDataTypes(setOf(DataType.STEPS_DAILY, DataType.CALORIES_TOTAL, DataType.HEART_RATE_BPM))

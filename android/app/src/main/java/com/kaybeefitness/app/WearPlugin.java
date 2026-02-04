@@ -50,6 +50,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     private static final String PREF_NAME = "KaybeePhoneSteps";
     private static final String KEY_OFFSET = "day_offset_steps";
     private static final String KEY_DATE = "last_step_date";
+    private static final String KEY_WATCH_ACTIVE = "watch_app_active"; // Nouvelle clé
 
     @Override
     public void load() {
@@ -81,12 +82,10 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             public void onDataChange(DataSnapshot snapshot) {
                 try {
                     Object stepsVal = snapshot.child("steps").getValue();
-                    // 1. On mémorise la "Vérité" de Firebase pour ne pas l'écraser plus tard
                     if (stepsVal != null) {
                         lastFirebaseSteps = ((Number) stepsVal).longValue();
                     }
 
-                    // 2. On envoie les données à l'interface JS
                     Object heartVal = snapshot.child("heart_rate").getValue();
                     JSObject ret = new JSObject();
                     if (stepsVal != null) ret.put("steps", stepsVal);
@@ -104,11 +103,10 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
                   .addValueEventListener(firebaseListener);
     }
 
-    // --- PODOMÈTRE TÉLÉPHONE SÉCURISÉ ---
-
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if (isWatchConnected) return; // Si montre là, on ne touche à rien
+        // Le téléphone continue de compter si la montre n'est pas "Active" (jumelée avec l'app)
+        if (isWatchConnected) return; 
         
         if (event.sensor.getType() == Sensor.TYPE_STEP_COUNTER) {
             long rawSensorSteps = (long) event.values[0];
@@ -120,14 +118,10 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     private void syncPhoneStepsToFirebase(long steps) {
         if (currentUserId == null || firebaseDb == null || isWatchConnected) return;
 
-        // --- SÉCURITÉ ANTI-YOYO ---
-        // Si le téléphone veut envoyer moins de pas que ce qu'il y a déjà, on bloque !
-        // (Sauf si c'est un nouveau jour et qu'on repart à zéro)
         if (steps < lastFirebaseSteps && lastFirebaseSteps > 100) {
             Log.d("WearPlugin", "⛔ Ignoré: Téléphone (" + steps + ") < Firebase (" + lastFirebaseSteps + ")");
             return;
         }
-        // --------------------------
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
         Map<String, Object> updates = new HashMap<>();
@@ -138,8 +132,6 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
         firebaseDb.child("users").child(currentUserId).child("live_data").updateChildren(updates);
     }
-
-    // --- AUTRES FONCTIONS (Standard) ---
 
     private long calculateDailySteps(long rawSteps) {
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
@@ -174,8 +166,11 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     private void checkWatchConnection() {
         Wearable.getNodeClient(getContext()).getConnectedNodes()
             .addOnSuccessListener(nodes -> {
-                boolean wasConnected = isWatchConnected;
-                isWatchConnected = !nodes.isEmpty();
+                boolean hasNodes = !nodes.isEmpty();
+                boolean isAppPaired = prefs.getBoolean(KEY_WATCH_ACTIVE, false);
+                
+                // On ne considère la montre "Connectée" que si elle est là ET jumelée
+                isWatchConnected = hasNodes && isAppPaired;
                 
                 if (isWatchConnected) {
                     stopPhoneStepCounting();
@@ -187,6 +182,11 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
     @Override
     public void onMessageReceived(MessageEvent messageEvent) {
+        // Si on reçoit un message de la montre, c'est qu'elle est active !
+        if (!prefs.getBoolean(KEY_WATCH_ACTIVE, false)) {
+            prefs.edit().putBoolean(KEY_WATCH_ACTIVE, true).apply();
+        }
+
         if (!isWatchConnected) {
             isWatchConnected = true;
             stopPhoneStepCounting();
@@ -204,7 +204,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         this.currentUserId = call.getString("userId");
         call.resolve();
         checkWatchConnection();
-        startListeningToFirebase(); // Démarrage de l'écoute
+        startListeningToFirebase();
     }
 
     @PluginMethod
@@ -212,7 +212,13 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         String userId = call.getString("userId");
         if (userId == null) { call.reject("ID requis"); return; }
         this.currentUserId = userId; 
-        startListeningToFirebase(); // On écoute aussi ici par sécurité
+        
+        // Marquer la montre comme active lors du jumelage
+        prefs.edit().putBoolean(KEY_WATCH_ACTIVE, true).apply();
+        isWatchConnected = true;
+        stopPhoneStepCounting();
+        
+        startListeningToFirebase();
         
         JSObject data = new JSObject();
         data.put("userId", userId);
