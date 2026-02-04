@@ -39,6 +39,7 @@ const PostCard = ({ post, currentUser, onPostUpdate, onPostDelete }) => {
   const [isSending, setIsSending] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // État pour la modification
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption || '');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -123,17 +124,24 @@ const PostCard = ({ post, currentUser, onPostUpdate, onPostDelete }) => {
     try {
       await addDoc(collection(db, "posts"), {
         userId: currentUser.uid,
-        authorName: currentUser.displayName,
-        authorAvatar: currentUser.photoURL,
+        authorId: currentUser.uid,
+        authorName: currentUser.displayName || "Moi",
+        authorAvatar: currentUser.photoURL || "",
         createdAt: new Date().toISOString(),
         privacy: 'Public',
         category: 'repost',
-        originalPost: { id: post.id, authorName: post.authorName, authorAvatar: post.authorAvatar, mediaUrl: post.mediaUrl, type: post.type },
+        originalPost: {
+          id: post.id,
+          authorName: post.authorName,
+          authorAvatar: post.authorAvatar,
+          mediaUrl: post.mediaUrl,
+          type: post.type,
+        },
         likes: [],
         comments: [],
       });
       alert("Reposté avec succès !");
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Erreur repost:", e); }
   };
 
   const shareToFriend = async (friend) => {
@@ -222,7 +230,7 @@ const PostCard = ({ post, currentUser, onPostUpdate, onPostDelete }) => {
           <Button variant="ghost" onClick={handleLike} className={`flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] ${isLiked ? 'text-red-500' : 'text-gray-500'}`}><Heart fill={isLiked ? 'currentColor' : 'none'} size={18} /> {likeCount}</Button>
           <Button variant="ghost" onClick={() => setShowComments(!showComments)} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><MessageCircle size={18} /> {comments.length}</Button>
           <Button variant="ghost" onClick={() => setIsShareModalOpen(true)} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><Share2 size={18} /> Partager</Button>
-          <Button variant="ghost" onClick={handleRepost} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><Repeat size={18} /> Reposter</Button>
+          <Button variant="ghost" onClick={handleRepost} className={`flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500`}><Repeat size={18} /> Reposter</Button>
         </div>
 
         <AnimatePresence>

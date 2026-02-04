@@ -134,7 +134,8 @@ export default function Performance() {
 
   const stats = useMemo(() => {
     const dailyLogs = filteredHistory.filter(h => h.type === 'daily_summary');
-    const workoutLogs = filteredHistory.filter(h => h.type === 'workout' || (!h.type && h.duration));
+    const workoutLogs = filteredHistory.filter(h => h.type === 'workout' || (!h.type && h.duration && h.type !== 'run'));
+    const runLogs = filteredHistory.filter(h => h.type === 'run');
 
     // Daily Stats
     const lastDaily = dailyLogs[dailyLogs.length - 1];
@@ -151,6 +152,13 @@ export default function Performance() {
     const totalDuration = workoutLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0);
     const avgIntensity = workoutLogs.reduce((acc, curr) => acc + (curr.intensity || 0), 0) / (totalSessions || 1);
 
+    // Run Stats
+    const totalRuns = runLogs.length;
+    const totalDistance = runLogs.reduce((acc, curr) => acc + (curr.distance || 0), 0);
+    const totalRunDuration = runLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+    const avgCadence = runLogs.reduce((acc, curr) => acc + (curr.avgCadence || 0), 0) / (totalRuns || 1);
+    const avgRunBpm = runLogs.reduce((acc, curr) => acc + (curr.avgHeartRate || 0), 0) / (totalRuns || 1);
+
     return {
         // Daily
         steps: lastDaily?.steps || 0,
@@ -166,7 +174,14 @@ export default function Performance() {
         duration: totalDuration,
         avgDuration: Math.round(totalDuration / (totalSessions || 1)),
         avgIntensity: avgIntensity.toFixed(1),
-        weight: lastDaily?.weight || userProfile?.weight || 0
+        weight: lastDaily?.weight || userProfile?.weight || 0,
+
+        // Cardio
+        totalRuns,
+        totalDistance,
+        totalRunDuration,
+        avgCadence,
+        avgRunBpm
     };
   }, [filteredHistory, userProfile]);
 
@@ -233,6 +248,20 @@ export default function Performance() {
           </div>
         </div>
 
+        {/* --- ROW 3 : CARDIO PERFORMANCE WIDGETS --- */}
+        <div className="space-y-6">
+          <div className="flex items-center gap-2 text-[#00f5d4] opacity-80">
+            <Zap size={20} />
+            <h2 className="text-xl font-black italic uppercase tracking-tighter">Performance Cardiovasculaire</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <KPICard title="Cadence Moyenne" value={Math.round(stats.avgCadence)} unit="SPM" icon={Activity} color="#00f5d4" description="Pas par minute" />
+            <KPICard title="Distance Totale" value={stats.totalDistance.toFixed(2)} unit="Km" icon={Target} color="#74b9ff" description="Sur la période" />
+            <KPICard title="Effort Moyen" value={Math.round(stats.avgRunBpm)} unit="BPM" icon={Flame} color="#ff7675" description="Intensité cardiaque" />
+            <KPICard title="Temps de Course" value={Math.floor(stats.totalRunDuration / 60)} unit="Min" icon={Timer} color="#fdcb6e" description="Volume total" />
+          </div>
+        </div>
+
         {/* --- CHART & HISTORY SECTION --- */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <Card className="lg:col-span-2 bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -278,12 +307,21 @@ export default function Performance() {
                       {history.length > 0 ? history.map((h, i) => (
                           <div key={i} className="bg-black/40 p-3 rounded-xl border border-white/5 flex items-center justify-between group hover:border-[#00f5d4]/30 transition-all">
                               <div>
-                                  <p className="text-white font-bold text-sm uppercase">{h.name || "Activité"}</p>
+                                  <p className="text-white font-bold text-sm uppercase">{h.name || (h.type === 'run' ? "Course" : "Activité")}</p>
                                   <p className="text-gray-500 text-[10px] uppercase font-bold">{format(new Date(h.date), 'dd MMMM yyyy', { locale: fr })}</p>
                               </div>
                               <div className="text-right">
-                                  {h.steps ? <p className="text-[#00f5d4] font-black text-xs">{h.steps} <span className="text-[8px] text-gray-600">PAS</span></p> : null}
-                                  {h.volume ? <p className="text-[#7b2cbf] font-black text-xs">{h.volume} <span className="text-[8px] text-gray-600">KG</span></p> : null}
+                                  {h.type === 'run' ? (
+                                      <>
+                                        <p className="text-[#00f5d4] font-black text-xs">{h.distance?.toFixed(2)} <span className="text-[8px] text-gray-600">KM</span></p>
+                                        <p className="text-gray-500 text-[8px] font-bold">{Math.floor((h.duration || 0) / 60)} MIN</p>
+                                      </>
+                                  ) : (
+                                      <>
+                                        {h.steps ? <p className="text-[#00f5d4] font-black text-xs">{h.steps} <span className="text-[8px] text-gray-600">PAS</span></p> : null}
+                                        {h.volume ? <p className="text-[#7b2cbf] font-black text-xs">{h.volume} <span className="text-[8px] text-gray-600">KG</span></p> : null}
+                                      </>
+                                  )}
                               </div>
                           </div>
                       )) : <p className="text-gray-500 text-center py-10 italic">Aucune donnée enregistrée.</p>}
