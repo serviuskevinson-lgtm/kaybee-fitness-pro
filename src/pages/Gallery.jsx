@@ -15,18 +15,22 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { 
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import {
   Upload, Image as ImageIcon, Video, Trash2, Eye, Users, Lock, Globe, Play, 
   Camera, SplitSquareHorizontal, X, UserCheck, Heart, MessageCircle, Share2, LayoutGrid, FileImage,
-  History, Clock, Sparkles, Loader2
+  History, Clock, Sparkles, Loader2, AlertCircle, ShieldCheck, MapPin, Wand2, Volume2, VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTranslation } from 'react-i18next';
 import KaybeeSocial from '@/pages/kaybeesocial';
+import { moderateImage } from '@/lib/moderation';
+import { Geolocation } from '@capacitor/geolocation';
 
 // --- CONSTANTES ---
 const CATEGORIES = [
@@ -35,6 +39,15 @@ const CATEGORIES = [
   { id: 'posing', icon: <Camera size={14}/> },
   { id: 'repas', icon: <ImageIcon size={14}/> },
   { id: 'reference', icon: <History size={14}/> }
+];
+
+const FILTERS = [
+  { name: 'Normal', filter: 'none' },
+  { name: 'Clair', filter: 'brightness(1.2) contrast(1.1)' },
+  { name: 'Chaud', filter: 'sepia(0.3) saturate(1.4)' },
+  { name: 'Froid', filter: 'hue-rotate(180deg) saturate(1.2)' },
+  { name: 'N&B', filter: 'grayscale(1)' },
+  { name: 'Vintage', filter: 'sepia(0.5) contrast(0.9) brightness(0.9)' },
 ];
 
 export default function Gallery() {
@@ -58,10 +71,19 @@ export default function Gallery() {
   // Upload
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [uploadCaption, setUploadCaption] = useState('');
   const [uploadCategory, setUploadCategory] = useState('physique');
   const [uploadPrivacy, setUploadPrivacy] = useState('Coach');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [moderationError, setModerationError] = useState(null);
+
+  // Options Instagram
+  const [useLocation, setUseLocation] = useState(false);
+  const [locationName, setLocationName] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState('Normal');
+  const [isMuted, setIsMuted] = useState(false);
+
   const fileInputRef = useRef(null);
 
   // Lightbox & Comparaison
@@ -87,7 +109,6 @@ export default function Gallery() {
         const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setMediaList(posts);
 
-        // On ne montre le ticker que sur sa propre galerie privée
         if (!isCoachView && activeUserId === currentUser?.uid) {
             const qRecent = query(
                 postsRef,
@@ -109,11 +130,29 @@ export default function Gallery() {
     fetchData();
   }, [activeUserId, isCoachView, currentUser]);
 
+  // --- GESTION LOCALISATION ---
+  const handleLocationToggle = async (checked) => {
+    setUseLocation(checked);
+    if (checked) {
+        try {
+            await Geolocation.requestPermissions();
+            const position = await Geolocation.getCurrentPosition();
+            setLocationName("Position Actuelle");
+        } catch (e) {
+            console.error("Erreur géo:", e);
+            setUseLocation(false);
+        }
+    } else {
+        setLocationName('');
+    }
+  };
+
   // --- 2. GESTION UPLOAD ---
   const handleFileSelect = (e) => {
     if (e.target.files && e.target.files.length > 0) {
         const newFiles = Array.from(e.target.files);
         setUploadFiles(prev => [...prev, ...newFiles]);
+        setModerationError(null);
     }
   };
 
@@ -121,17 +160,39 @@ export default function Gallery() {
       setUploadFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const toBase64 = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+  });
+
   const handleUpload = async () => {
     if (uploadFiles.length === 0 || !currentUser) return;
     setIsUploading(true);
     setUploadProgress(0);
+    setModerationError(null);
 
     const newPosts = [];
     let processedCount = 0;
 
     try {
+        const hashtags = uploadCaption.match(/#\w+/g) || [];
+
         for (const file of uploadFiles) {
-            const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${file.name}`;
+            if (uploadPrivacy === 'Public' || uploadPrivacy === 'Amis') {
+                if (file.type.startsWith('image')) {
+                    const base64 = await toBase64(file);
+                    const modResult = await moderateImage(base64);
+                    if (!modResult.isSafe) {
+                        setModerationError(`L'image "${file.name}" a été rejetée : ${modResult.reason || "Non conforme."}`);
+                        setIsUploading(false);
+                        return;
+                    }
+                }
+            }
+
+            const fileName = `${Date.now()}_${file.name}`;
             const storagePath = `gallery/${activeUserId}/${fileName}`;
             const storageRef = ref(storage, storagePath);
             
@@ -142,13 +203,19 @@ export default function Gallery() {
                 userId: activeUserId,
                 authorId: currentUser.uid,
                 authorName: isCoachView ? "Coach" : (currentUser.displayName || "Moi"),
+                authorAvatar: currentUser.photoURL || "",
                 mediaUrl: downloadURL,
                 type: file.type.startsWith('video') ? 'video' : 'image',
                 category: isCoachView ? 'reference' : uploadCategory,
                 privacy: uploadPrivacy,
+                caption: uploadCaption,
+                hashtags: hashtags,
+                location: locationName,
+                filter: selectedFilter,
+                isMuted: file.type.startsWith('video') ? isMuted : false,
                 uploadedByCoach: isCoachView,
                 createdAt: new Date().toISOString(),
-                likes: 0,
+                likes: [],
                 comments: []
             };
 
@@ -165,8 +232,13 @@ export default function Gallery() {
         setTimeout(() => {
             setIsUploadOpen(false);
             setUploadFiles([]);
+            setUploadCaption('');
             setUploadProgress(0);
             setIsUploading(false);
+            setUseLocation(false);
+            setLocationName('');
+            setSelectedFilter('Normal');
+            setIsMuted(false);
         }, 500);
 
     } catch (e) {
@@ -222,7 +294,7 @@ export default function Gallery() {
   return (
     <div className="p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white relative pb-40">
       
-      {/* --- SWITCHER: PRIVATE vs KB SOCIAL (STAYS AT THE VERY TOP) --- */}
+      {/* --- SWITCHER --- */}
       <div className="max-w-7xl mx-auto mb-12">
         <div className="bg-black/40 p-2 rounded-[2rem] border border-gray-800 shadow-2xl flex gap-2">
             <button
@@ -300,32 +372,41 @@ export default function Gallery() {
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden"
                 >
-                    <Card className="bg-[#1a1a20] border border-gray-800 shadow-2xl rounded-3xl overflow-hidden">
+                    <Card className="bg-[#1a1a20] border border-gray-800 shadow-2xl rounded-3xl overflow-hidden mb-12">
                         <CardContent className="p-8">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                <div className="md:col-span-2">
+                                <div className="md:col-span-2 space-y-6">
                                     <div
-                                        className="border-2 border-dashed border-gray-700 rounded-3xl flex flex-col items-center justify-center p-8 cursor-pointer hover:border-[#00f5d4] hover:bg-[#00f5d4]/5 transition-all min-h-[250px] group"
+                                        className="border-2 border-dashed border-gray-700 rounded-3xl flex flex-col items-center justify-center p-8 cursor-pointer hover:border-[#00f5d4] hover:bg-[#00f5d4]/5 transition-all min-h-[300px] group relative overflow-hidden"
                                         onClick={() => fileInputRef.current.click()}
                                     >
                                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*" multiple onChange={handleFileSelect}/>
 
                                         {uploadFiles.length > 0 ? (
                                             <div className="w-full">
-                                                <p className="text-center text-[#00f5d4] font-black uppercase italic mb-6 tracking-tighter text-xl">{uploadFiles.length} MEDIA PRÊTS</p>
+                                                <div className="flex justify-between items-center mb-6">
+                                                    <p className="text-[#00f5d4] font-black uppercase italic tracking-tighter text-xl">{uploadFiles.length} MÉDIAS PRÊTS</p>
+                                                    <div className="flex gap-2">
+                                                        {uploadFiles.some(f => f.type.startsWith('video')) && (
+                                                            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }} className={`h-10 w-10 rounded-full ${isMuted ? 'text-red-500 bg-red-500/10' : 'text-[#00f5d4] bg-[#00f5d4]/10'}`}>
+                                                                {isMuted ? <VolumeX size={20}/> : <Volume2 size={20}/>}
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
                                                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-60 overflow-y-auto custom-scrollbar p-2">
                                                     {uploadFiles.map((file, idx) => (
-                                                        <div key={idx} className="relative aspect-square bg-black rounded-2xl overflow-hidden border border-gray-800" onClick={(e) => e.stopPropagation()}>
+                                                        <div key={idx} className="relative aspect-square bg-black rounded-2xl overflow-hidden border border-gray-800 group/item" onClick={(e) => e.stopPropagation()}>
                                                             {file.type.startsWith('video') ? (
                                                                 <div className="w-full h-full flex items-center justify-center text-gray-500 bg-gray-900"><Video size={24}/></div>
                                                             ) : (
-                                                                <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover opacity-80" />
+                                                                <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" style={{ filter: FILTERS.find(f => f.name === selectedFilter)?.filter || 'none' }} />
                                                             )}
-                                                            <button onClick={() => removeFile(idx)} className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 shadow-lg hover:scale-110 transition-transform"><X size={14} /></button>
+                                                            <button onClick={() => removeFile(idx)} className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover/item:opacity-100 transition-opacity"><X size={14} /></button>
                                                         </div>
                                                     ))}
-                                                    <div className="aspect-square flex items-center justify-center bg-gray-900 border-2 border-dashed border-gray-800 rounded-2xl hover:border-[#00f5d4] transition-colors" onClick={() => fileInputRef.current.click()}>
-                                                        <PlusIcon />
+                                                    <div className="aspect-square flex items-center justify-center bg-gray-900 border-2 border-dashed border-gray-800 rounded-2xl hover:border-[#00f5d4] transition-colors">
+                                                        <Plus size={24} className="text-gray-600"/>
                                                     </div>
                                                 </div>
                                             </div>
@@ -341,6 +422,54 @@ export default function Gallery() {
                                             </div>
                                         )}
                                     </div>
+
+                                    {/* FILTRES STYLE INSTAGRAM */}
+                                    {uploadFiles.length > 0 && !uploadFiles.some(f => f.type.startsWith('video')) && (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-2 px-1">
+                                                <Wand2 size={14} className="text-[#7b2cbf]"/>
+                                                <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Filtres Créatifs</span>
+                                            </div>
+                                            <div className="flex gap-3 overflow-x-auto pb-4 px-1 custom-scrollbar">
+                                                {FILTERS.map((f) => (
+                                                    <button key={f.name} onClick={() => setSelectedFilter(f.name)} className={`flex-shrink-0 flex flex-col items-center gap-2 group transition-all ${selectedFilter === f.name ? 'scale-105' : 'opacity-60 hover:opacity-100'}`}>
+                                                        <div className="w-16 h-16 rounded-xl border-2 overflow-hidden shadow-lg transition-all" style={{ borderColor: selectedFilter === f.name ? '#00f5d4' : 'transparent' }}>
+                                                            <div className="w-full h-full bg-gray-800" style={{ filter: f.filter }} />
+                                                        </div>
+                                                        <span className={`text-[9px] font-bold uppercase ${selectedFilter === f.name ? 'text-[#00f5d4]' : 'text-gray-500'}`}>{f.name}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-gray-500 uppercase font-black tracking-widest px-1">Légende & Hashtags</label>
+                                        <Textarea
+                                            value={uploadCaption}
+                                            onChange={(e) => setUploadCaption(e.target.value)}
+                                            placeholder="Ex: Ma séance jambe d'aujourd'hui ! #fitness #legsday #motivation"
+                                            className="bg-black/40 border-gray-800 rounded-2xl min-h-[100px] text-sm focus:border-[#00f5d4] transition-all"
+                                        />
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl border border-gray-800 hover:border-[#00f5d4]/30 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-xl ${useLocation ? 'bg-[#00f5d4]/20 text-[#00f5d4]' : 'bg-gray-800 text-gray-500'}`}><MapPin size={18}/></div>
+                                            <div>
+                                                <p className="text-xs font-bold text-white">Ajouter une localisation</p>
+                                                <p className="text-[9px] text-gray-500 font-bold uppercase tracking-tighter">{locationName || "Désactivé"}</p>
+                                            </div>
+                                        </div>
+                                        <Switch checked={useLocation} onCheckedChange={handleLocationToggle} />
+                                    </div>
+
+                                    {moderationError && (
+                                        <div className="p-4 bg-red-500/10 border border-red-500/50 rounded-2xl flex items-center gap-3 text-red-400">
+                                            <AlertCircle size={20} />
+                                            <p className="text-sm font-bold">{moderationError}</p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="space-y-6">
@@ -352,33 +481,38 @@ export default function Gallery() {
                                         <div className="space-y-2">
                                             <label className="text-[10px] text-gray-500 uppercase font-black tracking-widest">{t('category')}</label>
                                             <Select value={uploadCategory} onValueChange={setUploadCategory}>
-                                                <SelectTrigger className="bg-black/40 border-gray-800 text-white h-12 rounded-xl focus:ring-[#00f5d4]"><SelectValue /></SelectTrigger>
-                                                <SelectContent className="bg-[#1a1a20] border-gray-800 text-white">
-                                                    <SelectItem value="physique">{t('physique')}</SelectItem>
-                                                    <SelectItem value="posing">{t('posing')}</SelectItem>
-                                                    <SelectItem value="repas">{t('meal')}</SelectItem>
-                                                    <SelectItem value="reference">Suivi Coach</SelectItem>
+                                                <SelectTrigger className="bg-black/40 border-gray-800 text-white h-12 rounded-xl focus:ring-[#00f5d4] shadow-xl"><SelectValue /></SelectTrigger>
+                                                <SelectContent className="bg-[#1a1a20] border-gray-800 text-white rounded-xl">
+                                                    <SelectItem value="physique" className="uppercase font-bold text-xs">{t('physique')}</SelectItem>
+                                                    <SelectItem value="posing" className="uppercase font-bold text-xs">{t('posing')}</SelectItem>
+                                                    <SelectItem value="repas" className="uppercase font-bold text-xs">{t('meal')}</SelectItem>
+                                                    <SelectItem value="reference" className="uppercase font-bold text-xs">Suivi Coach</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] text-gray-500 uppercase font-black tracking-widest">{t('privacy')}</label>
-                                            <Select value={uploadPrivacy} onValueChange={setUploadPrivacy}>
-                                                <SelectTrigger className="bg-black/40 border-gray-800 text-white h-12 rounded-xl focus:ring-[#00f5d4]"><SelectValue /></SelectTrigger>
-                                                <SelectContent className="bg-[#1a1a20] border-gray-800 text-white">
-                                                    <SelectItem value="Coach">{t('visible_coach')}</SelectItem>
-                                                    <SelectItem value="Privé">{t('me_only')}</SelectItem>
-                                                    <SelectItem value="Amis">Amis</SelectItem>
-                                                    <SelectItem value="Public">{t('visible_community')}</SelectItem>
+                                            <Select value={uploadPrivacy} onValueChange={(val) => { setUploadPrivacy(val); setModerationError(null); }}>
+                                                <SelectTrigger className="bg-black/40 border-gray-800 text-white h-12 rounded-xl focus:ring-[#00f5d4] shadow-xl"><SelectValue /></SelectTrigger>
+                                                <SelectContent className="bg-[#1a1a20] border-gray-800 text-white rounded-xl">
+                                                    <SelectItem value="Coach" className="uppercase font-bold text-xs">{t('visible_coach')}</SelectItem>
+                                                    <SelectItem value="Privé" className="uppercase font-bold text-xs">{t('me_only')}</SelectItem>
+                                                    <SelectItem value="Amis" className="uppercase font-bold text-xs">Amis</SelectItem>
+                                                    <SelectItem value="Public" className="uppercase font-bold text-xs">{t('visible_community')}</SelectItem>
                                                 </SelectContent>
                                             </Select>
+                                            {(uploadPrivacy === 'Public' || uploadPrivacy === 'Amis') && (
+                                                <p className="text-[9px] text-[#00f5d4] font-black uppercase tracking-tighter flex items-center gap-1 mt-1">
+                                                    <ShieldCheck size={10}/> Scan de sécurité IA activé
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
 
                                     {isUploading && (
                                         <div className="space-y-2 pt-4">
                                             <div className="flex justify-between text-[10px] font-black uppercase text-gray-400">
-                                                <span>Progression</span>
+                                                <span>{moderationError ? 'Echec' : 'Progression'}</span>
                                                 <span>{uploadProgress}%</span>
                                             </div>
                                             <Progress value={uploadProgress} className="h-1.5 bg-gray-800" />
@@ -403,7 +537,7 @@ export default function Gallery() {
           {/* FILTRES CATEGORIES */}
           <div className="flex flex-col md:flex-row justify-between items-center gap-6">
               <Tabs value={filterCategory} onValueChange={setFilterCategory} className="w-full md:w-auto">
-                  <TabsList className="bg-[#1a1a20] border border-gray-800 h-12 p-1 rounded-2xl">
+                  <TabsList className="bg-[#1a1a20] border border-gray-800 h-12 p-1 rounded-2xl shadow-xl">
                       {CATEGORIES.map(cat => (
                           <TabsTrigger key={cat.id} value={cat.id} className="data-[state=active]:bg-[#00f5d4] data-[state=active]:text-black text-[10px] font-black uppercase italic tracking-widest px-6 h-10 rounded-xl transition-all">
                               <span className="mr-2">{cat.icon}</span> {cat.id === 'all' ? 'Tout' : (cat.id === 'reference' ? 'Suivi' : t(cat.id))}
@@ -435,7 +569,7 @@ export default function Gallery() {
           {/* GRILLE */}
           {isLoading ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="aspect-square bg-[#1a1a20]/60 rounded-3xl border border-gray-800 animate-pulse"></div>)}
+                  {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="aspect-square bg-[#1a1a20]/60 rounded-3xl border border-gray-800 animate-pulse shadow-2xl"></div>)}
               </div>
           ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -460,7 +594,7 @@ export default function Gallery() {
                                   {media.type === 'video' ? (
                                       <video src={media.mediaUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                   ) : (
-                                      <img src={media.mediaUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" loading="lazy" />
+                                      <img src={media.mediaUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" loading="lazy" style={{ filter: FILTERS.find(f => f.name === media.filter)?.filter || 'none' }} />
                                   )}
 
                                   <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-5">
@@ -512,7 +646,6 @@ export default function Gallery() {
               </div>
           )}
 
-          {/* LIVE TICKER PERSONNEL */}
           {!isCoachView && activeUserId === currentUser?.uid && myUpdatesTicker.length > 0 && (
             <div className="fixed bottom-0 left-0 right-0 h-28 bg-black/60 backdrop-blur-2xl border-t border-white/5 z-50 flex items-center overflow-hidden">
                 <div className="px-6 bg-[#00f5d4] text-black font-black text-[10px] uppercase italic py-2 rounded-r-3xl absolute left-0 z-20 shadow-[0_0_30px_rgba(0,245,212,0.4)] flex items-center gap-2">
@@ -534,7 +667,6 @@ export default function Gallery() {
           )}
         </div>
       ) : (
-        /* --- KAYBEE SOCIAL VIEW --- */
         <div className="max-w-7xl mx-auto">
             <KaybeeSocial currentUser={currentUser} />
         </div>
@@ -542,7 +674,7 @@ export default function Gallery() {
 
       {/* MODAL LIGHTBOX / COMPARE */}
       <Dialog open={!!selectedMedia} onOpenChange={() => { setSelectedMedia(null); if(selectedMedia === 'COMPARE') setCompareSelection([]); }}>
-        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-7xl p-0 overflow-hidden rounded-[2.5rem] shadow-2xl">
+        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-7xl p-0 overflow-hidden rounded-[2.5rem] shadow-2xl border border-white/5">
             {selectedMedia === 'COMPARE' && compareSelection.length === 2 ? (
                 <div className="flex flex-col h-[85vh]">
                     <div className="flex-1 grid grid-cols-2 gap-1 bg-black relative">
@@ -575,42 +707,47 @@ export default function Gallery() {
                     <div className="flex flex-col md:flex-row h-[85vh]">
                         <div className="flex-1 bg-black flex items-center justify-center relative">
                             {selectedMedia.type === 'video' ? (
-                                <video src={selectedMedia.mediaUrl} controls autoPlay className="max-w-full max-h-full" />
+                                <video src={selectedMedia.mediaUrl} controls autoPlay muted={selectedMedia.isMuted} className="max-w-full max-h-full" />
                             ) : (
-                                <img src={selectedMedia.mediaUrl} className="max-w-full max-h-full object-contain shadow-2xl" />
+                                <img src={selectedMedia.mediaUrl} className="max-w-full max-h-full object-contain shadow-2xl" style={{ filter: FILTERS.find(f => f.name === selectedMedia.filter)?.filter || 'none' }} />
                             )}
                         </div>
-                        <div className="w-full md:w-[26rem] bg-[#1a1a20] border-l border-white/5 p-8 flex flex-col">
+                        <div className="w-full md:w-[26rem] bg-[#1a1a20] border-l border-white/5 p-8 flex flex-col shadow-2xl">
                             <div className="flex items-center gap-4 mb-8 p-4 bg-black/20 rounded-3xl border border-white/5">
-                                <Avatar className="w-14 h-14 border-2 border-[#7b2cbf]">
+                                <Avatar className="w-14 h-14 border-2 border-[#7b2cbf] shadow-xl shadow-[#7b2cbf]/20">
                                     <AvatarFallback className="bg-[#7b2cbf] text-white font-black italic text-xl">{selectedMedia.authorName?.[0]}</AvatarFallback>
                                 </Avatar>
                                 <div>
                                     <p className="font-black italic uppercase tracking-tighter text-lg text-white">{selectedMedia.authorName}</p>
                                     <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-1"><Clock size={10}/> {format(new Date(selectedMedia.createdAt), 'PPP', {locale: fr})}</p>
+                                    {selectedMedia.location && (
+                                        <p className="text-[9px] text-[#00f5d4] font-black uppercase flex items-center gap-1 mt-1">
+                                            <MapPin size={10}/> {selectedMedia.location}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3 mb-8">
-                                <div className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col items-center gap-1">
-                                  <label className="text-[8px] text-gray-600 font-black uppercase">Confidentialité</label>
+                                <div className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col items-center gap-1 text-[8px] text-gray-600 font-black uppercase text-center">
+                                  <label className="mb-1 opacity-50">Confidentialité</label>
                                   <PrivacyBadge privacy={selectedMedia.privacy} />
                                 </div>
-                                <div className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col items-center gap-1">
-                                  <label className="text-[8px] text-gray-600 font-black uppercase">Catégorie</label>
-                                  <Badge variant="outline" className="text-[10px] font-black uppercase border-[#00f5d4]/20 text-[#00f5d4]">{selectedMedia.category}</Badge>
+                                <div className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col items-center gap-1 text-center">
+                                  <label className="text-[8px] text-gray-600 font-black uppercase opacity-50 mb-1">Catégorie</label>
+                                  <Badge variant="outline" className="text-[10px] font-black uppercase border-[#00f5d4]/20 text-[#00f5d4] shadow-lg shadow-[#00f5d4]/10">{selectedMedia.category}</Badge>
                                 </div>
                             </div>
 
-                            <div className="flex-1 p-6 bg-black/20 rounded-3xl border border-white/5 italic text-sm text-gray-400 leading-relaxed">
+                            <div className="flex-1 p-6 bg-black/20 rounded-3xl border border-white/5 italic text-sm text-gray-400 leading-relaxed overflow-y-auto custom-scrollbar shadow-inner">
                               {selectedMedia.caption || "Aucune description pour ce média."}
                             </div>
 
                             <div className="flex gap-3 mt-8 pt-8 border-t border-white/5">
-                                <Button variant="ghost" className="flex-1 h-14 rounded-2xl text-gray-500 hover:text-red-500 hover:bg-red-500/10 transition-all font-black uppercase italic" onClick={() => handleDelete(selectedMedia.id)}>
+                                <Button variant="ghost" className="flex-1 h-14 rounded-2xl text-gray-500 hover:text-red-500 font-black uppercase italic hover:bg-red-500/10 transition-all" onClick={() => handleDelete(selectedMedia.id)}>
                                     <Trash2 size={24} className="mr-2" /> Supprimer
                                 </Button>
-                                <Button variant="ghost" className="flex-1 h-14 rounded-2xl text-gray-500 hover:text-[#00f5d4] hover:bg-[#00f5d4]/10 transition-all font-black uppercase italic">
+                                <Button variant="ghost" className="flex-1 h-14 rounded-2xl text-gray-500 hover:text-[#00f5d4] font-black uppercase italic hover:bg-[#00f5d4]/10 transition-all">
                                     <Share2 size={24} className="mr-2" /> Partager
                                 </Button>
                             </div>

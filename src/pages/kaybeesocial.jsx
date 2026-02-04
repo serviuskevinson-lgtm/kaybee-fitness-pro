@@ -1,407 +1,410 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import {
-  collection, query, where, getDocs, orderBy, limit, addDoc, serverTimestamp
+  collection, query, where, orderBy, getDocs, doc, updateDoc, arrayUnion, arrayRemove, addDoc, serverTimestamp, limit, getDoc, deleteDoc
 } from 'firebase/firestore';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Search, Heart, MessageSquare, Share2, MoreVertical, UserPlus, LayoutGrid, Loader2, AlertTriangle, ShieldAlert
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent } from "@/components/ui/card";
+import { Heart, MessageCircle, Share2, Repeat, Send, Loader2, X, Search, Users, Globe, Smartphone, Copy, Check, Settings, User, Hash, MoreVertical, Edit2, Trash2, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { sendNotification } from '@/lib/notifications';
+import { useAuth } from '@/context/AuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from '@/components/ui/input';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 
-/**
- * COMPOSANT : PROFIL UTILISATEUR (Instagram Style)
- */
-export const UserProfileModal = ({ userData, onClose, currentUser }) => {
-  const [posts, setPosts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+const PostCard = ({ post, currentUser, onPostUpdate, onPostDelete }) => {
+  const navigate = useNavigate();
+  const likesArray = Array.isArray(post.likes) ? post.likes : [];
+  const [isLiked, setIsLiked] = useState(likesArray.includes(currentUser?.uid));
+  const [likeCount, setLikeCount] = useState(likesArray.length);
+
+  const [comment, setComment] = useState('');
+  const [comments, setComments] = useState(Array.isArray(post.comments) ? post.comments : []);
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [friendList, setFriendList] = useState([]);
+  const [searchFriend, setSearchFriend] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editCaption, setEditCaption] = useState(post.caption || '');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const isOwner = currentUser?.uid === post.userId;
 
   useEffect(() => {
-    const fetchUserPosts = async () => {
-      if (!userData?.uid && !userData?.id) return;
-      const uid = userData.uid || userData.id;
-      try {
-        const q = query(
-          collection(db, "posts"),
-          where("userId", "==", uid),
-          where("privacy", "==", "Public"),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-        setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (e) {
-        console.error("Error fetching user posts:", e);
-      } finally {
-        setIsLoading(false);
-      }
+    if (!isShareModalOpen || !currentUser) return;
+    const fetchFriends = async () => {
+        try {
+            const [s1, s2] = await Promise.all([
+                getDocs(query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "accepted"))),
+                getDocs(query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "accepted")))
+            ]);
+            const contacts = [];
+            s1.forEach(d => contacts.push({ uid: d.data().toId, name: d.data().toName, avatar: d.data().toAvatar }));
+            s2.forEach(d => contacts.push({ uid: d.data().fromId, name: d.data().fromName, avatar: d.data().fromAvatar }));
+            setFriendList([...new Map(contacts.map(item => [item.uid, item])).values()]);
+        } catch (e) { console.error(e); }
     };
-    fetchUserPosts();
-  }, [userData]);
+    fetchFriends();
+  }, [isShareModalOpen, currentUser]);
 
-  const handleAddFriend = async () => {
+  const handleLike = async () => {
+    if (!currentUser) return;
+    const postRef = doc(db, "posts", post.id);
     try {
-      await sendNotification(
-        userData.uid || userData.id,
-        currentUser.uid,
-        currentUser.displayName || "Un utilisateur",
-        "Demande d'ami 🤝",
-        `${currentUser.displayName || 'Quelqu\'un'} souhaite devenir votre ami sur Kaybee.`,
-        "friend_request"
-      );
-      alert("Demande d'ami envoyée !");
-    } catch (e) {
-      console.error(e);
-    }
+      if (isLiked) {
+        await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
+        setLikeCount(prev => prev - 1);
+      } else {
+        await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
+        setLikeCount(prev => prev + 1);
+      }
+      setIsLiked(!isLiked);
+    } catch (e) { console.error("Erreur like:", e); }
   };
 
-  return (
-    <div className="bg-[#0a0a0f] text-white h-full overflow-y-auto custom-scrollbar p-6">
-      <div className="flex flex-col items-center mb-8">
-        <Avatar className="w-24 h-24 border-4 border-[#1a1a20] ring-2 ring-[#00f5d4] mb-4">
-          <AvatarImage src={userData?.avatar} className="object-cover"/>
-          <AvatarFallback className="bg-[#7b2cbf] text-2xl font-black">
-            {userData?.full_name ? userData.full_name[0] : (userData?.firstName ? userData.firstName[0] : '?')}
-          </AvatarFallback>
-        </Avatar>
-        <h2 className="text-2xl font-black uppercase italic tracking-tighter">{userData?.full_name || userData?.username}</h2>
-        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">
-          {userData?.role === 'coach' ? 'Coach Élite' : 'Athlète Kaybee'}
-        </p>
-
-        <div className="flex gap-4 mt-6">
-          <div className="text-center">
-            <p className="font-black text-white">{posts.length}</p>
-            <p className="text-[10px] text-gray-500 uppercase font-bold">Posts</p>
-          </div>
-          <div className="text-center">
-            <p className="font-black text-white">{userData?.points || 0}</p>
-            <p className="text-[10px] text-gray-500 uppercase font-bold">Points</p>
-          </div>
-          <div className="text-center">
-            <p className="font-black text-white">{userData?.level || 1}</p>
-            <p className="text-[10px] text-gray-500 uppercase font-bold">Niveau</p>
-          </div>
-        </div>
-
-        {currentUser?.uid !== (userData?.uid || userData?.id) && (
-          <div className="flex gap-2 mt-6 w-full max-w-xs">
-            <Button onClick={handleAddFriend} className="flex-1 bg-[#00f5d4] text-black font-black uppercase italic h-10 rounded-xl">
-              <UserPlus size={16} className="mr-2"/> Suivre
-            </Button>
-            <Button variant="outline" className="flex-1 border-gray-800 text-white font-black uppercase italic h-10 rounded-xl">
-              Message
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-gray-800 pt-6">
-        <p className="text-sm text-gray-300 text-center mb-8 italic">
-          {userData?.bio || "Aucune bio disponible."}
-        </p>
-
-        {isLoading ? (
-          <div className="grid grid-cols-3 gap-1">
-            {[1,2,3,4,5,6].map(i => <div key={i} className="aspect-square bg-gray-900 animate-pulse"></div>)}
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-1">
-            {posts.map(post => (
-              <div key={post.id} className="aspect-square bg-gray-900 relative group overflow-hidden cursor-pointer">
-                {post.type === 'video' ? (
-                  <video src={post.mediaUrl} className="w-full h-full object-cover" />
-                ) : (
-                  <img src={post.mediaUrl} className="w-full h-full object-cover" />
-                )}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                  <div className="flex items-center text-white font-bold"><Heart size={16} fill="white" className="mr-1"/> {post.likes || 0}</div>
-                  <div className="flex items-center text-white font-bold"><MessageSquare size={16} fill="white" className="mr-1"/> {post.comments?.length || 0}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/**
- * COMPOSANT : POST CARD (Instagram Style)
- */
-const PostCard = ({ post, onUserClick, currentUser }) => {
-  const [liked, setLiked] = useState(false);
-  const [isReportOpen, setIsReportOpen] = useState(false);
-
-  const handleReport = async (reason) => {
+  const handleComment = async () => {
+    if (!currentUser || !comment) return;
+    setIsCommenting(true);
+    const postRef = doc(db, "posts", post.id);
+    const newComment = {
+      userId: currentUser.uid,
+      authorName: currentUser.displayName || 'Anonyme',
+      authorAvatar: currentUser.photoURL,
+      text: comment,
+      createdAt: new Date().toISOString(),
+    };
     try {
-      await addDoc(collection(db, "reports"), {
-        postId: post.id,
-        authorId: post.authorId,
-        reporterId: currentUser?.uid,
-        reason: reason,
-        createdAt: serverTimestamp(),
-        status: "pending"
-      });
-      alert("Signalement envoyé. Notre équipe modérera ce contenu rapidement.");
-      setIsReportOpen(false);
+      await updateDoc(postRef, { comments: arrayUnion(newComment) });
+      setComments(prev => [...prev, newComment]);
+      setComment('');
+    } catch (e) { console.error("Erreur commentaire:", e); }
+    finally { setIsCommenting(false); }
+  };
+
+  const handleSaveEdit = async () => {
+    setIsSavingEdit(true);
+    try {
+        const hashtags = editCaption.match(/#\w+/g) || [];
+        await updateDoc(doc(db, "posts", post.id), {
+            caption: editCaption,
+            hashtags: hashtags
+        });
+        onPostUpdate(post.id, editCaption, hashtags);
+        setIsEditModalOpen(false);
+    } catch (e) { console.error(e); }
+    finally { setIsSavingEdit(false); }
+  };
+
+  const handleDeletePost = async () => {
+    if (!window.confirm("Supprimer définitivement ce post ?")) return;
+    try {
+        await deleteDoc(doc(db, "posts", post.id));
+        onPostDelete(post.id);
     } catch (e) { console.error(e); }
   };
 
+  const handleRepost = async () => {
+    if (!currentUser || !window.confirm("Reposter sur votre profil ?")) return;
+    try {
+      await addDoc(collection(db, "posts"), {
+        userId: currentUser.uid,
+        authorName: currentUser.displayName,
+        authorAvatar: currentUser.photoURL,
+        createdAt: new Date().toISOString(),
+        privacy: 'Public',
+        category: 'repost',
+        originalPost: { id: post.id, authorName: post.authorName, authorAvatar: post.authorAvatar, mediaUrl: post.mediaUrl, type: post.type },
+        likes: [],
+        comments: [],
+      });
+      alert("Reposté avec succès !");
+    } catch (e) { console.error(e); }
+  };
+
+  const shareToFriend = async (friend) => {
+    if (isSending) return;
+    setIsSending(true);
+    const conversationId = [currentUser.uid, friend.uid].sort().join('_');
+    const meSnap = await getDoc(doc(db, "users", currentUser.uid));
+    const myAvatar = meSnap.data()?.avatar || "";
+    try {
+        await addDoc(collection(db, "messages"), {
+            conversationId,
+            senderId: currentUser.uid,
+            senderName: currentUser.displayName || "Moi",
+            senderAvatar: myAvatar,
+            text: `Je te partage ce post de ${post.authorName}`,
+            sharedItem: { type: 'social_post', data: { id: post.id, authorName: post.authorName, mediaUrl: post.mediaUrl, type: post.type } },
+            createdAt: serverTimestamp(),
+            read: false
+        });
+        alert(`Partagé avec ${friend.name} !`);
+        setIsShareModalOpen(false);
+    } catch (e) { console.error(e); }
+    finally { setIsSending(false); }
+  };
+
+  const handleExternalShare = async () => {
+    const shareData = { title: 'Kaybee Fitness Pro', text: `Regarde ce post de ${post.authorName} !`, url: window.location.origin + '/gallery?postId=' + post.id };
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else { await navigator.clipboard.writeText(shareData.url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    } catch (e) { console.error(e); }
+  };
+
+  const renderCaption = (text) => {
+    if (!text) return null;
+    return text.split(/(\s+)/).map((part, i) => {
+      if (part.startsWith('#')) return <span key={i} className="text-[#00f5d4] font-bold cursor-pointer hover:underline">{part}</span>;
+      return part;
+    });
+  };
+
   return (
-    <Card className="bg-transparent border-none shadow-none mb-8 w-full max-w-md mx-auto">
-      <div className="flex items-center justify-between p-3">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => onUserClick(post.authorId)}>
-          <Avatar className="w-10 h-10 border border-[#00f5d4]/30">
-            <AvatarFallback className="bg-[#7b2cbf] text-white font-black">{post.authorName ? post.authorName[0] : '?'}</AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="text-sm font-black text-white">{post.authorName}</p>
-            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-              {post.createdAt ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true, locale: fr }) : 'Récemment'}
-            </p>
-          </div>
-        </div>
-
-        {/* REPORT ACTION */}
-        <Dialog open={isReportOpen} onOpenChange={setIsReportOpen}>
-          <button onClick={() => setIsReportOpen(true)} className="text-gray-600 hover:text-red-500 transition-colors p-2">
-            <ShieldAlert size={20} />
-          </button>
-          <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl p-6">
-            <h3 className="text-xl font-black uppercase italic text-red-500 mb-4 flex items-center gap-2">
-              <AlertTriangle size={24}/> Signaler ce contenu
-            </h3>
-            <div className="space-y-3">
-              {[
-                "Filmage sans consentement",
-                "Contenu inapproprié / Nudité",
-                "Harcèlement / Intimidation",
-                "Informations mensongères",
-                "Spam / Publicité abusive"
-              ].map(reason => (
-                <Button
-                  key={reason}
-                  variant="outline"
-                  className="w-full justify-start border-gray-800 hover:bg-red-500/10 hover:text-red-500 font-bold"
-                  onClick={() => handleReport(reason)}
-                >
-                  {reason}
-                </Button>
-              ))}
+    <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden shadow-lg mb-6 group">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate(`/profile/${post.userId}`)}>
+            <Avatar className="w-12 h-12 border-2 border-[#9d4edd] group-hover:scale-105 transition-transform">
+              <AvatarImage src={post.authorAvatar} />
+              <AvatarFallback className="bg-[#9d4edd] font-black">{post.authorName?.[0]}</AvatarFallback>
+            </Avatar>
+            <div>
+              <p className="font-bold text-white uppercase italic tracking-tighter">{post.authorName}</p>
+              <p className="text-[10px] text-gray-400 font-black uppercase">
+                {post.createdAt ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true, locale: fr }) : '...'}
+              </p>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="aspect-square bg-black rounded-xl overflow-hidden border border-gray-800 shadow-2xl">
-        {post.type === 'video' ? (
-          <video src={post.mediaUrl} controls className="w-full h-full object-cover" />
-        ) : (
-          <img src={post.mediaUrl} className="w-full h-full object-cover" loading="lazy" />
-        )}
-      </div>
-
-      <div className="p-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setLiked(!liked)} className={`${liked ? 'text-red-500' : 'text-white'} transition-colors`}>
-              <Heart size={26} fill={liked ? "currentColor" : "none"} />
-            </button>
-            <button className="text-white">
-              <MessageSquare size={26} />
-            </button>
-            <button className="text-white">
-              <Share2 size={26} />
-            </button>
           </div>
-          <button className="text-white">
-            <LayoutGrid size={26} />
-          </button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-white rounded-full h-10 w-10"><MoreVertical size={20}/></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="bg-[#1a1a20] border-gray-800 text-white rounded-xl">
+                {isOwner && (
+                    <>
+                        <DropdownMenuItem onClick={() => setIsEditModalOpen(true)} className="gap-2 cursor-pointer focus:bg-[#7b2cbf]/20 focus:text-white"><Edit2 size={14}/> Modifier</DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleDeletePost} className="gap-2 cursor-pointer text-red-400 focus:bg-red-500/10 focus:text-red-400"><Trash2 size={14}/> Supprimer</DropdownMenuItem>
+                    </>
+                )}
+                <DropdownMenuItem className="gap-2 cursor-pointer focus:bg-white/5 focus:text-white"><AlertCircle size={14}/> Signaler</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        <p className="text-sm font-black text-white mb-1">{post.likes || 0} j'aime</p>
-        <p className="text-sm text-gray-300">
-          <span className="font-black mr-2 text-white">{post.authorName}</span>
-          {post.caption || "Elite performance state. 🚀"}
-        </p>
-        <button className="text-xs text-gray-500 font-bold mt-2 uppercase tracking-widest">
-          Voir les {post.comments?.length || 0} commentaires
-        </button>
-      </div>
+        {post.caption && (
+          <div className="mb-4 text-sm text-gray-300 leading-relaxed px-1">
+            {renderCaption(post.caption)}
+          </div>
+        )}
+
+        <div className="rounded-2xl overflow-hidden mb-4 border border-gray-800 bg-black/40">
+            {post.type === 'video' ? <video src={post.mediaUrl} controls className="w-full max-h-[500px] object-contain" /> : <img src={post.mediaUrl} className="w-full max-h-[500px] object-contain" alt="post" />}
+        </div>
+
+        <div className="flex justify-around items-center border-t border-b border-gray-800/50 py-1 mb-2">
+          <Button variant="ghost" onClick={handleLike} className={`flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] ${isLiked ? 'text-red-500' : 'text-gray-500'}`}><Heart fill={isLiked ? 'currentColor' : 'none'} size={18} /> {likeCount}</Button>
+          <Button variant="ghost" onClick={() => setShowComments(!showComments)} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><MessageCircle size={18} /> {comments.length}</Button>
+          <Button variant="ghost" onClick={() => setIsShareModalOpen(true)} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><Share2 size={18} /> Partager</Button>
+          <Button variant="ghost" onClick={handleRepost} className="flex-1 flex flex-col h-auto py-2 gap-1 font-black uppercase text-[10px] text-gray-500"><Repeat size={18} /> Reposter</Button>
+        </div>
+
+        <AnimatePresence>
+          {showComments && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-4 space-y-4">
+              <div className="max-h-60 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                  {comments.map((c, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                      <Avatar className="w-8 h-8 border border-gray-800 cursor-pointer" onClick={() => navigate(`/profile/${c.userId}`)}><AvatarImage src={c.authorAvatar} /><AvatarFallback>{c.authorName?.[0]}</AvatarFallback></Avatar>
+                      <div className="bg-black/30 p-3 rounded-2xl w-full border border-white/5">
+                          <p className="font-black text-[10px] text-[#9d4edd] uppercase italic">{c.authorName}</p>
+                          <p className="text-sm text-gray-300 font-bold leading-tight mt-1">{c.text}</p>
+                      </div>
+                  </div>
+                  ))}
+              </div>
+              <div className="flex gap-2 bg-black/20 p-2 rounded-2xl border border-gray-800 focus-within:border-[#9d4edd] transition-all">
+                <Input value={comment} onChange={e => setComment(e.target.value)} placeholder="Exprime-toi..." className="bg-transparent border-none text-white focus-visible:ring-0 shadow-none h-10 font-bold" onKeyPress={(e) => e.key === 'Enter' && handleComment()} />
+                <Button onClick={handleComment} disabled={isCommenting || !comment.trim()} className="h-10 w-10 p-0 rounded-full bg-[#9d4edd] hover:bg-[#7b2cbf] shrink-0">{isCommenting ? <Loader2 className="animate-spin w-5 h-5" /> : <Send size={18} />}</Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </CardContent>
+
+      {/* MODAL MODIFICATION */}
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-[2rem] max-w-md p-6 shadow-2xl">
+            <DialogHeader><DialogTitle className="text-2xl font-black italic uppercase italic tracking-tighter">Modifier la légende</DialogTitle></DialogHeader>
+            <div className="py-4">
+                <Textarea
+                    value={editCaption}
+                    onChange={(e) => setEditCaption(e.target.value)}
+                    className="bg-black/40 border-gray-800 rounded-2xl min-h-[150px] text-lg focus:border-[#00f5d4] transition-all"
+                    placeholder="Écris ta nouvelle légende ici..."
+                />
+            </div>
+            <DialogFooter className="gap-2">
+                <Button variant="ghost" onClick={() => setIsEditModalOpen(false)} className="flex-1 uppercase font-black">Annuler</Button>
+                <Button onClick={handleSaveEdit} disabled={isSavingEdit} className="flex-1 bg-[#00f5d4] text-black uppercase font-black h-12 rounded-xl">
+                    {isSavingEdit ? <Loader2 className="animate-spin" /> : "Enregistrer"}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL DE PARTAGE */}
+      <Dialog open={isShareModalOpen} onOpenChange={setIsShareModalOpen}>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-[2rem] max-w-sm p-0 overflow-hidden shadow-2xl">
+            <DialogHeader className="p-6 bg-black/40 border-b border-gray-800"><DialogTitle className="text-xl font-black italic uppercase flex items-center gap-2"><Share2 className="text-[#00f5d4]" /> Partager le post</DialogTitle></DialogHeader>
+            <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-3">
+                    <Button onClick={handleExternalShare} variant="outline" className="h-14 rounded-2xl border-gray-800 bg-white/5 hover:bg-white/10 flex flex-col gap-1">{copied ? <Check className="text-green-500" /> : <Copy className="text-[#00f5d4]" />}<span className="text-[10px] font-black uppercase">{copied ? 'Copié !' : 'Copier lien'}</span></Button>
+                    <Button onClick={handleExternalShare} variant="outline" className="h-14 rounded-2xl border-gray-800 bg-white/5 hover:bg-white/10 flex flex-col gap-1"><Smartphone className="text-[#7b2cbf]" /><span className="text-[10px] font-black uppercase">Plus d'options</span></Button>
+                </div>
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between"><p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Amis Kaybee</p><div className="relative w-32"><Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" /><Input value={searchFriend} onChange={(e) => setSearchFriend(e.target.value)} placeholder="Chercher..." className="h-7 bg-black/40 border-gray-800 text-[10px] pl-7 rounded-lg"/></div></div>
+                    <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                        {friendList.filter(f => f.name.toLowerCase().includes(searchFriend.toLowerCase())).map(friend => (
+                            <div key={friend.uid} className="flex items-center justify-between p-3 bg-black/20 rounded-2xl border border-white/5 hover:border-[#00f5d4]/50 transition-all"><div className="flex items-center gap-3"><Avatar className="h-8 w-8 border border-gray-800"><AvatarImage src={friend.avatar}/><AvatarFallback>{friend.name[0]}</AvatarFallback></Avatar><p className="font-bold text-xs text-white uppercase italic truncate w-24">{friend.name}</p></div><Button size="sm" onClick={() => shareToFriend(friend)} disabled={isSending} className="h-8 bg-[#00f5d4] text-black font-black uppercase text-[9px] rounded-lg px-3">Envoyer</Button></div>
+                        ))}
+                        {friendList.length === 0 && <p className="text-center text-[10px] text-gray-600 italic py-4">Aucun ami trouvé.</p>}
+                    </div>
+                </div>
+            </div>
+            <DialogFooter className="p-4 bg-black/20"><Button onClick={() => setIsShareModalOpen(false)} variant="ghost" className="w-full font-black uppercase italic text-xs text-gray-500">Fermer</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };
 
-/**
- * COMPOSANT PRINCIPAL : KAYBEE SOCIAL (Sous-vue)
- */
-export default function KaybeeSocial({ currentUser }) {
-  const [feedPosts, setFeedPosts] = useState([]);
+export default function KaybeeSocial() {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
+  const [posts, setPosts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedUser, setSelectedUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [tickerPosts, setTickerPosts] = useState([]);
+  const [userProfile, setUserProfile] = useState(null);
 
   useEffect(() => {
-    const fetchFeed = async () => {
+    const fetchPosts = async () => {
+      setIsLoading(true);
       try {
-        const q = query(
-          collection(db, "posts"),
-          where("privacy", "==", "Public"),
-          orderBy("createdAt", "desc"),
-          limit(20)
-        );
+        const q = query(collection(db, "posts"), where("privacy", "in", ["Public", "Amis"]), orderBy("createdAt", "desc"), limit(50));
         const snapshot = await getDocs(q);
-        const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setFeedPosts(posts);
-        setTickerPosts(posts.slice(0, 10));
-      } catch (e) {
-        console.error("Error fetching feed:", e);
-      } finally {
-        setIsLoading(false);
-      }
+        setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (e) { console.error("Erreur chargement posts sociaux:", e); }
+      finally { setIsLoading(false); }
     };
-    fetchFeed();
-  }, []);
+    const fetchMyProfile = async () => {
+        if (!currentUser) return;
+        const d = await getDoc(doc(db, "users", currentUser.uid));
+        if (d.exists()) setUserProfile(d.data());
+    };
+    fetchPosts();
+    fetchMyProfile();
+  }, [currentUser]);
 
-  const handleSearch = async (val) => {
-    setSearchQuery(val);
-    if (val.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-    try {
-      const q = query(
-        collection(db, "users"),
-        where("username", ">=", val.toLowerCase()),
-        where("username", "<=", val.toLowerCase() + '\uf8ff'),
-        limit(5)
-      );
-      const snap = await getDocs(q);
-      setSearchResults(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    } catch (e) {
-      console.error(e);
-    }
+  const handlePostUpdate = (postId, newCaption, newHashtags) => {
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, caption: newCaption, hashtags: newHashtags } : p));
   };
 
-  const openUserProfile = async (userId) => {
-    try {
-      const userDoc = await getDocs(query(collection(db, "users"), where("uid", "==", userId)));
-      if (!userDoc.empty) {
-        setSelectedUser(userDoc.docs[0].data());
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  const handlePostDelete = (postId) => {
+    setPosts(prev => prev.filter(p => p.id !== postId));
   };
+
+  const filteredPosts = posts.filter(post => {
+    const search = searchQuery.toLowerCase();
+    return (
+        post.authorName?.toLowerCase().includes(search) ||
+        post.caption?.toLowerCase().includes(search) ||
+        post.hashtags?.some(h => h.toLowerCase().includes(search))
+    );
+  });
 
   return (
-    <div className="bg-black min-h-screen text-white pb-32 pt-4">
-      <div className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-gray-900 p-4 rounded-3xl mb-6">
-        <div className="max-w-md mx-auto flex items-center justify-between gap-4">
-          <h1 className="text-xl font-black italic uppercase tracking-tighter text-[#00f5d4]">Kaybee <span className="text-white">Social</span></h1>
-          <div className="relative flex-1 max-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
-            <Input
-              placeholder="Rechercher..."
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              className="bg-[#1a1a20] border-none h-9 pl-9 text-xs rounded-full"
-            />
-            <AnimatePresence>
-              {searchResults.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute top-11 left-0 right-0 bg-[#1a1a20] border border-gray-800 rounded-2xl shadow-2xl overflow-hidden"
-                >
-                  {searchResults.map(user => (
-                    <button
-                      key={user.id}
-                      onClick={() => { setSelectedUser(user); setSearchResults([]); setSearchQuery(''); }}
-                      className="w-full p-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left"
-                    >
-                      <Avatar className="w-8 h-8">
-                        <AvatarFallback className="bg-[#7b2cbf] text-[10px] font-black">{user.username ? user.username[0] : (user.full_name ? user.full_name[0] : '?')}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-xs font-black text-white">@{user.username || 'user'}</p>
-                        <p className="text-[8px] text-gray-500 uppercase font-bold">{user.role}</p>
-                      </div>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-      </div>
+    <div className="max-w-2xl mx-auto space-y-6 py-8 px-4 pb-32">
 
-      <div className="border-b border-gray-900 py-4 mb-8">
-        <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar">
-          {tickerPosts.map((post) => (
-            <motion.div
-              key={post.id}
-              whileTap={{ scale: 0.9 }}
-              className="flex-shrink-0 flex flex-col items-center gap-1 cursor-pointer"
-              onClick={() => openUserProfile(post.authorId)}
-            >
-              <div className="w-16 h-16 rounded-full p-0.5 bg-gradient-to-tr from-[#7b2cbf] via-[#9d4edd] to-[#00f5d4]">
-                <div className="w-full h-full rounded-full border-2 border-black overflow-hidden bg-gray-900">
-                  <img src={post.mediaUrl} className="w-full h-full object-cover" />
+      {userProfile && (
+        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-[#1a1a20] border border-gray-800 p-6 rounded-[2.5rem] shadow-2xl flex items-center justify-between mb-8">
+            <div className="flex items-center gap-5 cursor-pointer" onClick={() => navigate(`/profile/${currentUser.uid}`)}>
+                <div className="relative">
+                    <Avatar className="w-16 h-16 border-4 border-[#7b2cbf] shadow-xl">
+                        <AvatarImage src={userProfile.avatar} className="object-cover" />
+                        <AvatarFallback className="bg-black text-[#7b2cbf] font-black text-xl">{userProfile.full_name?.[0]}</AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -bottom-1 -right-1 bg-[#00f5d4] p-1.5 rounded-full border-2 border-[#1a1a20]"><User size={12} className="text-black" /></div>
                 </div>
-              </div>
-              <span className="text-[10px] text-gray-400 font-bold truncate w-16 text-center">{post.authorName}</span>
-            </motion.div>
-          ))}
-        </div>
-      </div>
+                <div>
+                    <h2 className="text-xl font-black italic uppercase tracking-tighter text-white">{userProfile.username || userProfile.full_name}</h2>
+                    <p className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Mon Profil Athlète</p>
+                </div>
+            </div>
+            <div className="flex gap-3">
+                <div className="text-center px-4 border-r border-gray-800">
+                    <p className="text-lg font-black text-[#00f5d4] leading-none">{userProfile.friends?.length || 0}</p>
+                    <p className="text-[8px] text-gray-500 font-bold uppercase mt-1">Amis</p>
+                </div>
+                <Button onClick={() => navigate(`/profile/${currentUser.uid}`)} variant="ghost" size="icon" className="h-12 w-12 rounded-2xl bg-white/5 hover:bg-[#7b2cbf]/20 text-[#7b2cbf]"><Settings size={20} /></Button>
+            </div>
+        </motion.div>
+      )}
 
-      <div className="max-w-md mx-auto px-2">
-        {isLoading ? (
-          <div className="space-y-12 py-8">
-            {[1,2,3].map(i => (
-              <div key={i} className="animate-pulse">
-                <div className="flex gap-3 mb-4"><div className="w-10 h-10 rounded-full bg-gray-800"></div><div className="h-4 w-32 bg-gray-800 rounded mt-2"></div></div>
-                <div className="aspect-square bg-gray-900 rounded-xl"></div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="py-4">
-            {feedPosts.map(post => (
-              <PostCard
-                key={post.id}
-                post={post}
-                currentUser={currentUser}
-                onUserClick={openUserProfile}
+      <div className="relative group mb-10">
+          <div className="absolute -inset-1 bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] rounded-[2rem] blur opacity-25 group-focus-within:opacity-50 transition duration-1000"></div>
+          <div className="relative bg-[#0a0a0f] border border-gray-800 rounded-[2rem] flex items-center px-6 h-16 shadow-2xl">
+              <Search className="text-gray-500 group-focus-within:text-[#00f5d4] transition-colors" size={24} />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Chercher un athlète, un post ou un #hashtag..."
+                className="bg-transparent border-none text-white focus-visible:ring-0 shadow-none text-lg font-bold placeholder:text-gray-700"
               />
-            ))}
+              {searchQuery && <X className="text-gray-500 cursor-pointer hover:text-white" onClick={() => setSearchQuery('')} size={20} />}
           </div>
-        )}
       </div>
 
-      <Dialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
-        <DialogContent className="bg-transparent border-none p-0 max-w-lg h-[90vh] overflow-hidden rounded-[2.5rem] shadow-2xl">
-          {selectedUser && (
-            <UserProfileModal
-              userData={selectedUser}
-              currentUser={currentUser}
-              onClose={() => setSelectedUser(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <Loader2 className="w-12 h-12 text-[#9d4edd] animate-spin" />
+            <p className="text-[10px] font-black text-gray-500 uppercase animate-pulse">Chargement du flux social...</p>
+        </div>
+      ) : filteredPosts.length === 0 ? (
+          <div className="text-center py-20 bg-[#1a1a20]/40 rounded-[3rem] border border-dashed border-gray-800">
+              <Globe className="mx-auto text-gray-700 w-16 h-16 mb-4 opacity-20" />
+              <p className="text-gray-500 font-black uppercase italic tracking-widest text-lg">{searchQuery ? "Aucun résultat trouvé" : "Le fil est vide"}</p>
+              <p className="text-xs text-gray-600 mt-2 font-bold italic">Essayez une autre recherche ou publiez un post !</p>
+          </div>
+      ) : (
+        <div className="space-y-8">
+            {filteredPosts.map(post => (
+                <PostCard
+                    key={post.id}
+                    post={post}
+                    currentUser={currentUser}
+                    onPostUpdate={handlePostUpdate}
+                    onPostDelete={handlePostDelete}
+                />
+            ))}
+        </div>
+      )}
     </div>
   );
 }

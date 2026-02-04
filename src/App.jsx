@@ -22,6 +22,7 @@ import Dashboard from '@/pages/Dashboard';
 import Coach from '@/pages/Coach';
 import Community from '@/pages/Community';
 import Profile from '@/pages/Profile';
+import UserProfile from '@/pages/UserProfile';
 import Exercises from '@/pages/Exercises';
 import Run from '@/pages/Run';
 import Meals from '@/pages/Meals';
@@ -31,7 +32,10 @@ import Performance from '@/pages/Performance';
 import Gallery from '@/pages/Gallery';
 import Messages from '@/pages/Messages';
 import Challenges from '@/pages/Challenges';
-import MyTeam from '@/pages/MyTeam'; // Nouvelle page
+import MyTeam from '@/pages/MyTeam';
+import PrivacyPolicy from '@/pages/PrivacyPolicy';
+import CommunityGuidelines from '@/pages/CommunityGuidelines';
+import Copyright from '@/pages/Copyright';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import { App as CapacitorApp } from '@capacitor/app';
 
@@ -68,6 +72,7 @@ const AppContent = () => {
     if (path.includes('nutrition')) return 'Nutrition & Macros';
     if (path.includes('my-team')) return 'Mon Équipe';
     if (path.includes('run')) return 'Course';
+    if (path.includes('profile/')) return 'Profil Athlète';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
   };
 
@@ -97,6 +102,7 @@ const AppContent = () => {
               <Route path="/coach" element={<Coach />} />
               <Route path="/community" element={<Community />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/:userId" element={<UserProfile />} />
               <Route path="/exercises" element={<Exercises />} />
               <Route path="/run" element={<Run />} />
               <Route path="/meals" element={<Meals />} />
@@ -109,7 +115,9 @@ const AppContent = () => {
               <Route path="/mon-coach" element={<MyCoach />} />
               <Route path="/my-team" element={<MyTeam />} />
               <Route path="/coach/payments" element={<Payments />} />
-              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/guidelines" element={<CommunityGuidelines />} />
+              <Route path="/copyright" element={<Copyright />} />
               <Route path="/unauthorized" element={<UserNotRegisteredError />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
