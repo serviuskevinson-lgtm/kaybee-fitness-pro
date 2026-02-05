@@ -19,6 +19,9 @@ import { WearPlugin } from '@/lib/wear';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { format, isSameDay, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { TimerManager } from '@/lib/timer';
+import PostSession from '@/components/PostSession';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Session() {
   const { currentUser } = useAuth();
@@ -47,7 +50,7 @@ export default function Session() {
 
   // Modales
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showPostSession, setShowPostSession] = useState(false);
   const [sessionStats, setSessionStats] = useState({ volume: 0, sets: 0, time: 0, calories: 0 });
 
   // --- 1. LOGIQUE DE CHARGEMENT ---
@@ -55,6 +58,12 @@ export default function Session() {
     const initSession = async () => {
       if (!targetId) return;
       setLoading(true);
+
+      // Restore session state if active
+      const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
+      if (startTime && !isCoachView) {
+        setIsSessionStarted(true);
+      }
 
       if (isCoachView) {
         const sessionRef = ref(rtdb, `users/${targetId}/live_data/session`);
@@ -107,50 +116,35 @@ export default function Session() {
     initSession();
   }, [targetId, isCoachView, rtdb, location.state]);
 
-  // Sync Timer to RTDB (Client only)
+  // Sync Timer and Rest Timer (Client only)
   useEffect(() => {
     let interval = null;
-    if (isSessionStarted && !showSummaryModal && !isCoachView) {
-      interval = setInterval(() => {
-        setSeconds(s => {
-          const newSec = s + 1;
-          if (newSec % 5 === 0) {
-            update(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { elapsedSeconds: newSec });
+    if (isSessionStarted && !showPostSession && !isCoachView) {
+      interval = setInterval(async () => {
+        // Main Session Timer
+        const elapsed = await TimerManager.getSessionElapsed();
+        setSeconds(elapsed);
+        if (elapsed % 5 === 0) {
+          update(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { elapsedSeconds: elapsed });
+        }
+
+        // Rest Timer
+        const remainingRest = await TimerManager.getRestRemaining();
+        if (remainingRest !== restTime) {
+          setRestTime(remainingRest);
+          if (remainingRest === 0 && restTime > 0) {
+            TimerManager.playEndSignal();
           }
-          return newSec;
-        });
+        }
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isSessionStarted, showSummaryModal, isCoachView, currentUser, rtdb]);
-
-  // Rest Timer Logic
-  useEffect(() => {
-    if (restTime > 0) {
-      restTimerRef.current = setInterval(() => {
-        setRestTime(prev => {
-          if (prev <= 1) {
-            clearInterval(restTimerRef.current);
-            handleRestEnd();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(restTimerRef.current);
-  }, [restTime]);
-
-  const handleRestEnd = async () => {
-    try {
-      await Haptics.vibrate({ duration: 1000 });
-      // On pourrait aussi ajouter une notification locale ici
-    } catch (e) {}
-  };
+  }, [isSessionStarted, showPostSession, isCoachView, currentUser, rtdb, restTime]);
 
   const handleStartSession = async () => {
     if (isCoachView) return;
     setIsSessionStarted(true);
+    await TimerManager.startSession();
     if (workout) {
         const exercises = workout.exercises || [];
         const watchData = {
@@ -174,7 +168,7 @@ export default function Session() {
     }
   };
 
-  const toggleSetComplete = (exoIdx, setIdx) => {
+  const toggleSetComplete = async (exoIdx, setIdx) => {
     if (isCoachView) return;
     const key = `${exoIdx}-${setIdx}`;
     const newDone = !sessionLogs[key]?.done;
@@ -186,8 +180,10 @@ export default function Session() {
 
     if (newDone) {
       const rest = parseInt(workout.exercises[exoIdx].rest) || 60;
+      await TimerManager.startRest(rest);
       setRestTime(rest);
     } else {
+      await TimerManager.clearRest();
       setRestTime(0);
     }
 
@@ -212,14 +208,37 @@ export default function Session() {
     handleSetChange(exoIdx, setIdx, 'reps', value);
   };
 
+  const handleEndSession = () => {
+    let totalVolume = 0; let totalSets = 0;
+    Object.values(sessionLogs).forEach(log => { if (log.done) { totalSets++; totalVolume += (parseFloat(log.weight || 0) * parseFloat(log.reps || 0)); } });
+    const weight = parseFloat(userProfile?.weight) || 80;
+    const caloriesBurned = Math.floor((seconds / 60) * weight * 0.07);
+    setSessionStats({ volume: totalVolume, sets: totalSets, time: seconds, calories: caloriesBurned });
+    setShowPostSession(true);
+  };
+
   const confirmSaveSession = async () => {
     if (!currentUser || !workout || isCoachView) return;
     setIsSaving(true);
     try {
         const historyItem = { id: Date.now().toString(), name: workout.name, date: new Date().toISOString(), duration: sessionStats.time, volume: sessionStats.volume, calories: sessionStats.calories, totalSets: sessionStats.sets, type: 'workout', logs: sessionLogs };
         const userRef = doc(db, "users", currentUser.uid);
-        await updateDoc(userRef, { history: arrayUnion(historyItem), workoutsCompleted: increment(1), points: increment(sessionStats.sets * 5 + 50), totalVolume: increment(sessionStats.volume), dailyBurnedCalories: increment(sessionStats.calories), lastActiveDate: format(new Date(), 'yyyy-MM-dd') });
+        await updateDoc(userRef, {
+            history: arrayUnion(historyItem),
+            workoutsCompleted: increment(1),
+            points: increment(sessionStats.sets * 5 + 50),
+            totalVolume: increment(sessionStats.volume),
+            dailyBurnedCalories: increment(sessionStats.calories),
+            lastActiveDate: format(new Date(), 'yyyy-MM-dd')
+        });
+
+        // Accumulate calories in RTDB for live widgets
+        update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
+            calories_burned: increment(sessionStats.calories)
+        });
+
         set(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { active: false });
+        await TimerManager.stopSession();
         try { await WearPlugin.sendDataToWatch({ path: "/stop-session", data: "{}" }); } catch(e){}
         navigate('/dashboard'); 
     } catch (e) { console.error(e); setIsSaving(false); }
@@ -288,7 +307,7 @@ export default function Session() {
                 </div>
                 {isCoachView && <Badge className="bg-[#7b2cbf] text-[10px] w-fit mt-1">VUE COACH (LIVE)</Badge>}
             </div>
-            {restTime > 0 && (
+            {restTime > 0 && restTime > 7 && (
               <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#7b2cbf] px-4 py-2 rounded-full animate-in zoom-in duration-300 shadow-[0_0_15px_rgba(123,44,191,0.5)]">
                 <Coffee size={16} className="animate-bounce" />
                 <span className="font-black text-lg">{restTime}s</span>
@@ -296,6 +315,36 @@ export default function Session() {
             )}
             {!isCoachView && <Button variant="ghost" onClick={() => setShowCancelModal(true)} className="text-red-500 font-bold hover:bg-red-500/10"><XCircle size={18} className="mr-1"/> Quitter</Button>}
         </div>
+
+        {/* REPOS URGENT OVERLAY */}
+        <AnimatePresence>
+          {restTime > 0 && restTime <= 7 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              className="fixed inset-0 z-[100] bg-[#7b2cbf] flex flex-col items-center justify-center p-8 text-center"
+            >
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 1, repeat: Infinity }}
+                className="mb-8"
+              >
+                <Clock size={120} className="text-white" />
+              </motion.div>
+              <h2 className="text-4xl font-black italic uppercase text-white mb-2">Reprise imminente !</h2>
+              <div className="text-[180px] font-black italic text-white leading-none tracking-tighter">
+                {restTime}
+              </div>
+              <Button
+                onClick={async () => { await TimerManager.clearRest(); setRestTime(0); }}
+                className="mt-8 bg-white text-[#7b2cbf] font-black text-2xl h-20 px-12 rounded-3xl"
+              >
+                PRÊT !
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="space-y-4">
             {workout?.exercises?.map((exo, idx) => {
@@ -357,27 +406,18 @@ export default function Session() {
 
         {!isCoachView && isSessionStarted && (
             <div className="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-[#0a0a0f] to-transparent z-30">
-                <Button onClick={() => {
-                     let totalVolume = 0; let totalSets = 0;
-                     Object.values(sessionLogs).forEach(log => { if (log.done) { totalSets++; totalVolume += (parseFloat(log.weight || 0) * parseFloat(log.reps || 0)); } });
-                     const weight = parseFloat(userProfile?.weight) || 80;
-                     const caloriesBurned = Math.floor((seconds / 60) * weight * 0.07);
-                     setSessionStats({ volume: totalVolume, sets: totalSets, time: seconds, calories: caloriesBurned });
-                     setShowSummaryModal(true);
-                }} className="w-full h-16 font-black bg-white text-black rounded-2xl text-xl shadow-2xl hover:scale-105 transition-all uppercase italic"> TERMINER LA SÉANCE </Button>
+                <Button onClick={handleEndSession} className="w-full h-16 font-black bg-white text-black rounded-2xl text-xl shadow-2xl hover:scale-105 transition-all uppercase italic"> TERMINER LA SÉANCE </Button>
             </div>
         )}
 
-        <Dialog open={showSummaryModal} onOpenChange={setShowSummaryModal}>
-            <DialogContent className="bg-[#1a1a20] border-[#00f5d4] text-white rounded-3xl max-w-sm">
-                <DialogHeader><DialogTitle className="text-[#00f5d4] italic uppercase text-3xl font-black text-center mb-4">Bravo !</DialogTitle></DialogHeader>
-                <div className="grid grid-cols-2 gap-4 py-4">
-                    <div className="bg-black/40 p-5 rounded-2xl border border-white/5 text-center"> <Activity className="mx-auto mb-2 text-[#7b2cbf]" size={28}/> <p className="text-[10px] text-gray-500 uppercase font-black mb-1">Durée</p> <p className="text-xl font-black">{Math.floor(sessionStats.time / 60)}m</p> </div>
-                    <div className="bg-black/40 p-5 rounded-2xl border border-white/5 text-center"> <Flame className="mx-auto mb-2 text-orange-500" size={28}/> <p className="text-[10px] text-gray-500 uppercase font-black mb-1">Brûlé</p> <p className="text-xl font-black">{sessionStats.calories} <span className="text-[10px]">kcal</span></p> </div>
-                </div>
-                <Button onClick={confirmSaveSession} disabled={isSaving} className="w-full bg-[#00f5d4] text-black font-black h-14 rounded-2xl text-lg uppercase italic"> {isSaving ? "SAUVEGARDE..." : "VALIDER LES RÉSULTATS"} </Button>
-            </DialogContent>
-        </Dialog>
+        {/* NEW POST SESSION WORKFLOW */}
+        <PostSession
+          isOpen={showPostSession}
+          stats={sessionStats}
+          workout={workout}
+          userId={currentUser?.uid}
+          onComplete={confirmSaveSession}
+        />
 
         <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
             <DialogContent className="bg-[#1a1a20] border-red-500 text-white rounded-3xl max-w-sm">
@@ -385,7 +425,7 @@ export default function Session() {
                 <p className="text-center text-gray-400 text-sm mb-6">Ta progression pour cette séance ne sera pas enregistrée.</p>
                 <div className="flex gap-3">
                     <Button variant="outline" onClick={() => setShowCancelModal(false)} className="flex-1 h-12 rounded-xl border-gray-700 bg-transparent text-white font-bold">RETOURNER</Button>
-                    <Button onClick={() => navigate('/dashboard')} className="flex-1 h-12 rounded-xl bg-red-500 text-white font-black">QUITTER</Button>
+                    <Button onClick={async () => { await TimerManager.stopSession(); navigate('/dashboard'); }} className="flex-1 h-12 rounded-xl bg-red-500 text-white font-black">QUITTER</Button>
                 </div>
             </DialogContent>
         </Dialog>

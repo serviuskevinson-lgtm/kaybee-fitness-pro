@@ -5,12 +5,12 @@ import { useClient } from '@/context/ClientContext';
 import { doc, getDoc, updateDoc, arrayRemove } from "firebase/firestore";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, AreaChart, Area, ReferenceLine
+  ResponsiveContainer, AreaChart, Area, ReferenceLine, PieChart, Pie, Cell
 } from 'recharts';
 import { 
   TrendingUp, Calendar, Trophy, Activity, Dumbbell, ArrowUpRight, 
   Users, Scale, Timer, Target, Zap, 
-  Download, Trash2, AlertTriangle, X, Footprints, Flame, Droplets
+  Download, Trash2, AlertTriangle, X, Footprints, Flame, Droplets, ZapOff, Utensils
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,7 @@ const CustomTooltip = ({ active, payload, label }) => {
             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className="text-gray-300 capitalize">{entry.name}:</span>
             <span className="font-mono font-bold text-white">
-              {entry.value} {entry.unit || ''}
+              {entry.value} {entry.name === 'weight' ? 'LBS' : entry.unit || ''}
             </span>
           </div>
         ))}
@@ -47,7 +47,6 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-// Squelette de chargement
 const PerformanceSkeleton = () => (
   <div className="space-y-6 animate-pulse p-8">
     <div className="flex justify-between items-center mb-8">
@@ -64,7 +63,6 @@ const PerformanceSkeleton = () => (
   </div>
 );
 
-// Carte KPI
 const KPICard = ({ title, value, unit, icon: Icon, trend, color, description }) => {
   const isPositive = trend > 0;
   return (
@@ -137,7 +135,6 @@ export default function Performance() {
     const workoutLogs = filteredHistory.filter(h => h.type === 'workout' || (!h.type && h.duration && h.type !== 'run'));
     const runLogs = filteredHistory.filter(h => h.type === 'run');
 
-    // Daily Stats
     const lastDaily = dailyLogs[dailyLogs.length - 1];
     const prevDaily = dailyLogs.length > 1 ? dailyLogs[dailyLogs.length - 2] : null;
 
@@ -146,42 +143,35 @@ export default function Performance() {
         return Math.round(((curr - old) / old) * 100);
     };
 
-    // Workout Stats
-    const totalSessions = workoutLogs.length;
-    const totalVolume = workoutLogs.reduce((acc, curr) => acc + (curr.volume || curr.totalLoad || 0), 0);
-    const totalDuration = workoutLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0);
-    const avgIntensity = workoutLogs.reduce((acc, curr) => acc + (curr.intensity || 0), 0) / (totalSessions || 1);
-
-    // Run Stats
-    const totalRuns = runLogs.length;
-    const totalDistance = runLogs.reduce((acc, curr) => acc + (curr.distance || 0), 0);
-    const totalRunDuration = runLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0);
-    const avgCadence = runLogs.reduce((acc, curr) => acc + (curr.avgCadence || 0), 0) / (totalRuns || 1);
-    const avgRunBpm = runLogs.reduce((acc, curr) => acc + (curr.avgHeartRate || 0), 0) / (totalRuns || 1);
+    // Energy Balance
+    const avgConsumed = dailyLogs.length > 0 ? dailyLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0) / dailyLogs.length : 0;
+    const avgBurned = dailyLogs.length > 0 ? dailyLogs.reduce((acc, curr) => acc + (curr.burned || 0), 0) / dailyLogs.length : 0;
+    const balance = avgConsumed - avgBurned;
 
     return {
-        // Daily
         steps: lastDaily?.steps || 0,
         cals: Math.round(lastDaily?.calories || 0),
+        burned: Math.round(lastDaily?.burned || 0),
         water: lastDaily?.water || 0,
         stepsTrend: calcTrend(lastDaily?.steps, prevDaily?.steps),
         calsTrend: calcTrend(lastDaily?.calories, prevDaily?.calories),
         avgSteps: dailyLogs.length > 0 ? Math.round(dailyLogs.reduce((acc, curr) => acc + (curr.steps || 0), 0) / dailyLogs.length) : 0,
+        energyBalance: Math.round(balance),
+        avgConsumed: Math.round(avgConsumed),
+        avgBurned: Math.round(avgBurned),
 
-        // Workouts
-        totalSessions,
-        volume: totalVolume,
-        duration: totalDuration,
-        avgDuration: Math.round(totalDuration / (totalSessions || 1)),
-        avgIntensity: avgIntensity.toFixed(1),
+        totalSessions: workoutLogs.length,
+        volume: workoutLogs.reduce((acc, curr) => acc + (curr.volume || curr.totalLoad || 0), 0),
+        duration: workoutLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0),
+        avgDuration: Math.round(workoutLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0) / (workoutLogs.length || 1)),
+        avgIntensity: (workoutLogs.reduce((acc, curr) => acc + (curr.intensity || 0), 0) / (workoutLogs.length || 1)).toFixed(1),
         weight: lastDaily?.weight || userProfile?.weight || 0,
 
-        // Cardio
-        totalRuns,
-        totalDistance,
-        totalRunDuration,
-        avgCadence,
-        avgRunBpm
+        totalRuns: runLogs.length,
+        totalDistance: runLogs.reduce((acc, curr) => acc + (curr.distance || 0), 0),
+        totalRunDuration: runLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0),
+        avgCadence: runLogs.length > 0 ? runLogs.reduce((acc, curr) => acc + (curr.avgCadence || 0), 0) / runLogs.length : 0,
+        avgRunBpm: runLogs.length > 0 ? runLogs.reduce((acc, curr) => acc + (curr.avgHeartRate || 0), 0) / runLogs.length : 0
     };
   }, [filteredHistory, userProfile]);
 
@@ -190,7 +180,9 @@ export default function Performance() {
         date: format(new Date(h.date), 'dd/MM'),
         steps: h.steps || 0,
         calories: Math.round(h.calories || 0),
-        water: h.water || 0
+        burned: Math.round(h.burned || 0),
+        water: h.water || 0,
+        weight: h.weight || 0
     }));
   }, [filteredHistory]);
 
@@ -220,6 +212,52 @@ export default function Performance() {
           </div>
         </header>
 
+        {/* --- ENERGY BALANCE ROW --- */}
+        <div className="space-y-6">
+          <div className="flex items-center gap-2 text-[#fdcb6e] opacity-80">
+            <Zap size={20} />
+            <h2 className="text-xl font-black italic uppercase tracking-tighter">Balance Énergétique</h2>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-2 bg-[#1a1a20] p-6 rounded-3xl border border-gray-800 flex flex-col md:flex-row items-center gap-8 shadow-2xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-[#fdcb6e]/5 to-transparent pointer-events-none"></div>
+                <div className="relative w-40 h-40">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <Pie data={[{value: stats.avgConsumed}, {value: stats.avgBurned}]} innerRadius={55} outerRadius={75} paddingAngle={5} dataKey="value">
+                                <Cell fill="#00f5d4" />
+                                <Cell fill="#ff7675" />
+                            </Pie>
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className={`text-2xl font-black ${stats.energyBalance > 0 ? 'text-[#00f5d4]' : 'text-[#ff7675]'}`}>{stats.energyBalance > 0 ? '+' : ''}{stats.energyBalance}</span>
+                        <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">Balance</span>
+                    </div>
+                </div>
+                <div className="flex-1 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#00f5d4]"></div><span className="text-xs font-bold text-gray-400 uppercase">Moy. Consommée</span></div>
+                        <span className="font-black text-white">{stats.avgConsumed} Kcal</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#ff7675]"></div><span className="text-xs font-bold text-gray-400 uppercase">Moy. Brûlée</span></div>
+                        <span className="font-black text-white">{stats.avgBurned} Kcal</span>
+                    </div>
+                    <div className="pt-2 border-t border-gray-800">
+                        <p className="text-[10px] text-gray-500 font-medium italic leading-relaxed">
+                            {stats.energyBalance > 200 ? "Vous êtes en surplus calorique, idéal pour la prise de masse." :
+                             stats.energyBalance < -200 ? "Vous êtes en déficit calorique, favorable à la perte de gras." :
+                             "Votre balance est équilibrée, parfait pour la maintenance."}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <KPICard title="Déficit/Surplus" value={stats.energyBalance} unit="Kcal/j" icon={stats.energyBalance < 0 ? Flame : Activity} color={stats.energyBalance < 0 ? "#00f5d4" : "#ff7675"} description="Moyenne sur la période" />
+            <KPICard title="Métabolisme Est." value={stats.avgBurned} unit="Kcal" icon={TrendingUp} color="#a29bfe" description="Dépense quotidienne moy." />
+          </div>
+        </div>
+
         {/* --- ROW 1 : DAILY HEALTH WIDGETS --- */}
         <div className="space-y-6">
           <div className="flex items-center gap-2 text-[#00f5d4] opacity-80">
@@ -228,9 +266,9 @@ export default function Performance() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <KPICard title="Derniers Pas" value={stats.steps.toLocaleString()} unit="Pas" icon={Footprints} color="#00f5d4" trend={stats.stepsTrend} description={`Moyenne: ${stats.avgSteps} pas`} />
-            <KPICard title="Calories Brûlées" value={stats.cals} unit="Kcal" icon={Flame} color="#ff7675" trend={stats.calsTrend} description="Hier vs Avant-hier" />
+            <KPICard title="Calories Consommées" value={stats.cals} unit="Kcal" icon={Utensils} color="#ff7675" trend={stats.calsTrend} description="Hier vs Avant-hier" />
             <KPICard title="Hydratation" value={stats.water.toFixed(1)} unit="L" icon={Droplets} color="#74b9ff" description="Total journalier" />
-            <KPICard title="Poids Actuel" value={stats.weight} unit="Kg" icon={Scale} color="#fdcb6e" description="Dernière pesée" />
+            <KPICard title="Poids Actuel" value={stats.weight} unit="LBS" icon={Scale} color="#fdcb6e" description="Dernière pesée" />
           </div>
         </div>
 
@@ -276,8 +314,10 @@ export default function Performance() {
                 </SelectTrigger>
                 <SelectContent className="bg-[#1a1a20] border-gray-800 text-white">
                   <SelectItem value="steps">Pas (Daily)</SelectItem>
-                  <SelectItem value="calories">Calories (Kcal)</SelectItem>
+                  <SelectItem value="calories">Consommées (Kcal)</SelectItem>
+                  <SelectItem value="burned">Brûlées (Kcal)</SelectItem>
                   <SelectItem value="water">Eau (Litre)</SelectItem>
+                  <SelectItem value="weight">Poids (LBS)</SelectItem>
                 </SelectContent>
               </Select>
             </CardHeader>
@@ -319,7 +359,7 @@ export default function Performance() {
                                   ) : (
                                       <>
                                         {h.steps ? <p className="text-[#00f5d4] font-black text-xs">{h.steps} <span className="text-[8px] text-gray-600">PAS</span></p> : null}
-                                        {h.volume ? <p className="text-[#7b2cbf] font-black text-xs">{h.volume} <span className="text-[8px] text-gray-600">KG</span></p> : null}
+                                        {h.calories ? <p className="text-[#ff7675] font-black text-xs">{h.calories} <span className="text-[8px] text-gray-600">KCAL</span></p> : null}
                                       </>
                                   )}
                               </div>

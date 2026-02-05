@@ -152,6 +152,32 @@ export const generateDailyAccountability = async (profile, liveStats, history = 
 };
 
 /**
+ * FONCTION 5 : FEEDBACK DE SÉANCE
+ */
+export const generateWorkoutFeedback = async (workout, stats) => {
+  try {
+    const prompt = `
+      Agis comme un coach sportif motivant et expert.
+      L'athlète vient de terminer la séance suivante : ${JSON.stringify(workout)}.
+      Statistiques de la séance : ${JSON.stringify(stats)}.
+
+      Analyse les performances (durée, calories, volume) et donne un feedback court (2 phrases max),
+      très motivant et personnalisé. Utilise le tutoiement.
+
+      Retourne UNIQUEMENT une chaîne de caractères simple (pas de JSON).
+    `;
+
+    // Pour cette fonction on n'utilise pas le format JSON forcé pour avoir un texte brut propre
+    const modelText = getGenerativeModel(vertexAI, { model: "gemini-2.5-flash-lite" });
+    const result = await modelText.generateContent(prompt);
+    return result.response.text().trim();
+  } catch (error) {
+    console.error("Erreur Feedback Gemini:", error);
+    return "Super séance ! Ta régularité va payer, continue comme ça !";
+  }
+};
+
+/**
  * FONCTION 4 : RECHERCHE HYBRIDE DE COACHS (Kaybee + Google Places)
  */
 export const searchCoachesWithGemini = async (location, specialty, budget, type, currentCoaches = []) => {
