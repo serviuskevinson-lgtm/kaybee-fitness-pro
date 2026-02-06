@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { format } from 'date-fns';
 import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 
 export default function Run() {
   const { currentUser } = useAuth();
@@ -52,12 +53,12 @@ export default function Run() {
     return `${h > 0 ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Demande de permissions au montage
+  // Demande de permissions au montage (Uniquement sur mobile)
   useEffect(() => {
     const requestPermissions = async () => {
+      if (Capacitor.getPlatform() === 'web') return;
       try {
-        const status = await Geolocation.requestPermissions();
-        console.log('Location permissions status:', status);
+        await Geolocation.requestPermissions();
       } catch (e) { console.error('Error requesting permissions:', e); }
     };
     requestPermissions();
@@ -103,7 +104,7 @@ export default function Run() {
   // Géolocalisation
   useEffect(() => {
     let watchId;
-    if (isRunning && !isPaused && !isTreadmill) {
+    if (isRunning && !isPaused && !isTreadmill && Capacitor.getPlatform() !== 'web') {
       const startWatching = async () => {
         watchId = await Geolocation.watchPosition({
           enableHighAccuracy: true,
@@ -155,6 +156,9 @@ export default function Run() {
       });
     }, 1000);
   };
+
+  const handlePause = () => setIsPaused(!isPaused);
+  const handleStopRequest = () => setShowConfirmStop(true);
 
   const confirmStop = async () => {
     const finalData = {
