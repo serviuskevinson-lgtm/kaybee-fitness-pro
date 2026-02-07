@@ -8,7 +8,7 @@ import { getDatabase, ref, update, onValue, set } from "firebase/database";
 import {
   Timer, CheckCircle, ChevronDown, ChevronUp, 
   Play, RotateCcw, Dumbbell, AlertCircle, XCircle, Save, 
-  Trophy, CalendarClock, ArrowRight, Activity, Flame, Zap, Clock, Coffee, Plus, Minus
+  Trophy, CalendarClock, ArrowRight, Activity, Flame, Zap, Clock, Coffee, Plus, Minus, Layers, Link2, Target, TrendingDown, TrendingUp, Repeat
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,18 @@ import { fr } from 'date-fns/locale';
 import { TimerManager } from '@/lib/timer';
 import PostSession from '@/components/PostSession';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const SET_TYPE_INFO = {
+  straight: { name: 'Série Classique', icon: Dumbbell, color: 'bg-gray-600', textColor: 'text-gray-400' },
+  superset_antagonist: { name: 'Superset Antagoniste', icon: Link2, color: 'bg-blue-600', textColor: 'text-blue-400' },
+  superset_agonist: { name: 'Superset Agoniste', icon: Flame, color: 'bg-orange-600', textColor: 'text-orange-400' },
+  pre_exhaustion: { name: 'Pré-fatigue', icon: Target, color: 'bg-red-600', textColor: 'text-red-400' },
+  triset: { name: 'Tri-Set', icon: Layers, color: 'bg-purple-600', textColor: 'text-purple-400' },
+  giant_set: { name: 'Série Géante', icon: Zap, color: 'bg-yellow-600', textColor: 'text-yellow-400' },
+  dropset: { name: 'Drop Set', icon: TrendingDown, color: 'bg-pink-600', textColor: 'text-pink-400' },
+  pyramid: { name: 'Pyramide', icon: TrendingUp, color: 'bg-emerald-600', textColor: 'text-emerald-400' },
+  reverse_pyramid: { name: 'Pyramide Inversée', icon: Repeat, color: 'bg-cyan-600', textColor: 'text-cyan-400' }
+};
 
 export default function Session() {
   const { currentUser } = useAuth();
@@ -43,10 +55,9 @@ export default function Session() {
   const [isSessionStarted, setIsSessionStarted] = useState(false); 
   const [isCompletedToday, setIsCompletedToday] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  const [expandedExo, setExpandedExo] = useState(null);
+  const [expandedGroup, setExpandedGroup] = useState(0);
   const [sessionLogs, setSessionLogs] = useState({});
   const [restTime, setRestTime] = useState(0);
-  const restTimerRef = useRef(null);
 
   // Modales
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -59,7 +70,6 @@ export default function Session() {
       if (!targetId) return;
       setLoading(true);
 
-      // Restore session state if active
       const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
       if (startTime && !isCoachView) {
         setIsSessionStarted(true);
@@ -70,7 +80,7 @@ export default function Session() {
         onValue(sessionRef, (snapshot) => {
           const data = snapshot.val();
           if (data && data.active) {
-            setWorkout({ name: data.workoutName, exercises: data.exercises || [] });
+            setWorkout({ name: data.workoutName, groups: data.groups || data.exercises });
             setSessionLogs(data.logs || {});
             setSeconds(data.elapsedSeconds || 0);
             setIsSessionStarted(true);
@@ -79,13 +89,25 @@ export default function Session() {
       }
 
       if (location.state?.sessionData) {
-        setWorkout({ name: "Séance Express", exercises: location.state.sessionData });
+        // Nouvelle structure attendue: tableau de groupes
+        setWorkout({ name: "Séance Express", groups: location.state.sessionData });
         setLoading(false);
         return;
       }
 
       if (location.state?.workout) {
-        setWorkout(location.state.workout);
+        const w = location.state.workout;
+        // Compatibilité: si c'est une ancienne structure plate, on la convertit en groupes straight
+        if (w.exercises && !w.groups) {
+          w.groups = w.exercises.map(ex => ({
+            id: Math.random(),
+            setType: 'straight',
+            exercises: [ex],
+            sets: ex.sets || 3,
+            rest: ex.rest || 60
+          }));
+        }
+        setWorkout(w);
         setLoading(false);
         return;
       }
@@ -97,17 +119,26 @@ export default function Session() {
           setUserProfile(data);
           const today = new Date();
           const todayStr = format(today, 'yyyy-MM-dd');
-          const history = data.history || [];
-          if (history.some(h => h.date && h.date.startsWith(todayStr) && h.type === 'workout')) {
+          if (data.history?.some(h => h.date?.startsWith(todayStr) && h.type === 'workout')) {
               setIsCompletedToday(true);
           }
           const todayName = format(today, 'EEEE', { locale: fr });
-          const todayWorkout = data.workouts?.find(w =>
+          let todayWorkout = data.workouts?.find(w =>
             w.scheduledDays?.some(d => {
                 const dDate = typeof d === 'string' && d.includes('-') ? parseISO(d) : new Date(d);
                 return isSameDay(dDate, today);
             }) || w.scheduledDays?.includes(todayName)
           );
+
+          if (todayWorkout && todayWorkout.exercises && !todayWorkout.groups) {
+            todayWorkout.groups = todayWorkout.exercises.map(ex => ({
+              id: Math.random(),
+              setType: 'straight',
+              exercises: [ex],
+              sets: ex.sets || 3,
+              rest: ex.rest || 60
+            }));
+          }
           setWorkout(todayWorkout || null);
         }
       } catch (e) { console.error(e); } 
@@ -116,19 +147,15 @@ export default function Session() {
     initSession();
   }, [targetId, isCoachView, rtdb, location.state]);
 
-  // Sync Timer and Rest Timer (Client only)
   useEffect(() => {
     let interval = null;
     if (isSessionStarted && !showPostSession && !isCoachView) {
       interval = setInterval(async () => {
-        // Main Session Timer
         const elapsed = await TimerManager.getSessionElapsed();
         setSeconds(elapsed);
         if (elapsed % 5 === 0) {
           update(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { elapsedSeconds: elapsed });
         }
-
-        // Rest Timer
         const remainingRest = await TimerManager.getRestRemaining();
         if (remainingRest !== restTime) {
           setRestTime(remainingRest);
@@ -146,42 +173,42 @@ export default function Session() {
     setIsSessionStarted(true);
     await TimerManager.startSession();
     if (workout) {
-        const exercises = workout.exercises || [];
-        const watchData = {
-            name: workout.name,
-            exercises: exercises.map(e => ({
-                name: e.name || "Exercice",
-                sets: parseInt(e.sets || 3),
-                reps: parseInt(e.reps || 10),
-                weight: parseFloat(e.weight || 0)
-            }))
-        };
         set(ref(rtdb, `users/${currentUser.uid}/live_data/session`), {
             active: true,
             workoutName: workout.name,
             startTime: Date.now(),
             elapsedSeconds: 0,
-            exercises: exercises,
+            groups: workout.groups,
             logs: {}
         });
-        try { await WearPlugin.sendDataToWatch({ path: "/start-session", data: JSON.stringify(watchData) }); } catch (e) {}
+        // Simplification pour la montre (envoie les exercices à plat)
+        const flatExos = workout.groups.flatMap(g => g.exercises.map(e => ({ ...e, sets: g.sets })));
+        try { await WearPlugin.sendDataToWatch({ path: "/start-session", data: JSON.stringify({ name: workout.name, exercises: flatExos }) }); } catch (e) {}
     }
   };
 
-  const toggleSetComplete = async (exoIdx, setIdx) => {
+  const toggleSetComplete = async (groupIdx, exoIdx, setIdx) => {
     if (isCoachView) return;
-    const key = `${exoIdx}-${setIdx}`;
+    const group = workout.groups[groupIdx];
+    const key = `${groupIdx}-${exoIdx}-${setIdx}`;
     const newDone = !sessionLogs[key]?.done;
-    const weight = sessionLogs[key]?.weight || workout.exercises[exoIdx].weight || 0;
-    const reps = sessionLogs[key]?.reps || workout.exercises[exoIdx].reps || 0;
+
+    const exercise = group.exercises[exoIdx];
+    const weight = sessionLogs[key]?.weight || exercise.weight || 0;
+    const reps = sessionLogs[key]?.reps || exercise.reps || 10;
 
     const updatedLogs = { ...sessionLogs, [key]: { ...sessionLogs[key], done: newDone, weight, reps } };
     setSessionLogs(updatedLogs);
 
     if (newDone) {
-      const rest = parseInt(workout.exercises[exoIdx].rest) || 60;
-      await TimerManager.startRest(rest);
-      setRestTime(rest);
+      // Déclencher le repos SEULEMENT si c'est le dernier exercice du bloc pour ce set
+      // (ex: en Superset, après l'exercice 2/2)
+      const isLastExoOfGroup = exoIdx === group.exercises.length - 1;
+      if (isLastExoOfGroup) {
+        const rest = parseInt(group.rest) || 60;
+        await TimerManager.startRest(rest);
+        setRestTime(rest);
+      }
     } else {
       await TimerManager.clearRest();
       setRestTime(0);
@@ -190,22 +217,12 @@ export default function Session() {
     update(ref(rtdb, `users/${currentUser.uid}/live_data/session/logs`), { [key]: updatedLogs[key] });
   };
 
-  const handleSetChange = (exoIdx, setIdx, field, value) => {
+  const handleSetChange = (groupIdx, exoIdx, setIdx, field, value) => {
     if (isCoachView) return;
-    const key = `${exoIdx}-${setIdx}`;
+    const key = `${groupIdx}-${exoIdx}-${setIdx}`;
     const updatedLogs = { ...sessionLogs, [key]: { ...sessionLogs[key], [field]: value } };
     setSessionLogs(updatedLogs);
     update(ref(rtdb, `users/${currentUser.uid}/live_data/session/logs`), { [key]: updatedLogs[key] });
-  };
-
-  const adjustWeight = (exoIdx, setIdx, delta) => {
-    const key = `${exoIdx}-${setIdx}`;
-    const currentWeight = parseFloat(sessionLogs[key]?.weight || workout.exercises[exoIdx].weight || 0);
-    handleSetChange(exoIdx, setIdx, 'weight', Math.max(0, currentWeight + delta));
-  };
-
-  const setReps = (exoIdx, setIdx, value) => {
-    handleSetChange(exoIdx, setIdx, 'reps', value);
   };
 
   const handleEndSession = () => {
@@ -232,7 +249,6 @@ export default function Session() {
             lastActiveDate: format(new Date(), 'yyyy-MM-dd')
         });
 
-        // Accumulate calories in RTDB for live widgets
         update(ref(rtdb, `users/${currentUser.uid}/live_data`), {
             calories_burned: increment(sessionStats.calories)
         });
@@ -259,25 +275,31 @@ export default function Session() {
                 {workout.name}
               </h1>
               <p className="text-gray-400 font-medium italic">
-                {workout.exercises?.length || 0} exercices prévus pour aujourd'hui.
+                {workout.groups?.length || 0} blocs d'exercices prévus.
               </p>
             </div>
-            <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
-              {workout.exercises?.map((exo, idx) => (
-                <div key={idx} className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 flex items-center gap-4 group hover:border-[#7b2cbf]/50 transition-all">
-                  <div className="w-16 h-16 rounded-xl bg-gray-800 overflow-hidden shrink-0 border border-white/5">
-                    {exo.imageUrl ? (
-                      <img src={exo.imageUrl} alt={exo.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-600"><Activity size={24} /></div>
-                    )}
+            <div className="space-y-4 max-h-[45vh] overflow-y-auto pr-2 custom-scrollbar">
+              {workout.groups?.map((group, idx) => {
+                const typeInfo = SET_TYPE_INFO[group.setType] || SET_TYPE_INFO.straight;
+                return (
+                  <div key={idx} className="bg-[#1a1a20] p-4 rounded-3xl border border-gray-800 space-y-3">
+                    <div className="flex justify-between items-center mb-1">
+                      <Badge className={`${typeInfo.color} text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border-none`}>
+                        {typeInfo.name}
+                      </Badge>
+                      <span className="text-[10px] font-bold text-gray-500 uppercase">{group.sets} Séries</span>
+                    </div>
+                    {group.exercises.map((exo, eIdx) => (
+                      <div key={eIdx} className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gray-800 overflow-hidden shrink-0">
+                          {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover" /> : <Activity size={16} className="m-3 text-gray-600"/>}
+                        </div>
+                        <p className="font-bold text-white uppercase italic text-sm truncate">{exo.name}</p>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-black text-white uppercase italic truncate">{exo.name}</p>
-                    <p className="text-xs text-gray-500 font-bold uppercase">{exo.sets} Séries • {exo.reps} Reps</p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <Button onClick={handleStartSession} className="w-full h-20 bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black font-black text-2xl italic rounded-3xl shadow-[0_0_30px_rgba(123,44,191,0.4)] hover:scale-[1.02] transition-all group">
               <Zap className="mr-3 h-8 w-8 fill-black group-hover:animate-pulse" /> DÉMARRER LA SÉANCE
@@ -325,76 +347,91 @@ export default function Session() {
               exit={{ opacity: 0, scale: 0.8 }}
               className="fixed inset-0 z-[100] bg-[#7b2cbf] flex flex-col items-center justify-center p-8 text-center"
             >
-              <motion.div
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 1, repeat: Infinity }}
-                className="mb-8"
-              >
+              <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1, repeat: Infinity }} className="mb-8">
                 <Clock size={120} className="text-white" />
               </motion.div>
               <h2 className="text-4xl font-black italic uppercase text-white mb-2">Reprise imminente !</h2>
-              <div className="text-[180px] font-black italic text-white leading-none tracking-tighter">
-                {restTime}
-              </div>
-              <Button
-                onClick={async () => { await TimerManager.clearRest(); setRestTime(0); }}
-                className="mt-8 bg-white text-[#7b2cbf] font-black text-2xl h-20 px-12 rounded-3xl"
-              >
-                PRÊT !
-              </Button>
+              <div className="text-[180px] font-black italic text-white leading-none tracking-tighter">{restTime}</div>
+              <Button onClick={async () => { await TimerManager.clearRest(); setRestTime(0); }} className="mt-8 bg-white text-[#7b2cbf] font-black text-2xl h-20 px-12 rounded-3xl">PRÊT !</Button>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="space-y-4">
-            {workout?.exercises?.map((exo, idx) => {
-                const isExpanded = expandedExo === idx;
-                const numSets = parseInt(exo.sets) || 0;
+        <div className="space-y-6">
+            {workout?.groups?.map((group, groupIdx) => {
+                const isExpanded = expandedGroup === groupIdx;
+                const typeInfo = SET_TYPE_INFO[group.setType] || SET_TYPE_INFO.straight;
+                const TypeIcon = typeInfo.icon;
+
                 return (
-                    <div key={idx} className={`bg-[#1a1a20] border transition-all duration-300 rounded-3xl overflow-hidden ${isExpanded ? 'border-[#7b2cbf] shadow-[0_0_20px_rgba(123,44,191,0.2)]' : 'border-gray-800'}`}>
-                        <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => setExpandedExo(isExpanded ? null : idx)}>
-                            <div className="w-14 h-14 rounded-xl bg-gray-800 overflow-hidden shrink-0 border border-white/5">
-                                {exo.imageUrl ? <img src={exo.imageUrl} alt={exo.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Dumbbell size={20} /></div>}
+                    <div key={groupIdx} className={`bg-[#1a1a20] border transition-all duration-300 rounded-[2rem] overflow-hidden ${isExpanded ? 'border-[#7b2cbf] shadow-[0_0_20px_rgba(123,44,191,0.2)]' : 'border-gray-800'}`}>
+                        {/* Header du Groupe */}
+                        <div className="p-5 flex flex-col gap-3 cursor-pointer" onClick={() => setExpandedGroup(isExpanded ? null : groupIdx)}>
+                            <div className="flex justify-between items-center">
+                                <Badge className={`${typeInfo.color} text-white text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg border-none flex items-center gap-1.5`}>
+                                  <TypeIcon size={12}/> {typeInfo.name}
+                                </Badge>
+                                {isExpanded ? <ChevronUp className="text-[#7b2cbf]"/> : <ChevronDown className="text-gray-500"/>}
                             </div>
-                            <div className="flex-1">
-                                <span className="font-black text-lg italic uppercase block truncate">{exo.name}</span>
-                                <span className="text-[10px] text-gray-500 font-bold uppercase">{numSets} Séries • {exo.reps} Reps • {exo.rest || 60}s Repos</span>
+                            <div className="space-y-1">
+                                {group.exercises.map((exo, eIdx) => (
+                                    <div key={eIdx} className="flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-[#7b2cbf]/50" />
+                                        <span className="font-black text-lg italic uppercase truncate text-white">{exo.name}</span>
+                                    </div>
+                                ))}
                             </div>
-                            {isExpanded ? <ChevronUp className="text-[#7b2cbf]"/> : <ChevronDown className="text-gray-500"/>}
+                            <div className="flex gap-4 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                                <span>{group.sets} Séries</span>
+                                <span>{group.rest}s Repos</span>
+                            </div>
                         </div>
+
                         {isExpanded && (
-                            <div className="p-5 pt-0 space-y-6 bg-black/20">
-                                {Array.from({ length: numSets }).map((_, i) => (
-                                    <div key={i} className="space-y-3 animate-in slide-in-from-left duration-300 border-b border-white/5 pb-4 last:border-0" style={{ animationDelay: `${i*100}ms` }}>
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-xs text-gray-500 font-black uppercase tracking-tighter">SÉRIE {i+1}</span>
-                                          <button disabled={isCoachView} onClick={() => toggleSetComplete(idx, i)} className={`h-10 px-6 flex items-center gap-2 rounded-xl font-black italic transition-all ${sessionLogs[`${idx}-${i}`]?.done ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20' : 'bg-gray-800 text-gray-500'}`}>
-                                            <CheckCircle size={18}/> {sessionLogs[`${idx}-${i}`]?.done ? 'FAIT' : 'À FAIRE'}
-                                          </button>
-                                        </div>
+                            <div className="p-5 pt-0 space-y-8 bg-black/20">
+                                {Array.from({ length: group.sets }).map((_, sIdx) => (
+                                    <div key={sIdx} className="p-4 rounded-3xl bg-black/40 border border-white/5 space-y-6">
+                                        <h4 className="text-[10px] font-black text-[#7b2cbf] uppercase tracking-[0.2em] text-center">SET {sIdx + 1}</h4>
 
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div className="space-y-2">
-                                            <p className="text-[10px] font-bold text-gray-600 uppercase">Poids (LBS)</p>
-                                            <div className="flex items-center bg-[#1a1a20] rounded-xl border border-gray-800 p-1">
-                                              <Button variant="ghost" size="icon" className="h-9 w-9 text-gray-400" onClick={() => adjustWeight(idx, i, -5)}><Minus size={16}/></Button>
-                                              <Input disabled={isCoachView} type="number" className="h-9 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[`${idx}-${i}`]?.weight || ''} onChange={(e) => handleSetChange(idx, i, 'weight', e.target.value)} />
-                                              <Button variant="ghost" size="icon" className="h-9 w-9 text-gray-400" onClick={() => adjustWeight(idx, i, 5)}><Plus size={16}/></Button>
-                                            </div>
-                                          </div>
-                                          <div className="space-y-2">
-                                            <p className="text-[10px] font-bold text-gray-600 uppercase">Répétitions</p>
-                                            <Input disabled={isCoachView} type="number" className="h-11 bg-[#1a1a20] border-gray-800 text-white text-center font-black text-lg rounded-xl" value={sessionLogs[`${idx}-${i}`]?.reps || ''} onChange={(e) => handleSetChange(idx, i, 'reps', e.target.value)} />
-                                          </div>
-                                        </div>
+                                        {group.exercises.map((exo, eIdx) => {
+                                            const logKey = `${groupIdx}-${eIdx}-${sIdx}`;
+                                            const isDone = sessionLogs[logKey]?.done;
 
-                                        {!isCoachView && (
-                                          <div className="flex flex-wrap gap-2 pt-1">
-                                            {[6, 8, 10, 12, 15].map(r => (
-                                              <button key={r} onClick={() => setReps(idx, i, r)} className="h-8 px-3 rounded-lg bg-gray-900 border border-gray-800 text-[10px] font-black hover:border-[#7b2cbf] transition-colors">{r}</button>
-                                            ))}
-                                          </div>
-                                        )}
+                                            return (
+                                                <div key={eIdx} className="space-y-4 pb-6 last:pb-0 border-b last:border-0 border-white/5">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            <div className="w-10 h-10 rounded-xl bg-gray-900 overflow-hidden shrink-0 border border-white/5">
+                                                                {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover" /> : <Dumbbell className="m-2.5 text-gray-700" size={20}/>}
+                                                            </div>
+                                                            <p className="font-black text-white uppercase italic text-sm truncate">{exo.name}</p>
+                                                        </div>
+                                                        <button disabled={isCoachView} onClick={() => toggleSetComplete(groupIdx, eIdx, sIdx)} className={`h-10 px-6 rounded-xl font-black italic transition-all ${isDone ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20' : 'bg-gray-800 text-gray-500'}`}>
+                                                            {isDone ? 'OK' : 'VALIDER'}
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Poids (LBS)</p>
+                                                            <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
+                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', Math.max(0, (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) - 2.5)))}><Minus size={14}/></Button>
+                                                                <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.weight || exo.weight || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'weight', e.target.value)} />
+                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) + 2.5))}><Plus size={14}/></Button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Répétitions</p>
+                                                            <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
+                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', Math.max(0, (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) - 1)))}><Minus size={14}/></Button>
+                                                                <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.reps || exo.reps || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'reps', e.target.value)} />
+                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) + 1))}><Plus size={14}/></Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 ))}
                             </div>
@@ -410,17 +447,10 @@ export default function Session() {
             </div>
         )}
 
-        {/* NEW POST SESSION WORKFLOW */}
-        <PostSession
-          isOpen={showPostSession}
-          stats={sessionStats}
-          workout={workout}
-          userId={currentUser?.uid}
-          onComplete={confirmSaveSession}
-        />
+        <PostSession isOpen={showPostSession} stats={sessionStats} workout={workout} userId={currentUser?.uid} onComplete={confirmSaveSession} />
 
         <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
-            <DialogContent className="bg-[#1a1a20] border-red-500 text-white rounded-3xl max-w-sm">
+            <DialogContent className="bg-[#1a1a20] border-red-500 text-white rounded-[2rem] max-w-sm">
                 <DialogHeader><DialogTitle className="text-red-500 italic uppercase text-2xl font-black text-center mb-2">Abandonner ?</DialogTitle></DialogHeader>
                 <p className="text-center text-gray-400 text-sm mb-6">Ta progression pour cette séance ne sera pas enregistrée.</p>
                 <div className="flex gap-3">

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Calendar } from "@/components/ui/calendar";
+import CustomCalendar from "@/components/CustomCalendar"; // Utilisation du nouveau calendrier
 import { useTranslation } from 'react-i18next';
 import { fr } from 'date-fns/locale';
 
@@ -87,7 +87,6 @@ export default function Meals() {
             const data = await res.json();
             rawMeals = data.meals || [];
         } else if (selectedCategory === "Latest") {
-            // Pour charger énormément de plats (le "500+"), on boucle sur l'alphabet
             const letters = "abcdefghijklmnopqrstuvwxyz".split("");
             const results = await Promise.all(
                 letters.slice(0, 8).map(l => fetch(`${BASE_URL}search.php?f=${l}`).then(r => r.json()))
@@ -152,35 +151,35 @@ export default function Meals() {
   };
 
   return (
-    <div className="p-4 lg:p-8 bg-[#0a0a0f] min-h-screen text-white pb-32 animate-in fade-in duration-500">
+    <div className="p-2 sm:p-4 lg:p-8 bg-[#0a0a0f] min-h-screen text-white pb-32 animate-in fade-in duration-500">
       {/* HEADER */}
-      <div className="max-w-7xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-3xl border border-gray-800 shadow-xl">
-        <div className="flex-1">
-          <h1 className="text-4xl font-black uppercase italic text-[#00f5d4] flex items-center gap-3 tracking-tighter">
-            <Utensils size={36} /> {t('healthy_kitchen')}
+      <div className="max-w-7xl mx-auto mb-6 sm:mb-10 flex flex-col md:flex-row justify-between items-center gap-4 sm:gap-6 bg-[#1a1a20] p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-gray-800 shadow-xl">
+        <div className="flex-1 text-center md:text-left">
+          <h1 className="text-2xl sm:text-4xl font-black uppercase italic text-[#00f5d4] flex items-center justify-center md:justify-start gap-3 tracking-tighter">
+            <Utensils size={28} className="sm:size-[36px]" /> {t('healthy_kitchen')}
           </h1>
-          <p className="text-gray-400 mt-2 flex items-center gap-2 text-sm italic">
-            <Database size={14} className="text-[#00f5d4]"/> Bibliothèque complète : {allMeals.length}+ plats disponibles.
+          <p className="text-gray-400 mt-2 flex items-center justify-center md:justify-start gap-2 text-xs sm:text-sm italic">
+            <Database size={14} className="text-[#00f5d4]"/> Bibliothèque complète : {allMeals.length}+ plats.
           </p>
         </div>
-        <Button onClick={() => { setIsPlannerOpen(!isPlannerOpen); setPlannerSelection([]); }} className={`${isPlannerOpen ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black'} font-black py-6 px-8 rounded-2xl shadow-lg hover:scale-105 transition-all`}>
-          {isPlannerOpen ? <X className="mr-2"/> : <Zap className="mr-2 fill-black" size={20} />}
+        <Button onClick={() => { setIsPlannerOpen(!isPlannerOpen); setPlannerSelection([]); }} className={`${isPlannerOpen ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black'} font-black py-4 sm:py-6 px-6 sm:px-8 rounded-xl sm:rounded-2xl shadow-lg hover:scale-105 transition-all text-xs sm:text-base`}>
+          {isPlannerOpen ? <X className="mr-2" size={18}/> : <Zap className="mr-2 fill-black" size={18} />}
           {isPlannerOpen ? "ANNULER" : t('create_nutrition_plan')}
         </Button>
       </div>
 
       {/* SEARCH & FILTERS */}
-      <div className="max-w-7xl mx-auto mb-8 space-y-4">
+      <div className="max-w-7xl mx-auto mb-6 sm:mb-8 space-y-4">
         <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
-          <Input placeholder={t('search_recipe_placeholder')} className="pl-12 bg-[#1a1a20] border-gray-800 h-14 text-lg rounded-2xl focus:border-[#00f5d4]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+          <Input placeholder={t('search_recipe_placeholder')} className="pl-12 bg-[#1a1a20] border-gray-800 h-12 sm:h-14 text-sm sm:text-lg rounded-xl sm:rounded-2xl focus:border-[#00f5d4]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
         <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
           {FILTER_KEYS.map(apiKey => (
             <Button
               key={apiKey}
               onClick={() => { setSelectedCategory(apiKey); setSearchTerm(""); }}
-              className={selectedCategory === apiKey && !searchTerm ? "bg-[#7b2cbf] text-white font-bold px-6 h-10 rounded-xl border-none" : "bg-[#1a1a20] text-gray-400 border border-gray-800 hover:text-white h-10 rounded-xl"}
+              className={selectedCategory === apiKey && !searchTerm ? "bg-[#7b2cbf] text-white font-bold px-4 sm:px-6 h-8 sm:h-10 rounded-lg sm:rounded-xl border-none text-[10px] sm:text-sm" : "bg-[#1a1a20] text-gray-400 border border-gray-800 hover:text-white h-8 sm:h-10 rounded-lg sm:rounded-xl text-[10px] sm:text-sm"}
             >
               {t(apiKey.toLowerCase())}
             </Button>
@@ -196,46 +195,46 @@ export default function Meals() {
         </div>
       ) : (
         <>
-          <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-6">
             {currentMeals.map((meal) => {
               const isSelected = plannerSelection.find(m => m.id === meal.id);
               return (
-                <div key={meal.id} className={`bg-[#1a1a20] rounded-3xl overflow-hidden border transition-all duration-300 group relative ${isSelected ? 'border-[#00f5d4] ring-4 ring-[#00f5d4]/20' : 'border-gray-800 hover:border-[#7b2cbf]'}`}>
+                <div key={meal.id} className={`bg-[#1a1a20] rounded-xl sm:rounded-3xl overflow-hidden border transition-all duration-300 group relative ${isSelected ? 'border-[#00f5d4] ring-2 sm:ring-4 ring-[#00f5d4]/20' : 'border-gray-800 hover:border-[#7b2cbf]'}`}>
                   {isPlannerOpen && (
-                    <div className="absolute top-4 right-4 z-20">
+                    <div className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20">
                         <div
                           onClick={() => toggleMealSelection(meal)}
-                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all cursor-pointer ${isSelected ? 'bg-[#00f5d4] border-[#00f5d4] scale-110 shadow-lg' : 'bg-black/60 border-white/50 hover:border-[#00f5d4]'}`}
+                          className={`w-6 h-6 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 transition-all cursor-pointer ${isSelected ? 'bg-[#00f5d4] border-[#00f5d4] scale-110 shadow-lg' : 'bg-black/60 border-white/50 hover:border-[#00f5d4]'}`}
                         >
-                            {isSelected && <Check size={24} className="text-black font-black"/>}
+                            {isSelected && <Check size={14} className="text-black font-black sm:size-[24px]"/>}
                         </div>
                     </div>
                   )}
-                  <div className="relative h-56 cursor-pointer overflow-hidden" onClick={() => { if(isPlannerOpen) toggleMealSelection(meal); else handleOpenDetails(meal); }}>
+                  <div className="relative h-28 sm:h-56 cursor-pointer overflow-hidden" onClick={() => { if(isPlannerOpen) toggleMealSelection(meal); else handleOpenDetails(meal); }}>
                     <img src={meal.imageUrl} alt={meal.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" loading="lazy" />
-                    <div className="absolute bottom-3 left-3 flex gap-2">
-                        <Badge className="bg-black/70 text-[#00f5d4] border-none backdrop-blur-md px-2 py-1 text-[10px] font-black">{meal.category}</Badge>
-                        <Badge className="bg-black/70 text-white border-none backdrop-blur-md px-2 py-1 text-[10px] font-black">{meal.calories} kcal</Badge>
+                    <div className="absolute bottom-1 left-1 sm:bottom-3 sm:left-3 flex flex-col sm:flex-row gap-1">
+                        <Badge className="bg-black/70 text-[#00f5d4] border-none backdrop-blur-md px-1 py-0 sm:px-2 sm:py-1 text-[7px] sm:text-[10px] font-black">{meal.category}</Badge>
+                        <Badge className="bg-black/70 text-white border-none backdrop-blur-md px-1 py-0 sm:px-2 sm:py-1 text-[7px] sm:text-[10px] font-black">{meal.calories} kcal</Badge>
                     </div>
                   </div>
-                  <div className="p-6">
-                    <h3 className="font-black text-white text-lg mb-4 truncate italic uppercase tracking-tight">{meal.name}</h3>
+                  <div className="p-2 sm:p-6">
+                    <h3 className="font-black text-white text-[10px] sm:text-lg mb-1 sm:mb-4 truncate italic uppercase tracking-tight">{meal.name}</h3>
 
-                    {/* MACROS HIGHLIGHTED */}
-                    <div className="grid grid-cols-3 gap-2 mb-6 text-center">
-                        <div className="bg-black/40 p-2 rounded-xl border border-white/5 border-b-blue-500/50">
-                          <p className="text-[10px] text-blue-400 font-bold uppercase">P: {meal.protein}g</p>
+                    {/* MACROS COMPACT ON MOBILE */}
+                    <div className="grid grid-cols-3 gap-1 sm:gap-2 mb-2 sm:mb-6 text-center">
+                        <div className="bg-black/40 p-1 sm:p-2 rounded-lg sm:rounded-xl border border-white/5 border-b-blue-500/50">
+                          <p className="text-[7px] sm:text-[10px] text-blue-400 font-bold uppercase">P: {meal.protein}g</p>
                         </div>
-                        <div className="bg-black/40 p-2 rounded-xl border border-white/5 border-b-[#00f5d4]/50">
-                          <p className="text-[10px] text-[#00f5d4] font-bold uppercase">G: {meal.carbs}g</p>
+                        <div className="bg-black/40 p-1 sm:p-2 rounded-lg sm:rounded-xl border border-white/5 border-b-[#00f5d4]/50">
+                          <p className="text-[7px] sm:text-[10px] text-[#00f5d4] font-bold uppercase">G: {meal.carbs}g</p>
                         </div>
-                        <div className="bg-black/40 p-2 rounded-xl border border-white/5 border-b-orange-500/50">
-                          <p className="text-[10px] text-orange-400 font-bold uppercase">L: {meal.fat}g</p>
+                        <div className="bg-black/40 p-1 sm:p-2 rounded-lg sm:rounded-xl border border-white/5 border-b-orange-500/50">
+                          <p className="text-[7px] sm:text-[10px] text-orange-400 font-bold uppercase">L: {meal.fat}g</p>
                         </div>
                     </div>
 
-                    <Button variant="ghost" className="w-full text-[#9d4edd] hover:text-[#00f5d4] hover:bg-white/5 text-xs font-black uppercase tracking-widest transition-colors" onClick={(e) => { e.stopPropagation(); handleOpenDetails(meal); }}>
-                        VOIR DÉTAILS
+                    <Button variant="ghost" className="w-full text-[#9d4edd] hover:text-[#00f5d4] hover:bg-white/5 h-6 sm:h-10 text-[8px] sm:text-xs font-black uppercase tracking-widest transition-colors" onClick={(e) => { e.stopPropagation(); handleOpenDetails(meal); }}>
+                        DÉTAILS
                     </Button>
                   </div>
                 </div>
@@ -245,29 +244,29 @@ export default function Meals() {
 
           {/* PAGINATION */}
           {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-6 mt-16 bg-[#1a1a20] w-fit mx-auto p-2 rounded-2xl border border-gray-800 shadow-xl ring-1 ring-white/5">
+            <div className="flex justify-center items-center gap-2 sm:gap-6 mt-8 sm:mt-16 bg-[#1a1a20] w-fit mx-auto p-1 sm:p-2 rounded-xl sm:rounded-2xl border border-gray-800 shadow-xl ring-1 ring-white/5">
               <Button
                 variant="outline"
                 size="icon"
                 disabled={currentPage === 1}
                 onClick={() => { setCurrentPage(p => p - 1); window.scrollTo(0, 0); }}
-                className="border-gray-700 bg-black/40 text-[#00f5d4] hover:bg-[#00f5d4] hover:text-black transition-all"
+                className="border-gray-700 bg-black/40 text-[#00f5d4] hover:bg-[#00f5d4] hover:text-black transition-all size-8 sm:size-10"
               >
-                <ChevronLeft size={24}/>
+                <ChevronLeft size={18} className="sm:size-[24px]"/>
               </Button>
-              <div className="flex items-center gap-3 px-4">
-                <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Page</span>
-                <span className="text-xl font-black text-white">{currentPage}</span>
-                <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">/ {totalPages}</span>
+              <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4">
+                <span className="text-[8px] sm:text-[10px] font-black text-gray-500 uppercase tracking-tighter">Page</span>
+                <span className="text-sm sm:text-xl font-black text-white">{currentPage}</span>
+                <span className="text-[8px] sm:text-[10px] font-black text-gray-500 uppercase tracking-tighter">/ {totalPages}</span>
               </div>
               <Button
                 variant="outline"
                 size="icon"
                 disabled={currentPage === totalPages}
                 onClick={() => { setCurrentPage(p => p + 1); window.scrollTo(0, 0); }}
-                className="border-gray-700 bg-black/40 text-[#00f5d4] hover:bg-[#00f5d4] hover:text-black transition-all"
+                className="border-gray-700 bg-black/40 text-[#00f5d4] hover:bg-[#00f5d4] hover:text-black transition-all size-8 sm:size-10"
               >
-                <ChevronRight size={24}/>
+                <ChevronRight size={18} className="sm:size-[24px]"/>
               </Button>
             </div>
           )}
@@ -277,11 +276,11 @@ export default function Meals() {
       {/* FLOATING ACTION */}
       {isPlannerOpen && plannerSelection.length > 0 && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 duration-500">
-            <Button onClick={() => setIsDaySelectOpen(true)} className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-8 px-12 rounded-full shadow-[0_0_50px_rgba(0,245,212,0.5)] flex items-center gap-4 scale-110 border-4 border-[#0a0a0f]">
-                <CheckCircle size={28}/>
+            <Button onClick={() => setIsDaySelectOpen(true)} className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 sm:py-8 px-8 sm:px-12 rounded-full shadow-[0_0_50px_rgba(0,245,212,0.5)] flex items-center gap-3 sm:gap-4 scale-100 sm:scale-110 border-4 border-[#0a0a0f]">
+                <CheckCircle size={24} className="sm:size-[28px]"/>
                 <div className="flex flex-col items-start leading-none text-left">
-                    <span className="text-lg">CONFIRMER ({plannerSelection.length})</span>
-                    <span className="text-[10px] opacity-60 uppercase">DÉFINIR LES DATES</span>
+                    <span className="text-sm sm:text-lg">CONFIRMER ({plannerSelection.length})</span>
+                    <span className="text-[8px] sm:text-[10px] opacity-60 uppercase">DÉFINIR LES DATES</span>
                 </div>
             </Button>
         </div>
@@ -289,28 +288,28 @@ export default function Meals() {
 
       {/* DETAIL MODAL */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-2xl max-h-[90vh] overflow-y-auto rounded-[40px] p-0 shadow-2xl">
+        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-2xl max-h-[90vh] overflow-y-auto rounded-[30px] sm:rounded-[40px] p-0 shadow-2xl">
           {selectedMeal && (
             <div className="flex flex-col">
-              <div className="relative h-80">
+              <div className="relative h-60 sm:h-80">
                 <img src={selectedMeal.imageUrl} className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] via-transparent to-transparent" />
-                <button onClick={() => setIsDetailOpen(false)} className="absolute top-6 right-6 bg-black/60 p-2 rounded-full hover:bg-red-500 transition-colors text-white z-30"><X size={20}/></button>
-                <div className="absolute bottom-8 left-8">
-                    <Badge className="bg-[#7b2cbf] text-white border-none mb-3 px-3 py-1 font-bold">{selectedMeal.category}</Badge>
-                    <h2 className="text-4xl font-black uppercase italic tracking-tighter drop-shadow-lg">{selectedMeal.name}</h2>
+                <button onClick={() => setIsDetailOpen(false)} className="absolute top-4 sm:top-6 right-4 sm:right-6 bg-black/60 p-2 rounded-full hover:bg-red-500 transition-colors text-white z-30"><X size={18} className="sm:size-[20px]"/></button>
+                <div className="absolute bottom-4 sm:bottom-8 left-4 sm:left-8">
+                    <Badge className="bg-[#7b2cbf] text-white border-none mb-2 sm:mb-3 px-2 sm:px-3 py-1 font-bold text-[10px] sm:text-sm">{selectedMeal.category}</Badge>
+                    <h2 className="text-2xl sm:text-4xl font-black uppercase italic tracking-tighter drop-shadow-lg">{selectedMeal.name}</h2>
                 </div>
               </div>
-              <div className="p-10 space-y-8">
-                <div className="grid grid-cols-4 gap-4">
-                    <div className="bg-white/5 p-4 rounded-3xl text-center border border-white/5"><Flame className="mx-auto text-orange-500 mb-2" size={24} /><p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Énergie</p><p className="text-sm font-black">{selectedMeal.calories} Cal</p></div>
-                    <div className="bg-white/5 p-4 rounded-3xl text-center border border-white/5"><ChefHat className="mx-auto text-blue-400 mb-2" size={24} /><p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Protéines</p><p className="text-sm font-black">{selectedMeal.protein}g</p></div>
-                    <div className="bg-white/5 p-4 rounded-3xl text-center border border-white/5"><Clock className="mx-auto text-[#00f5d4] mb-2" size={24} /><p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Temps</p><p className="text-sm font-black">{selectedMeal.prepTime}</p></div>
-                    <div className="bg-white/5 p-4 rounded-3xl text-center border border-white/5"><Utensils className="mx-auto text-yellow-500 mb-2" size={24} /><p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Portion</p><p className="text-sm font-black">1 Pers.</p></div>
+              <div className="p-6 sm:p-10 space-y-6 sm:space-y-8">
+                <div className="grid grid-cols-4 gap-2 sm:gap-4">
+                    <div className="bg-white/5 p-2 sm:p-4 rounded-2xl sm:rounded-3xl text-center border border-white/5"><Flame className="mx-auto text-orange-500 mb-1 sm:mb-2" size={20} /><p className="text-[8px] sm:text-[10px] text-gray-500 font-bold uppercase tracking-widest">Énergie</p><p className="text-[10px] sm:text-sm font-black">{selectedMeal.calories} Cal</p></div>
+                    <div className="bg-white/5 p-2 sm:p-4 rounded-2xl sm:rounded-3xl text-center border border-white/5"><ChefHat className="mx-auto text-blue-400 mb-1 sm:mb-2" size={20} /><p className="text-[8px] sm:text-[10px] text-gray-500 font-bold uppercase tracking-widest">Protéines</p><p className="text-[10px] sm:text-sm font-black">{selectedMeal.protein}g</p></div>
+                    <div className="bg-white/5 p-2 sm:p-4 rounded-2xl sm:rounded-3xl text-center border border-white/5"><Clock className="mx-auto text-[#00f5d4] mb-1 sm:mb-2" size={20} /><p className="text-[8px] sm:text-[10px] text-gray-500 font-bold uppercase tracking-widest">Temps</p><p className="text-[10px] sm:text-sm font-black">{selectedMeal.prepTime}</p></div>
+                    <div className="bg-white/5 p-2 sm:p-4 rounded-2xl sm:rounded-3xl text-center border border-white/5"><Utensils className="mx-auto text-yellow-500 mb-1 sm:mb-2" size={20} /><p className="text-[8px] sm:text-[10px] text-gray-500 font-bold uppercase tracking-widest">Portion</p><p className="text-[10px] sm:text-sm font-black">1 Pers.</p></div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-8 border-t border-white/5">
-                    <div><h4 className="font-black text-xl mb-4 text-[#00f5d4] flex items-center gap-2 italic uppercase tracking-tight"><LayoutList size={20}/> Ingrédients</h4><ul className="text-sm space-y-3 text-gray-400 font-medium">{selectedMeal.ingredients.map((ing, i) => <li key={i} className="flex items-start gap-3"><Check size={14} className="text-[#7b2cbf] mt-1 shrink-0"/> {ing}</li>)}</ul></div>
-                    <div><h4 className="font-black text-xl mb-4 text-[#00f5d4] flex items-center gap-2 italic uppercase tracking-tight"><HistoryIcon size={20}/> Préparation</h4><p className="text-sm text-gray-400 leading-relaxed italic whitespace-pre-line border-l-2 border-[#7b2cbf]/30 pl-4">{selectedMeal.instructions}</p></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:gap-10 pt-6 sm:pt-8 border-t border-white/5">
+                    <div><h4 className="font-black text-lg sm:text-xl mb-3 sm:mb-4 text-[#00f5d4] flex items-center gap-2 italic uppercase tracking-tight"><LayoutList size={18}/> Ingrédients</h4><ul className="text-[12px] sm:text-sm space-y-2 sm:space-y-3 text-gray-400 font-medium">{selectedMeal.ingredients.map((ing, i) => <li key={i} className="flex items-start gap-3"><Check size={12} className="text-[#7b2cbf] mt-1 shrink-0"/> {ing}</li>)}</ul></div>
+                    <div><h4 className="font-black text-lg sm:text-xl mb-3 sm:mb-4 text-[#00f5d4] flex items-center gap-2 italic uppercase tracking-tight"><HistoryIcon size={18}/> Préparation</h4><p className="text-[12px] sm:text-sm text-gray-400 leading-relaxed italic whitespace-pre-line border-l-2 border-[#7b2cbf]/30 pl-4">{selectedMeal.instructions}</p></div>
                 </div>
               </div>
             </div>
@@ -320,13 +319,13 @@ export default function Meals() {
 
       {/* CALENDAR MODAL */}
       <Dialog open={isDaySelectOpen} onOpenChange={setIsDaySelectOpen}>
-        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-sm rounded-[40px] p-8 shadow-3xl">
-          <DialogHeader><DialogTitle className="text-[#00f5d4] uppercase font-black italic text-center text-2xl tracking-tighter">Planification</DialogTitle></DialogHeader>
-          <div className="flex flex-col items-center py-6">
-            <div className="bg-black/40 p-4 rounded-[32px] border border-white/10 mb-8 shadow-2xl">
-                <Calendar mode="multiple" selected={selectedDates} onSelect={setSelectedDates} locale={fr} className="bg-transparent text-white" />
+        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white max-w-sm max-h-[95vh] overflow-y-auto rounded-[30px] sm:rounded-[40px] p-6 sm:p-8 shadow-3xl">
+          <DialogHeader><DialogTitle className="text-[#00f5d4] uppercase font-black italic text-center text-xl sm:text-2xl tracking-tighter">Planification</DialogTitle></DialogHeader>
+          <div className="flex flex-col items-center py-4 sm:py-6">
+            <div className="mb-6 sm:mb-8">
+                <CustomCalendar selectedDates={selectedDates} onSelect={setSelectedDates} />
             </div>
-            <Button className="w-full bg-[#00f5d4] text-black font-black h-16 rounded-3xl shadow-[0_0_30px_rgba(0,245,212,0.3)] text-lg hover:scale-105 transition-all" onClick={saveNutritionalPlan} disabled={selectedDates.length === 0}>
+            <Button className="w-full bg-[#00f5d4] text-black font-black h-14 sm:h-16 rounded-2xl sm:rounded-3xl shadow-[0_0_30px_rgba(0,245,212,0.3)] text-base sm:text-lg hover:scale-105 transition-all mt-4" onClick={saveNutritionalPlan} disabled={selectedDates.length === 0}>
                 {isCoachView ? "ENVOYER AU CLIENT" : "VALIDER LE PLAN"}
             </Button>
           </div>

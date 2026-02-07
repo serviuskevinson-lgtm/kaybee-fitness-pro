@@ -11,11 +11,11 @@ function Calendar({
   ...props
 }) {
   return (
-    (<DayPicker
+    <DayPicker
       showOutsideDays={showOutsideDays}
       className={cn("p-3 w-full", className)}
       classNames={{
-        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 w-full",
+        months: "flex flex-col space-y-4 w-full",
         month: "space-y-4 w-full",
         caption: "flex justify-center pt-1 relative items-center mb-4",
         caption_label: "text-sm font-black uppercase text-[#9d4edd] italic tracking-widest",
@@ -26,22 +26,30 @@ function Calendar({
         ),
         nav_button_previous: "absolute left-1",
         nav_button_next: "absolute right-1",
-        table: "w-full border-collapse",
-        head_row: "flex w-full justify-between mb-2",
-        head_cell: "text-gray-500 rounded-md w-9 font-bold text-[10px] uppercase text-center",
-        row: "flex w-full mt-2 justify-between",
-        cell: cn(
-          "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 w-full flex justify-center",
-          props.mode === "range"
-            ? "[&:has(>.day-range-end)]:rounded-r-md [&:has(>.day-range-start)]:rounded-l-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
-            : "[&:has([aria-selected])]:rounded-md"
-        ),
+        
+        // --- STRUCTURE GRILLE ---
+        table: "w-full border-collapse block", // On passe en block pour que la grille fonctionne
+        thead: "block w-full",
+        tbody: "block w-full",
+        
+        // Jours de la semaine : 7 colonnes
+        head_row: "grid grid-cols-7 w-full mb-2",
+        head_cell: "text-gray-500 font-bold text-[10px] uppercase text-center",
+        
+        // Lignes de dates : 7 colonnes
+        row: "grid grid-cols-7 w-full mt-2",
+        
+        cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 w-full flex justify-center items-center h-10",
+        
         day: cn(
           buttonVariants({ variant: "ghost" }),
           "h-9 w-9 p-0 font-bold aria-selected:opacity-100 text-gray-300 hover:bg-white/10 rounded-xl transition-all"
         ),
+        
+        // EFFET MAUVE GLOW
         day_selected:
-          "bg-[#9d4edd] !important text-white !important hover:bg-[#7b2cbf] !important focus:bg-[#9d4edd] !important shadow-[0_0_15px_rgba(157,78,221,0.8)] border border-white/20 scale-110 font-black",
+          "bg-[#9d4edd] !important text-white !important hover:bg-[#7b2cbf] !important shadow-[0_0_15px_rgba(157,78,221,0.8)] border border-white/20 scale-110 font-black z-10",
+        
         day_today: "border border-[#00f5d4] text-[#00f5d4]",
         day_outside: "text-gray-600 opacity-50",
         day_disabled: "text-gray-600 opacity-20",
@@ -57,8 +65,9 @@ function Calendar({
           <ChevronRight className={cn("h-4 w-4 text-[#9d4edd]", className)} {...props} />
         ),
       }}
-      {...props} />)
-  );
+      {...props}
+    />
+  )
 }
 Calendar.displayName = "Calendar"
 
