@@ -133,8 +133,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 onAddWater = { healthManager.addWater(0.25) },
                 onStartRest = { duration -> startRestTimer(duration) },
                 onStopSession = { stopSessionLocally() },
-                onUpdateSet = { exoIdx, setIdx, weight, reps, done -> updateSetData(exoIdx, setIdx, weight, reps, done) },
-                onAdjustWeight = { exoIdx, setIdx, delta -> adjustWeight(exoIdx, setIdx, delta) },
+                onUpdateSet = { groupIdx, exoIdx, setIdx, weight, reps, done -> updateSetData(groupIdx, exoIdx, setIdx, weight, reps, done) },
+                onAdjustWeight = { groupIdx, exoIdx, setIdx, delta -> adjustWeight(groupIdx, exoIdx, setIdx, delta) },
                 onRetryPair = { requestAutoPairing() }
             )
         }
@@ -175,34 +175,64 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             heartRate = (liveData.child("heart_rate").value as? Number)?.toInt() ?: heartRate
             waterLevel = (liveData.child("water").value as? Number)?.toDouble() ?: waterLevel
             
-            // Sync Session de la RTDB
             val sessionSnap = liveData.child("session")
             if (sessionSnap.exists() && sessionSnap.child("active").getValue(Boolean::class.java) == true) {
                 isSessionRunning = true
                 sessionDurationSeconds = (sessionSnap.child("elapsedSeconds").value as? Number)?.toLong() ?: 0L
                 
                 val workoutName = sessionSnap.child("workoutName").getValue(String::class.java) ?: "Séance"
-                val exosSnap = sessionSnap.child("exercises")
+                val groupsSnap = sessionSnap.child("groups")
                 val logsSnap = sessionSnap.child("logs")
                 
-                val exercisesList = mutableListOf<SessionExercise>()
-                exosSnap.children.forEachIndexed { exoIdx, eSnap ->
-                    val setsCount = (eSnap.child("sets").value as? Number)?.toInt() ?: 3
-                    val repsDefault = (eSnap.child("reps").value as? Number)?.toInt() ?: 10
-                    val weightDefault = (eSnap.child("weight").value as? Number)?.toFloat() ?: 0f
-                    
-                    val setsList = mutableListOf<SessionSet>()
-                    for (setIdx in 0 until setsCount) {
-                        val logKey = "$exoIdx-$setIdx"
-                        val logSnap = logsSnap.child(logKey)
-                        val isDone = logSnap.child("done").getValue(Boolean::class.java) ?: false
-                        val weight = (logSnap.child("weight").value as? Number)?.toFloat() ?: weightDefault
-                        val reps = (logSnap.child("reps").value as? Number)?.toInt() ?: repsDefault
-                        setsList.add(SessionSet(weight, reps, isDone))
+                val groupsList = mutableListOf<SessionGroup>()
+                
+                if (groupsSnap.exists()) {
+                    groupsSnap.children.forEachIndexed { groupIdx, gSnap ->
+                        val setType = gSnap.child("setType").getValue(String::class.java) ?: "straight"
+                        val setsCount = (gSnap.child("sets").value as? Number)?.toInt() ?: 3
+                        val restDefault = (gSnap.child("rest").value as? Number)?.toInt() ?: 60
+                        
+                        val exercisesList = mutableListOf<SessionExercise>()
+                        gSnap.child("exercises").children.forEachIndexed { exoIdx, eSnap ->
+                            val exoName = eSnap.child("name").getValue(String::class.java) ?: "Exo"
+                            val repsDefault = (eSnap.child("reps").value as? Number)?.toInt() ?: 10
+                            val weightDefault = (eSnap.child("weight").value as? Number)?.toFloat() ?: 0f
+                            
+                            val setsList = mutableListOf<SessionSet>()
+                            for (setIdx in 0 until setsCount) {
+                                val logKey = "$groupIdx-$exoIdx-$setIdx"
+                                val logSnap = logsSnap.child(logKey)
+                                val isDone = logSnap.child("done").getValue(Boolean::class.java) ?: false
+                                val weight = (logSnap.child("weight").value as? Number)?.toFloat() ?: weightDefault
+                                val reps = (logSnap.child("reps").value as? Number)?.toInt() ?: repsDefault
+                                setsList.add(SessionSet(weight, reps, isDone))
+                            }
+                            exercisesList.add(SessionExercise(exoName, setsList, restDefault))
+                        }
+                        groupsList.add(SessionGroup(setType, exercisesList, setsCount, restDefault))
                     }
-                    exercisesList.add(SessionExercise(eSnap.child("name").getValue(String::class.java) ?: "Exo", setsList, (eSnap.child("rest").value as? Number)?.toInt() ?: 60))
+                } else {
+                    // Fallback exercises si pas de groups
+                    val exosSnap = sessionSnap.child("exercises")
+                    exosSnap.children.forEachIndexed { exoIdx, eSnap ->
+                        val setsCount = (eSnap.child("sets").value as? Number)?.toInt() ?: 3
+                        val repsDefault = (eSnap.child("reps").value as? Number)?.toInt() ?: 10
+                        val weightDefault = (eSnap.child("weight").value as? Number)?.toFloat() ?: 0f
+                        
+                        val setsList = mutableListOf<SessionSet>()
+                        for (setIdx in 0 until setsCount) {
+                            val logKey = "$exoIdx-$setIdx"
+                            val logSnap = logsSnap.child(logKey)
+                            val isDone = logSnap.child("done").getValue(Boolean::class.java) ?: false
+                            val weight = (logSnap.child("weight").value as? Number)?.toFloat() ?: weightDefault
+                            val reps = (logSnap.child("reps").value as? Number)?.toInt() ?: repsDefault
+                            setsList.add(SessionSet(weight, reps, isDone))
+                        }
+                        val exo = SessionExercise(eSnap.child("name").getValue(String::class.java) ?: "Exo", setsList, (eSnap.child("rest").value as? Number)?.toInt() ?: 60)
+                        groupsList.add(SessionGroup("straight", listOf(exo), setsCount, exo.rest))
+                    }
                 }
-                activeSession = SessionData(workoutName, exercisesList)
+                activeSession = SessionData(workoutName, groupsList)
             } else if (isSessionRunning) {
                 stopSessionLocally()
             }
@@ -266,9 +296,9 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }
     }
 
-    private fun updateSetData(exoIdx: Int, setIdx: Int, weight: Float, reps: Int, done: Boolean) {
+    private fun updateSetData(groupIdx: Int, exoIdx: Int, setIdx: Int, weight: Float, reps: Int, done: Boolean) {
         val uid = currentUserId ?: return
-        val logKey = "$exoIdx-$setIdx"
+        val logKey = if (groupIdx >= 0) "$groupIdx-$exoIdx-$setIdx" else "$exoIdx-$setIdx"
         val updates = mapOf(
             "done" to done,
             "weight" to weight,
@@ -278,14 +308,19 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         healthManager.updateSessionLog(uid, logKey, updates)
         
         if (done) {
-            val restDuration = activeSession?.exercises?.getOrNull(exoIdx)?.rest ?: 60
-            startRestTimer(restDuration)
+            val group = activeSession?.groups?.getOrNull(groupIdx)
+            val isLastExo = group != null && exoIdx == group.exercises.size - 1
+            if (isLastExo || groupIdx < 0) {
+                val restDuration = group?.rest ?: 60
+                startRestTimer(restDuration)
+            }
         }
     }
 
-    private fun adjustWeight(exoIdx: Int, setIdx: Int, delta: Float) {
-        val set = activeSession?.exercises?.getOrNull(exoIdx)?.sets?.getOrNull(setIdx) ?: return
-        updateSetData(exoIdx, setIdx, (set.weight + delta).coerceAtLeast(0f), set.reps, set.isDone)
+    private fun adjustWeight(groupIdx: Int, exoIdx: Int, setIdx: Int, delta: Float) {
+        val group = activeSession?.groups?.getOrNull(groupIdx) ?: return
+        val set = group.exercises.getOrNull(exoIdx)?.sets?.getOrNull(setIdx) ?: return
+        updateSetData(groupIdx, exoIdx, setIdx, (set.weight + delta).coerceAtLeast(0f), set.reps, set.isDone)
     }
 
     private fun startRestTimer(duration: Int) {
@@ -347,7 +382,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
 data class ScheduleDay(val day: String, val workout: String)
 data class NutritionData(val calories: Int = 0, val protein: Int = 0, val carbs: Int = 0, val fats: Int = 0)
-data class SessionData(val name: String, val exercises: List<SessionExercise>)
+data class SessionData(val name: String, val groups: List<SessionGroup>)
+data class SessionGroup(val type: String, val exercises: List<SessionExercise>, val sets: Int, val rest: Int)
 data class SessionExercise(val name: String, val sets: List<SessionSet>, val rest: Int = 60)
 data class SessionSet(val weight: Float, val reps: Int, val isDone: Boolean = false)
 
@@ -359,8 +395,8 @@ fun WearApp(
     isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean,
     lastSync: String, currentUid: String, accel: Triple<Float, Float, Float>,
     onAddWater: () -> Unit, onStartRest: (Int) -> Unit, onStopSession: () -> Unit,
-    onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit,
-    onAdjustWeight: (Int, Int, Float) -> Unit,
+    onUpdateSet: (Int, Int, Int, Float, Int, Boolean) -> Unit,
+    onAdjustWeight: (Int, Int, Int, Float) -> Unit,
     onRetryPair: () -> Unit
 ) {
     val pagerState = rememberPagerState(pageCount = { if (isCoach) 4 else 3 })
@@ -465,8 +501,8 @@ fun SchedulePage(title: String, schedule: List<ScheduleDay>) {
 @Composable
 fun SessionPage(
     session: SessionData?, duration: Long, restTime: Int, isResting: Boolean,
-    onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit,
-    onAdjustWeight: (Int, Int, Float) -> Unit
+    onUpdateSet: (Int, Int, Int, Float, Int, Boolean) -> Unit,
+    onAdjustWeight: (Int, Int, Int, Float) -> Unit
 ) {
     if (session == null) {
         Box(modifier = Modifier.fillMaxSize().background(DarkBg), contentAlignment = Alignment.Center) {
@@ -491,10 +527,25 @@ fun SessionPage(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
-            itemsIndexed(session.exercises) { exoIdx, exo ->
-                Text(exo.name.uppercase(), color = GreenAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                exo.sets.forEachIndexed { setIdx, set ->
-                    SetCard(exoIdx, setIdx, set, onUpdateSet, onAdjustWeight)
+            itemsIndexed(session.groups) { groupIdx, group ->
+                val typeName = when(group.type) {
+                    "superset_antagonist", "superset_agonist" -> "SUPERSET"
+                    "triset" -> "TRI-SET"
+                    "giant_set" -> "SÉRIE GÉANTE"
+                    "dropset" -> "DROP SET"
+                    else -> null
+                }
+                
+                if (typeName != null) {
+                    Text(typeName, color = PurplePrimary, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
+                }
+                
+                group.exercises.forEachIndexed { exoIdx, exo ->
+                    Text(exo.name.uppercase(), color = GreenAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    for (setIdx in 0 until group.sets) {
+                        val set = exo.sets.getOrNull(setIdx) ?: SessionSet(0f, 10, false)
+                        SetCard(groupIdx, exoIdx, setIdx, set, onUpdateSet, onAdjustWeight)
+                    }
                 }
             }
         }
@@ -502,21 +553,21 @@ fun SessionPage(
 }
 
 @Composable
-fun SetCard(exoIdx: Int, setIdx: Int, set: SessionSet, onUpdateSet: (Int, Int, Float, Int, Boolean) -> Unit, onAdjustWeight: (Int, Int, Float) -> Unit) {
+fun SetCard(groupIdx: Int, exoIdx: Int, setIdx: Int, set: SessionSet, onUpdateSet: (Int, Int, Int, Float, Int, Boolean) -> Unit, onAdjustWeight: (Int, Int, Int, Float) -> Unit) {
     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(if (set.isDone) Color(0xFF065f46) else CardBg).padding(8.dp)) {
         Column {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("SÉRIE ${setIdx + 1}", color = if (set.isDone) Color.White else Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                Checkbox(checked = set.isDone, onCheckedChange = { onUpdateSet(exoIdx, setIdx, set.weight, set.reps, it) }, modifier = Modifier.size(24.dp))
+                Checkbox(checked = set.isDone, onCheckedChange = { onUpdateSet(groupIdx, exoIdx, setIdx, set.weight, set.reps, it) }, modifier = Modifier.size(24.dp))
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { onAdjustWeight(exoIdx, setIdx, -5f) }, modifier = Modifier.size(32.dp)) { Text("-", color = Color.White, fontSize = 20.sp) }
+                Button(onClick = { onAdjustWeight(groupIdx, exoIdx, setIdx, -5f) }, modifier = Modifier.size(32.dp)) { Text("-", color = Color.White, fontSize = 20.sp) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${set.weight.toInt()}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Text("LBS", color = Color.Gray, fontSize = 8.sp)
                 }
-                Button(onClick = { onAdjustWeight(exoIdx, setIdx, 5f) }, modifier = Modifier.size(32.dp)) { Text("+", color = Color.White, fontSize = 20.sp) }
+                Button(onClick = { onAdjustWeight(groupIdx, exoIdx, setIdx, 5f) }, modifier = Modifier.size(32.dp)) { Text("+", color = Color.White, fontSize = 20.sp) }
                 
                 Spacer(modifier = Modifier.width(8.dp))
                 

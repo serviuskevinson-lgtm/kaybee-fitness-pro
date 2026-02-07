@@ -30,7 +30,7 @@ import { fr } from 'date-fns/locale';
 import { WearPlugin } from '@/lib/wear';
 
 // --- CONFIGURATION ---
-const ITEMS_PER_PAGE = 30; // Augmenté car plus petit
+const ITEMS_PER_PAGE = 24;
 const EXERCISE_DB_URL = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
 const IMAGE_BASE_URL = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 
@@ -392,75 +392,98 @@ export default function Exercises() {
   const currentExercises = filteredExercises.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
-    <div className="p-2 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-32">
-      <div className="max-w-full mx-auto mb-6 lg:mb-10">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-[#1a1a20] p-4 lg:p-6 rounded-2xl border border-gray-800 shadow-xl">
-            <div className="flex-1 text-center md:text-left">
-                <h1 className="text-2xl lg:text-4xl font-black italic uppercase flex items-center justify-center md:justify-start gap-2 text-white">
-                    <Dumbbell className="text-[#9d4edd] w-6 h-6 lg:w-10 lg:h-10 fill-[#9d4edd]/20"/> {t('workout_builder')}
+    <div className="p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-32">
+      <div className="max-w-7xl mx-auto mb-10">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 shadow-xl">
+            <div className="flex-1">
+                <h1 className="text-4xl font-black italic uppercase flex items-center gap-3 text-white">
+                    <Dumbbell className="text-[#9d4edd] w-10 h-10 fill-[#9d4edd]/20"/> {t('workout_builder')}
                 </h1>
-                <p className="text-gray-400 text-[10px] lg:text-sm font-medium mt-1">{isDbLoading ? t('loading') : t('exercises_available', {count: allExercises.length})}</p>
+                <p className="text-gray-400 text-sm font-medium mt-2">{isDbLoading ? t('loading') : t('exercises_available', {count: allExercises.length})}</p>
             </div>
-            <div className="flex gap-2 w-full md:w-auto">
-                <Button onClick={() => { setIsAutoBuildModalOpen(true); setAutoBuildStep(1); }} className="flex-1 md:flex-none bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white font-black h-10 lg:h-14 px-4 lg:px-8 rounded-xl shadow-lg transition-all hover:scale-105 border border-white/10 text-[10px] lg:text-base">
-                    <Wand2 size={16} className="mr-1 lg:mr-2 animate-pulse"/> IA
+            <div className="flex gap-4">
+                <Button onClick={() => { setIsAutoBuildModalOpen(true); setAutoBuildStep(1); }} className="bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white font-black h-14 px-8 rounded-xl shadow-[0_0_20px_rgba(157,78,221,0.3)] transition-all hover:scale-105 border border-white/10">
+                    <Wand2 size={20} className="mr-2 animate-pulse"/> AUTO BUILD (IA)
                 </Button>
-                {isCoachView && ( <Button onClick={() => setIsCreateOpen(true)} className="flex-1 md:flex-none bg-white text-black hover:bg-gray-200 font-black h-10 lg:h-14 px-4 lg:px-8 rounded-xl shadow-lg transition-all hover:scale-105 border-none text-[10px] lg:text-base"> <Plus size={16} className="mr-1 lg:mr-2"/> CRÉER </Button> )}
+                {isCoachView && ( <Button onClick={() => setIsCreateOpen(true)} className="bg-white text-black hover:bg-gray-200 font-black h-14 px-8 rounded-xl shadow-lg transition-all hover:scale-105 border-none"> <Plus size={24} className="mr-2"/> {t('create_exercise')} </Button> )}
             </div>
         </div>
       </div>
 
-      <div className="max-w-full mx-auto flex flex-row gap-2 lg:gap-8 h-[calc(100vh-160px)] overflow-hidden">
-        {/* LISTE EXERCICES (2/3 de l'écran sur desktop, 60-70% sur mobile) */}
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-            <div className="bg-[#1a1a20]/90 backdrop-blur p-3 lg:p-5 rounded-2xl lg:rounded-3xl border border-gray-800 shadow-2xl shrink-0">
-                <div className="relative mb-3 lg:mb-5">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16}/>
-                    <Input value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} placeholder={t('search_exercise')} className="pl-10 bg-black/50 border-gray-700 text-white h-10 lg:h-12 rounded-xl focus:border-[#9d4edd] focus:ring-[#9d4edd] text-xs lg:text-base"/>
+      {templates.length > 0 && (
+        <div className="max-w-7xl mx-auto mb-10 animate-in slide-in-from-top duration-500">
+            <h3 className="text-sm font-bold text-[#9d4edd] uppercase mb-4 flex items-center gap-2 tracking-widest pl-2"> <Star size={14} className="fill-[#9d4edd]" /> {t('favorite_workouts')} </h3>
+            <ScrollArea className="w-full whitespace-nowrap rounded-3xl border border-[#7b2cbf]/30 bg-[#15151a]/90 backdrop-blur-md p-4 shadow-2xl">
+                <div className="flex space-x-4">
+                    {templates.map((tpl) => (
+                        <div key={tpl.id} onClick={() => setTemplateToLoad(tpl)} className={`relative group flex-shrink-0 w-72 p-5 rounded-2xl border cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-lg ${tpl.createdBy === 'coach' ? 'bg-gradient-to-br from-[#7b2cbf]/20 to-[#9d4edd]/10 border-[#7b2cbf]/50 hover:border-[#9d4edd]' : 'bg-[#1a1a20] border-gray-700 hover:border-[#9d4edd]'}`}>
+                            <div className="flex justify-between items-start mb-3"> <h4 className="font-bold text-white truncate pr-6 text-lg">{tpl.name}</h4> {tpl.createdBy === 'coach' && <Badge className="bg-[#7b2cbf] text-white text-[10px] px-2 py-0.5">Coach</Badge>} </div>
+                            <div className="flex items-center justify-between text-xs text-gray-400 mb-4"> <span className="flex items-center gap-1"><LayoutList size={12}/> {tpl.groups?.length || tpl.exercises?.length || 0} Blocs</span> <span>{tpl.createdAt?.seconds ? new Date(tpl.createdAt.seconds * 1000).toLocaleDateString() : ""}</span> </div>
+                            <div className="flex gap-2 opacity-80 group-hover:opacity-100 transition-opacity"> <Button size="sm" className="h-8 text-xs w-full font-bold bg-white/10 hover:bg-white/20 text-white"><Play size={12} className="mr-2"/> {t('load')}</Button> <button onClick={(e) => {e.stopPropagation(); deleteTemplate(e, tpl.id)}} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"><Trash2 size={16}/></button> </div>
+                        </div>
+                    ))}
                 </div>
-                <div className="flex flex-col md:flex-row gap-2 lg:gap-4">
+                <ScrollBar orientation="horizontal" className="bg-[#7b2cbf]/20" />
+            </ScrollArea>
+        </div>
+      )}
+
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-6">
+            <div className="bg-[#1a1a20]/90 backdrop-blur p-5 rounded-3xl border border-gray-800 sticky top-4 z-10 shadow-2xl">
+                <div className="relative mb-5">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20}/>
+                    <Input value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} placeholder={t('search_exercise')} className="pl-12 bg-black/50 border-gray-700 text-white h-12 rounded-xl focus:border-[#9d4edd] focus:ring-[#9d4edd]"/>
+                </div>
+                <div className="flex flex-col md:flex-row gap-4">
                     <Tabs value={activeTab} onValueChange={(val) => { setActiveTab(val); setCurrentPage(1); }} className="flex-1 min-w-0">
                         <ScrollArea className="w-full whitespace-nowrap rounded-xl bg-black/50 border border-gray-800">
-                            <TabsList className="bg-transparent w-full justify-start h-auto p-1 lg:p-1.5">
-                                <TabsTrigger value="all" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] lg:text-xs py-1.5 lg:py-2.5 font-bold transition-all">{t('all')}</TabsTrigger>
-                                {customExercises.length > 0 && ( <TabsTrigger value="custom" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] lg:text-xs py-1.5 lg:py-2.5 font-bold transition-all border border-[#9d4edd]/50 mx-1"> Coach </TabsTrigger> )}
-                                {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => ( <TabsTrigger key={g.id} value={g.id} className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] lg:text-xs py-1.5 lg:py-2.5 font-bold transition-all whitespace-nowrap"> <span className="mr-1 lg:mr-1.5 opacity-80">{g.icon}</span> {g.name} </TabsTrigger> ))}
+                            <TabsList className="bg-transparent w-full justify-start h-auto p-1.5">
+                                <TabsTrigger value="all" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all">{t('all')}</TabsTrigger>
+                                {customExercises.length > 0 && ( <TabsTrigger value="custom" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all border border-[#9d4edd]/50 mx-1"> <span className="mr-1.5">👑</span> Coach </TabsTrigger> )}
+                                {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => ( <TabsTrigger key={g.id} value={g.id} className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all whitespace-nowrap"> <span className="mr-1.5 opacity-80">{g.icon}</span> {g.name} </TabsTrigger> ))}
                             </TabsList>
                             <ScrollBar orientation="horizontal" className="invisible"/>
                         </ScrollArea>
                     </Tabs>
+                    <div className="w-full md:w-48 shrink-0">
+                        <Select value={activeEquipment} onValueChange={(val) => { setActiveEquipment(val); setCurrentPage(1); }}>
+                            <SelectTrigger className="w-full bg-[#2d2d35] border-[#9d4edd]/30 text-white h-[52px] rounded-xl font-bold hover:border-[#9d4edd] transition-colors"><Filter size={14} className="mr-2 text-[#9d4edd]"/><SelectValue placeholder="Équipement" /></SelectTrigger>
+                            <SelectContent className="bg-[#1a1a20] border-gray-700 text-white"> {EQUIPMENTS.map(eq => <SelectItem key={eq.id} value={eq.id} className="focus:bg-[#9d4edd] focus:text-white cursor-pointer font-medium">{t(eq.name)}</SelectItem>)} </SelectContent>
+                        </Select>
+                    </div>
                 </div>
             </div>
 
-            <ScrollArea className="flex-1 pr-2 custom-scrollbar">
-                {isDbLoading ? ( <div className="py-20 text-center"><Loader2 className="animate-spin w-8 h-8 text-[#9d4edd] mx-auto mb-4"/><p className="text-gray-500 text-xs">{t('loading')}</p></div> ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 lg:gap-5">
-                        {currentExercises.map(exo => {
-                            const isPending = pendingExercises.find(e => e.name === exo.name);
-                            const isInGroups = groups.some(g => g.exercises.some(e => e.name === exo.name));
-                            const isAdded = isPending || isInGroups;
+            {isDbLoading ? ( <div className="py-20 text-center"><Loader2 className="animate-spin w-12 h-12 text-[#9d4edd] mx-auto mb-4"/><p className="text-gray-500">{t('loading')}</p></div> ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {currentExercises.map(exo => {
+                        const isPending = pendingExercises.find(e => e.name === exo.name);
+                        const isInGroups = groups.some(g => g.exercises.some(e => e.name === exo.name));
+                        const isAdded = isPending || isInGroups;
 
-                            return (
-                                <div key={exo.id} className={`rounded-xl border transition-all group overflow-hidden flex flex-col h-full ${exo.isCustom ? 'bg-[#1a1a25] border-[#9d4edd]/30 hover:border-[#9d4edd]' : 'bg-[#1a1a20] border-gray-800 hover:border-[#9d4edd]'}`}>
-                                    <div className="relative h-24 lg:h-40 bg-gray-900 cursor-pointer overflow-hidden" onClick={() => { setSelectedExo(exo); setIsDetailOpen(true); }}>
-                                        {exo.mediaType === 'video' ? ( <video src={exo.imageUrl} className="w-full h-full object-cover opacity-80 transition-opacity" muted loop onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()}/> ) : ( <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" loading="lazy" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
-                                        <div className="absolute top-1 right-1 bg-black/60 rounded-full p-1 lg:p-1.5 backdrop-blur-md pointer-events-none"><Info size={10} className="text-white lg:hidden"/><Info size={14} className="text-white hidden lg:block"/></div>
-                                    </div>
-                                    <div className="p-2 lg:p-4 flex-1 flex flex-col justify-between">
-                                        <h3 className="font-bold text-white text-[10px] lg:text-sm line-clamp-1 leading-tight mb-1">{exo.name}</h3>
-                                        <Button size="sm" className={`w-full mt-1 lg:mt-3 h-7 lg:h-9 font-bold text-[9px] lg:text-xs rounded-lg transition-all ${isAdded ? 'bg-[#00f5d4]/10 text-[#00f5d4] border border-[#00f5d4]/50' : 'bg-[#9d4edd] text-white hover:bg-[#7b2cbf] shadow-lg shadow-purple-500/20'}`} onClick={() => !isAdded && addToCart(exo)}> {isAdded ? <Check size={12}/> : <><Plus size={12} className="mr-1"/> {t('add')}</>} </Button>
-                                    </div>
+                        return (
+                            <div key={exo.id} className={`rounded-2xl border transition-all group overflow-hidden flex flex-col h-full ${exo.isCustom ? 'bg-[#1a1a25] border-[#9d4edd]/30 hover:border-[#9d4edd] hover:shadow-[0_0_20px_rgba(157,78,221,0.2)]' : 'bg-[#1a1a20] border-gray-800 hover:border-[#9d4edd]'}`}>
+                                <div className="relative h-40 bg-gray-900 cursor-pointer overflow-hidden" onClick={() => { setSelectedExo(exo); setIsDetailOpen(true); }}>
+                                    {exo.mediaType === 'video' ? ( <div className="w-full h-full flex items-center justify-center bg-black"> <video src={exo.imageUrl} className="w-full h-full object-cover opacity-80 transition-opacity" muted loop onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()}/> <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Play className="fill-white text-white opacity-50" size={32}/></div> </div> ) : ( <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" loading="lazy" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
+                                    <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a20] to-transparent opacity-80 pointer-events-none"></div>
+                                    <div className="absolute bottom-2 left-3 pointer-events-none"> <Badge className={`text-[10px] font-bold border-none px-2 mb-1 capitalize ${exo.isCustom ? 'bg-white text-[#9d4edd]' : 'bg-[#9d4edd] text-white'}`}> {exo.isCustom ? 'Coach' : MUSCLE_GROUPS.find(g => g.id === exo.group)?.name || exo.group} </Badge> </div>
+                                    <div className="absolute top-2 right-2 bg-black/60 rounded-full p-1.5 backdrop-blur-md pointer-events-none"><Info size={14} className="text-white"/></div>
                                 </div>
-                            );
-                        })}
-                    </div>
-                )}
-                {!isDbLoading && filteredExercises.length > ITEMS_PER_PAGE && ( <div className="flex justify-center items-center gap-2 lg:gap-4 py-6"> <Button variant="outline" size="icon" className="h-8 w-8 lg:h-10 lg:w-10 bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] rounded-full" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft size={16}/></Button> <span className="text-[10px] lg:text-sm font-bold text-[#9d4edd]">Page {currentPage} / {totalPages}</span> <Button variant="outline" size="icon" className="h-8 w-8 lg:h-10 lg:w-10 bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] rounded-full" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight size={16}/></Button> </div> )}
-            </ScrollArea>
+                                <div className="p-4 flex-1 flex flex-col justify-between">
+                                    <div> <h3 className="font-bold text-white text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[#00f5d4] transition-colors">{exo.name}</h3> <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wide truncate">{t(EQUIPMENTS.find(e => e.id === exo.equipment)?.name) || exo.equipment}</p> </div>
+                                    <Button size="sm" className={`w-full mt-3 h-9 font-bold text-xs rounded-lg transition-all ${isAdded ? 'bg-[#00f5d4]/10 text-[#00f5d4] border border-[#00f5d4]/50' : 'bg-[#9d4edd] text-white hover:bg-[#7b2cbf] shadow-lg shadow-purple-500/20'}`} onClick={() => !isAdded && addToCart(exo)}> {isAdded ? <><Check size={14} className="mr-1"/> AJOUTÉ</> : <><Plus size={14} className="mr-1"/> {t('add')}</>} </Button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+            {!isDbLoading && filteredExercises.length > ITEMS_PER_PAGE && ( <div className="flex justify-center items-center gap-4 py-6"> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft size={20}/></Button> <span className="text-sm font-bold text-[#9d4edd] bg-[#9d4edd]/10 px-4 py-2 rounded-full border border-[#9d4edd]/20">Page {currentPage} / {totalPages}</span> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight size={20}/></Button> </div> )}
         </div>
 
-        {/* WORKOUT CART - PERSISTENT SUR LE CÔTÉ (Mobile & Desktop) */}
-        <div className="w-[140px] md:w-80 lg:w-96 shrink-0 h-full overflow-hidden">
+        {/* WORKOUT CART */}
+        <div className="lg:col-span-1">
             <WorkoutCart
                 groups={groups}
                 setGroups={setGroups}
@@ -499,13 +522,13 @@ export default function Exercises() {
       <Dialog open={isAutoBuildModalOpen} onOpenChange={setIsAutoBuildModalOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-xl">
             <DialogHeader>
-                <DialogTitle className="text-2xl font-black italic text-[#9d4edd] flex items-center gap-2 uppercase"> <Sparkles className="animate-pulse" /> Auto Build IA </DialogTitle>
+                <DialogTitle className="text-2xl font-black italic text-[#9d4edd] flex items-center gap-2 uppercase"> <Sparkles className="animate-pulse" /> Auto Build AI </DialogTitle>
                 <DialogDescription className="text-gray-400">Génère un programme complet basé sur tes besoins.</DialogDescription>
             </DialogHeader>
             {autoBuildStep === 1 ? (
                 <div className="space-y-6 py-4 animate-in fade-in duration-300 flex flex-col items-center">
                     <h4 className="text-lg font-bold text-[#00f5d4] italic uppercase w-full text-center">1. Sélectionne tes dates</h4>
-                    <div className="w-full flex justify-center scale-90 lg:scale-100">
+                    <div className="w-full flex justify-center">
                         <CustomCalendar selectedDates={autoBuildDates} onSelect={setAutoBuildDates} />
                     </div>
                     <DialogFooter className="w-full"> <Button disabled={autoBuildDates.length === 0} onClick={() => setAutoBuildStep(2)} className="bg-[#9d4edd] text-white font-bold w-full h-12 rounded-xl shadow-[0_0_15px_rgba(157,78,221,0.4)]">Continuer <ChevronRight className="ml-2" size={16}/></Button> </DialogFooter>
@@ -525,6 +548,7 @@ export default function Exercises() {
         </DialogContent>
       </Dialog>
 
+      {/* MODAL CRÉATION EXERCICE COACH */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-lg">
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('create_exercise')}</DialogTitle><DialogDescription>Cet exercice sera visible par vos clients.</DialogDescription></DialogHeader>
@@ -554,7 +578,7 @@ export default function Exercises() {
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-[#9d4edd] uppercase">Programmer</DialogTitle><DialogDescription className="text-gray-400">Sélectionne les dates pour cette séance.</DialogDescription></DialogHeader>
             <div className="space-y-6 py-4 flex flex-col items-center">
                 <Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Nom de la séance" className="bg-black border-gray-700 text-white h-12 rounded-xl w-full"/>
-                <div className="w-full flex justify-center scale-90">
+                <div className="w-full flex justify-center">
                     <CustomCalendar selectedDates={programDates} onSelect={setProgramDates} />
                 </div>
             </div>
