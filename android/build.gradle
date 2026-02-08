@@ -31,6 +31,24 @@ allprojects {
     }
 }
 
+// Workaround for 'proguard-android.txt' no longer supported in AGP 8+
+// This helps if the subprojects are evaluated successfully.
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android.buildTypes.all { buildType ->
+                def files = buildType.proguardFiles
+                if (files.any { it.name == 'proguard-android.txt' }) {
+                    def updatedFiles = files.collect { 
+                        it.name == 'proguard-android.txt' ? project.android.getDefaultProguardFile('proguard-android-optimize.txt') : it 
+                    }
+                    buildType.setProguardFiles(updatedFiles)
+                }
+            }
+        }
+    }
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
