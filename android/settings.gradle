@@ -1,4 +1,4 @@
 include ':app'
-apply from: 'capacitor.settings.gradle'
 include ':kaybeewear'
 include ':shared'
+apply from: 'capacitor.settings.gradle'

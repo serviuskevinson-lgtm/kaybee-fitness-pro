@@ -6,10 +6,10 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:9.0.0'
-        classpath 'com.google.gms:google-services:4.4.1'
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.10'
-        classpath 'org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.2.10'
+        classpath 'com.android.tools.build:gradle:8.13.2'
+        classpath 'com.google.gms:google-services:4.4.2'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0'
+        classpath 'org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.1.0'
     }
 }
 
@@ -32,7 +32,6 @@ allprojects {
 }
 
 // Workaround for 'proguard-android.txt' no longer supported in AGP 8+
-// This helps if the subprojects are evaluated successfully.
 subprojects {
     afterEvaluate { project ->
         if (project.hasProperty('android')) {
@@ -50,5 +49,5 @@ subprojects {
 }
 
 task clean(type: Delete) {
-    delete rootProject.buildDir
+    delete rootProject.layout.buildDirectory
 }
