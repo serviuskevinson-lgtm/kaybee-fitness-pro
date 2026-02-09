@@ -1,4 +1,11 @@
+rootProject.name = 'android'
 include ':app'
 include ':kaybeewear'
 include ':shared'
+
 apply from: 'capacitor.settings.gradle'
+
+// Force all project directories to absolute paths to fix "'other' has different root" on Windows
+rootProject.children.each { project ->
+    project.projectDir = file(project.projectDir.absolutePath)
+}
