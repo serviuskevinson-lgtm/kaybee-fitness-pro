@@ -4,7 +4,9 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signInWithPopup, 
-  signOut, 
+  signInWithRedirect,
+  getRedirectResult,
+  signOut,
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber
@@ -21,7 +23,23 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 1. Email/Password
+  useEffect(() => {
+    // Vérifier si on revient d'une redirection (utile pour mobile/certains navigateurs)
+    getRedirectResult(auth).then((result) => {
+      if (result) {
+        handleUserInDB(result.user);
+      }
+    }).catch((error) => {
+      console.error("Erreur redirection auth:", error);
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
   async function signup(email, password, userData) {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
@@ -39,25 +57,32 @@ export function AuthProvider({ children }) {
     return signInWithEmailAndPassword(auth, email, password);
   }
 
-  // 2. Google & Apple
   async function socialLogin(providerName) {
     let provider;
     if (providerName === 'google') provider = googleProvider;
-    if (providerName === 'apple') provider = appleProvider;
+    else if (providerName === 'apple') provider = appleProvider;
+    else throw new Error("Fournisseur non supporté");
 
-    const result = await signInWithPopup(auth, provider);
-    return await handleUserInDB(result.user);
+    try {
+      // Sur mobile/Capacitor, signInWithPopup peut échouer, signInWithRedirect est plus stable
+      // Mais pour le web standard, Popup est plus user-friendly.
+      // On tente Popup d'abord, si échec spécifique on pourrait basculer.
+      const result = await signInWithPopup(auth, provider);
+      return await handleUserInDB(result.user);
+    } catch (error) {
+      console.error(`Erreur login ${providerName}:`, error);
+      // Optionnel: fallback sur redirect si popup est bloqué
+      if (error.code === 'auth/popup-blocked') {
+        return await signInWithRedirect(auth, provider);
+      }
+      throw error;
+    }
   }
 
-  // 3. Téléphone (SMS)
   function setUpRecaptcha(elementId) {
-    // Crée le verifier invisible ou visible
     if (!window.recaptchaVerifier) {
       window.recaptchaVerifier = new RecaptchaVerifier(auth, elementId, {
-        'size': 'invisible',
-        'callback': (response) => {
-          // reCAPTCHA solved
-        }
+        'size': 'invisible'
       });
     }
     return window.recaptchaVerifier;
@@ -67,8 +92,8 @@ export function AuthProvider({ children }) {
     return signInWithPhoneNumber(auth, phoneNumber, appVerifier);
   }
 
-  // --- Helper pour créer/vérifier l'user en DB ---
   async function handleUserInDB(user) {
+    if (!user) return;
     const docRef = doc(db, "users", user.uid);
     const docSnap = await getDoc(docRef);
 
@@ -78,10 +103,10 @@ export function AuthProvider({ children }) {
       
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
-        email: user.email || user.phoneNumber, // Utilise le tel si pas d'email
+        email: user.email || user.phoneNumber || "",
         firstName: firstName,
         lastName: '',
-        photoURL: user.photoURL,
+        photoURL: user.photoURL || "",
         createdAt: new Date(),
         onboardingCompleted: false,
         role: 'client'
@@ -100,29 +125,22 @@ export function AuthProvider({ children }) {
     await updateDoc(userRef, data);
   }
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
   const value = {
     currentUser,
+    loading,
     signup,
     login,
     socialLogin,
-    setUpRecaptcha, // <--- Pour le Login
-    sendOtp,        // <--- Pour envoyer le SMS
-    handleUserInDB, // <--- Pour valider après le code
+    setUpRecaptcha,
+    sendOtp,
+    handleUserInDB,
     logout,
     updateUserProfile
   };
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }

@@ -36,7 +36,7 @@ const SET_TYPE_INFO = {
 };
 
 export default function Session() {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const { isCoachView, targetUserId } = useClient();
   const location = useLocation();
   const navigate = useNavigate();
@@ -67,52 +67,58 @@ export default function Session() {
   // --- 1. LOGIQUE DE CHARGEMENT ---
   useEffect(() => {
     const initSession = async () => {
-      if (!targetId) return;
+      // Si l'auth est encore en train de charger, on attend
+      if (authLoading) return;
+
+      // Si on n'a pas de targetId après le chargement de l'auth, on arrête le loading
+      if (!targetId) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
 
-      const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
-      if (startTime && !isCoachView) {
-        setIsSessionStarted(true);
-      }
-
-      if (isCoachView) {
-        const sessionRef = ref(rtdb, `users/${targetId}/live_data/session`);
-        onValue(sessionRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data && data.active) {
-            setWorkout({ name: data.workoutName, groups: data.groups || data.exercises });
-            setSessionLogs(data.logs || {});
-            setSeconds(data.elapsedSeconds || 0);
-            setIsSessionStarted(true);
-          }
-        });
-      }
-
-      if (location.state?.sessionData) {
-        // Nouvelle structure attendue: tableau de groupes
-        setWorkout({ name: "Séance Express", groups: location.state.sessionData });
-        setLoading(false);
-        return;
-      }
-
-      if (location.state?.workout) {
-        const w = location.state.workout;
-        // Compatibilité: si c'est une ancienne structure plate, on la convertit en groupes straight
-        if (w.exercises && !w.groups) {
-          w.groups = w.exercises.map(ex => ({
-            id: Math.random(),
-            setType: 'straight',
-            exercises: [ex],
-            sets: ex.sets || 3,
-            rest: ex.rest || 60
-          }));
-        }
-        setWorkout(w);
-        setLoading(false);
-        return;
-      }
-
       try {
+        const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
+        if (startTime && !isCoachView) {
+          setIsSessionStarted(true);
+        }
+
+        if (isCoachView) {
+          const sessionRef = ref(rtdb, `users/${targetId}/live_data/session`);
+          onValue(sessionRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.active) {
+              setWorkout({ name: data.workoutName, groups: data.groups || data.exercises });
+              setSessionLogs(data.logs || {});
+              setSeconds(data.elapsedSeconds || 0);
+              setIsSessionStarted(true);
+            }
+          });
+        }
+
+        if (location.state?.sessionData) {
+          setWorkout({ name: "Séance Express", groups: location.state.sessionData });
+          setLoading(false);
+          return;
+        }
+
+        if (location.state?.workout) {
+          const w = location.state.workout;
+          if (w.exercises && !w.groups) {
+            w.groups = w.exercises.map(ex => ({
+              id: Math.random(),
+              setType: 'straight',
+              exercises: [ex],
+              sets: ex.sets || 3,
+              rest: ex.rest || 60
+            }));
+          }
+          setWorkout(w);
+          setLoading(false);
+          return;
+        }
+
         const docSnap = await getDoc(doc(db, "users", targetId));
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -141,11 +147,14 @@ export default function Session() {
           }
           setWorkout(todayWorkout || null);
         }
-      } catch (e) { console.error(e); } 
-      finally { setLoading(false); }
+      } catch (e) {
+        console.error("Erreur lors de l'initialisation de la session:", e);
+      } finally {
+        setLoading(false);
+      }
     };
     initSession();
-  }, [targetId, isCoachView, rtdb, location.state]);
+  }, [targetId, authLoading, isCoachView, rtdb, location.state]);
 
   useEffect(() => {
     let interval = null;
@@ -153,7 +162,7 @@ export default function Session() {
       interval = setInterval(async () => {
         const elapsed = await TimerManager.getSessionElapsed();
         setSeconds(elapsed);
-        if (elapsed % 5 === 0) {
+        if (elapsed % 5 === 0 && currentUser) {
           update(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { elapsedSeconds: elapsed });
         }
         const remainingRest = await TimerManager.getRestRemaining();
@@ -169,7 +178,7 @@ export default function Session() {
   }, [isSessionStarted, showPostSession, isCoachView, currentUser, rtdb, restTime]);
 
   const handleStartSession = async () => {
-    if (isCoachView) return;
+    if (isCoachView || !currentUser) return;
     setIsSessionStarted(true);
     await TimerManager.startSession();
     if (workout) {
@@ -181,14 +190,13 @@ export default function Session() {
             groups: workout.groups,
             logs: {}
         });
-        // Simplification pour la montre (envoie les exercices à plat)
         const flatExos = workout.groups.flatMap(g => g.exercises.map(e => ({ ...e, sets: g.sets })));
         try { await WearPlugin.sendDataToWatch({ path: "/start-session", data: JSON.stringify({ name: workout.name, exercises: flatExos }) }); } catch (e) {}
     }
   };
 
   const toggleSetComplete = async (groupIdx, exoIdx, setIdx) => {
-    if (isCoachView) return;
+    if (isCoachView || !currentUser) return;
     const group = workout.groups[groupIdx];
     const key = `${groupIdx}-${exoIdx}-${setIdx}`;
     const newDone = !sessionLogs[key]?.done;
@@ -201,8 +209,6 @@ export default function Session() {
     setSessionLogs(updatedLogs);
 
     if (newDone) {
-      // Déclencher le repos SEULEMENT si c'est le dernier exercice du bloc pour ce set
-      // (ex: en Superset, après l'exercice 2/2)
       const isLastExoOfGroup = exoIdx === group.exercises.length - 1;
       if (isLastExoOfGroup) {
         const rest = parseInt(group.rest) || 60;
@@ -218,7 +224,7 @@ export default function Session() {
   };
 
   const handleSetChange = (groupIdx, exoIdx, setIdx, field, value) => {
-    if (isCoachView) return;
+    if (isCoachView || !currentUser) return;
     const key = `${groupIdx}-${exoIdx}-${setIdx}`;
     const updatedLogs = { ...sessionLogs, [key]: { ...sessionLogs[key], [field]: value } };
     setSessionLogs(updatedLogs);
@@ -260,7 +266,7 @@ export default function Session() {
     } catch (e) { console.error(e); setIsSaving(false); }
   };
 
-  if (loading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white">{t('loading')}...</div>;
+  if (loading || authLoading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white">{t('loading')}...</div>;
 
   if (!isSessionStarted) {
     return (
