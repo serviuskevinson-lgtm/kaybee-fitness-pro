@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 import MyCoach from '@/pages/client/MyCoach'; 
@@ -33,6 +33,7 @@ import Gallery from '@/pages/Gallery';
 import Messages from '@/pages/Messages';
 import Challenges from '@/pages/Challenges';
 import MyTeam from '@/pages/MyTeam';
+import WorkoutAgenda from '@/pages/WorkoutAgenda';
 import PrivacyPolicy from '@/pages/PrivacyPolicy';
 import CommunityGuidelines from '@/pages/CommunityGuidelines';
 import Copyright from '@/pages/Copyright';
@@ -43,36 +44,44 @@ const queryClient = new QueryClient();
 
 const PrivateRoute = ({ children }) => {
   const { currentUser, loading } = useAuth();
-  if (loading) return <div className="flex h-screen items-center justify-center bg-[#0a0a0f] text-white">Chargement...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center bg-[#0a0a0f] text-white font-black italic uppercase animate-pulse">Chargement Kaybee...</div>;
   return currentUser ? children : <Navigate to="/login" />;
 };
 
 const AppContent = () => {
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const backListener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-      if (!canGoBack) {
+    const backListener = CapacitorApp.addListener('backButton', (e) => {
+      const backEvent = new CustomEvent('kbBackButton', { cancelable: true });
+      window.dispatchEvent(backEvent);
+
+      if (backEvent.defaultPrevented) {
+        return;
+      }
+
+      if (location.pathname === '/' || location.pathname === '/dashboard' || location.pathname === '/login') {
         CapacitorApp.exitApp();
       } else {
-        window.history.back();
+        navigate(-1);
       }
     });
 
     return () => {
       backListener.then(handler => handler.remove());
     };
-  }, []);
+  }, [location, navigate]);
 
   const getPageName = (path) => {
     const cleanPath = path.split('/')[1] || 'dashboard';
-    if (path === '/' || path === '/dashboard') return 'Tableau de Bord';
+    if (path === '/' || path === '/dashboard') return 'Elite Dashboard';
+    if (path.includes('workout-agenda')) return 'Agenda';
     if (path.includes('payments')) return 'Finance';
     if (path.includes('coach-onboarding')) return 'Configuration Coach';
-    if (path.includes('nutrition')) return 'Nutrition & Macros';
-    if (path.includes('my-team')) return 'Mon Équipe';
-    if (path.includes('run')) return 'Course';
-    if (path.includes('profile/')) return 'Profil Athlète';
+    if (path.includes('nutrition')) return 'Macros';
+    if (path.includes('run')) return 'Run Tracker';
+    if (path.includes('session')) return 'Séance Live';
     return cleanPath.charAt(0).toUpperCase() + cleanPath.slice(1);
   };
 
@@ -86,7 +95,7 @@ const AppContent = () => {
           <Onboarding />
         </PrivateRoute>
       } />
-      
+
       <Route path="/coach-onboarding" element={
         <PrivateRoute>
           <CoachOnboarding />
@@ -99,6 +108,7 @@ const AppContent = () => {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/workout-agenda" element={<WorkoutAgenda />} />
               <Route path="/coach" element={<Coach />} />
               <Route path="/community" element={<Community />} />
               <Route path="/profile" element={<Profile />} />

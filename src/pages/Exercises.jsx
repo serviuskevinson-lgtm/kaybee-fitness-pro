@@ -21,11 +21,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import CustomCalendar from "@/components/CustomCalendar";
-import WorkoutCart from "@/components/WorkoutCart"; // Nouveau composant
+import WorkoutCart from "@/components/WorkoutCart";
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { autoBuildWorkoutsWithGemini } from '@/lib/geminiexercices';
-import { format, isSameDay } from 'date-fns';
+import { format, isSameDay, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { WearPlugin } from '@/lib/wear';
 
@@ -66,7 +66,6 @@ export default function Exercises() {
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // --- NOUVEL ÉTAT POUR LES GROUPES ---
   const [groups, setGroups] = useState([]);
   const [pendingExercises, setPendingExercises] = useState([]);
   const [selectedSetType, setSelectedSetType] = useState('straight');
@@ -197,7 +196,6 @@ export default function Exercises() {
     fetchTemplates();
   }, [targetUserId]);
 
-  // AJOUT AU PANIER EN ATTENTE
   const addToCart = (exo) => {
     const newExo = { ...exo, uniqueId: Date.now() + Math.random() };
     setPendingExercises([...pendingExercises, newExo]);
@@ -207,10 +205,9 @@ export default function Exercises() {
     if (!newTemplateName.trim()) return;
     setIsSaving(true);
     try {
-      // On sauvegarde les groupes structurés
       const templateData = {
         name: newTemplateName,
-        groups: groups, // Nouvelle structure
+        groups: groups,
         createdBy: isCoachView ? 'coach' : 'client',
         createdAt: serverTimestamp()
       };
@@ -234,25 +231,28 @@ export default function Exercises() {
       setIsSaving(true);
       try {
           const cleanGroups = JSON.parse(JSON.stringify(groups));
-
-          const workoutData = {
-            id: Date.now().toString(),
-            name: programName,
-            groups: cleanGroups,
-            scheduledDays: programDates.map(d => format(d, 'yyyy-MM-dd')),
-            createdAt: new Date().toISOString(),
-            assignedBy: isCoachView ? 'coach' : 'self'
-          };
-
           const userRef = doc(db, "users", targetUserId);
-          await updateDoc(userRef, {
-              workouts: arrayUnion(workoutData)
+
+          const updates = {};
+          programDates.forEach(date => {
+              const dateKey = `Exercise-${format(date, 'MM-dd-yyyy')}`;
+              updates[dateKey] = {
+                  id: Date.now().toString() + Math.random(),
+                  name: programName,
+                  groups: cleanGroups,
+                  scheduledDays: [format(date, 'yyyy-MM-dd')],
+                  createdAt: new Date().toISOString(),
+                  assignedBy: isCoachView ? 'coach' : 'self'
+              };
           });
+
+          await updateDoc(userRef, updates);
 
           setIsProgramModalOpen(false);
           setProgramName("");
           setProgramDates([]);
           alert(t('program_saved') || "Planification réussie !");
+          navigate('/dashboard');
       } catch (e) {
           console.error("Erreur lors de la planification:", e);
           alert("Erreur lors de l'enregistrement : " + e.message);
@@ -272,8 +272,9 @@ export default function Exercises() {
       if (!Array.isArray(generatedWorkouts)) throw new Error("Format invalide");
 
       const userRef = doc(db, "users", targetUserId);
-      const workoutPromises = generatedWorkouts.map(async (workout) => {
-        // L'IA génère une liste plate, on la convertit en groupes 'straight'
+      const updates = {};
+
+      generatedWorkouts.forEach(workout => {
         const groupedExercises = workout.exercises.map(ex => {
           const found = exercisesDB.find(dbEx => dbEx.name.toLowerCase().includes(ex.name.toLowerCase()));
           return {
@@ -290,7 +291,10 @@ export default function Exercises() {
           };
         });
 
-        const workoutData = {
+        const dateObj = parseISO(workout.date);
+        const dateKey = `Exercise-${format(dateObj, 'MM-dd-yyyy')}`;
+
+        updates[dateKey] = {
           id: Date.now().toString() + Math.random(),
           name: workout.name,
           tip: workout.tip,
@@ -299,10 +303,9 @@ export default function Exercises() {
           createdAt: new Date().toISOString(),
           assignedBy: 'AI'
         };
-        return updateDoc(userRef, { workouts: arrayUnion(workoutData) });
       });
 
-      await Promise.all(workoutPromises);
+      await updateDoc(userRef, updates);
       setIsAutoBuildModalOpen(false);
       alert("Programme généré !");
       navigate('/dashboard');
@@ -311,7 +314,6 @@ export default function Exercises() {
 
   const confirmLoadTemplate = () => {
     if (!templateToLoad) return;
-    // Compatibilité : si c'est un ancien template (exercises), on le convertit en groupes
     if (templateToLoad.exercises && !templateToLoad.groups) {
         const converted = templateToLoad.exercises.map(ex => ({
             id: Math.random(),
@@ -482,7 +484,6 @@ export default function Exercises() {
             {!isDbLoading && filteredExercises.length > ITEMS_PER_PAGE && ( <div className="flex justify-center items-center gap-4 py-6"> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft size={20}/></Button> <span className="text-sm font-bold text-[#9d4edd] bg-[#9d4edd]/10 px-4 py-2 rounded-full border border-[#9d4edd]/20">Page {currentPage} / {totalPages}</span> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight size={20}/></Button> </div> )}
         </div>
 
-        {/* WORKOUT CART */}
         <div className="lg:col-span-1">
             <WorkoutCart
                 groups={groups}
@@ -493,7 +494,7 @@ export default function Exercises() {
                 setSelectedSetType={setSelectedSetType}
                 onSaveTemplate={() => setIsSaveModalOpen(true)}
                 onProgramWeek={() => setIsProgramModalOpen(true)}
-                onStartSession={() => navigate('/session', { state: { sessionData: groups } })}
+                onStartSession={() => navigate('/session', { state: { workout: { name: "Séance Express", groups: groups } } })}
                 isCoachView={isCoachView}
                 t={t}
             />
@@ -548,7 +549,6 @@ export default function Exercises() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL CRÉATION EXERCICE COACH */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-lg">
             <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('create_exercise')}</DialogTitle><DialogDescription>Cet exercice sera visible par vos clients.</DialogDescription></DialogHeader>

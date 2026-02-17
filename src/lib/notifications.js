@@ -1,7 +1,9 @@
 import { db } from './firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 
 const getLocalNotifications = async () => {
+  if (!Capacitor.isNativePlatform()) return null;
   try {
     const { LocalNotifications } = await import(/* @vite-ignore */ '@capacitor/local-notifications');
     return LocalNotifications;
@@ -10,15 +12,8 @@ const getLocalNotifications = async () => {
   }
 };
 
-/**
- * Envoie une notification persistante dans Firestore.
- * TYPES POSSIBLES:
- * 'message', 'vote', 'challenge', 'invoice', 'plan_workout', 'plan_nutrition',
- * 'friend_request', 'friend_accept', 'reminder'
- */
 export const sendNotification = async (recipientId, currentUserId, senderName, title, message, type) => {
   if (!recipientId || recipientId === currentUserId) return;
-
   try {
     await addDoc(collection(db, "notifications"), {
       recipientId,
@@ -37,10 +32,13 @@ export const sendNotification = async (recipientId, currentUserId, senderName, t
 
 export const NotificationManager = {
   async scheduleStepReminders() {
-    const LocalNotifications = await getLocalNotifications();
-    if (!LocalNotifications) return;
+    // Sécurité stricte pour le Web
+    if (!Capacitor.isNativePlatform()) return;
 
     try {
+      const LocalNotifications = await getLocalNotifications();
+      if (!LocalNotifications) return;
+
       const perms = await LocalNotifications.checkPermissions();
       if (perms.display !== 'granted') {
         await LocalNotifications.requestPermissions();
@@ -74,7 +72,7 @@ export const NotificationManager = {
         ]
       });
     } catch (e) {
-      console.warn("Erreur lors de la planification des notifications de pas", e);
+      console.warn("Notifications non supportées sur cette plateforme");
     }
   }
 };

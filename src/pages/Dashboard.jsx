@@ -281,15 +281,20 @@ export default function Dashboard() {
     const unsubRTDB = onValue(ref(rtdb, `users/${targetId}/live_data`), (snapshot) => {
         const data = snapshot.val();
         if (data) {
+            const today = getTodayString();
+            const firebaseDate = data.date || "";
+            const isTodayData = firebaseDate === today;
+
             setLiveStats(prev => ({
                 ...prev,
-                steps: data.source === 'watch' ? Number(data.steps) : Math.max(prev.steps, Number(data.steps) || 0),
-                caloriesBurned: data.source === 'watch' ? Number(data.calories_burned) : Math.max(prev.caloriesBurned, Number(data.calories_burned) || 0),
-                caloriesConsumed: Number(data.calories_consumed) || 0,
-                water: Number(data.water) || 0,
+                // On n'utilise plus Math.max pour permettre le reset à 0 à minuit
+                steps: isTodayData ? (Number(data.steps) || 0) : 0,
+                caloriesBurned: isTodayData ? (Number(data.calories_burned) || 0) : 0,
+                caloriesConsumed: isTodayData ? (Number(data.calories_consumed) || 0) : 0,
+                water: isTodayData ? (Number(data.water) || 0) : 0,
                 heartRate: Number(data.heart_rate) || 0,
                 weight: Number(data.weight) || prev.weight,
-                macros: data.nutrition || prev.macros
+                macros: isTodayData ? (data.nutrition || prev.macros) : { protein: 0, carbs: 0, fats: 0, fiber: 0, sugar: 0, meals: [], calories: 0 }
             }));
         }
     });
@@ -318,8 +323,9 @@ export default function Dashboard() {
   const handleDeleteWorkout = async (workout) => {
     if (!currentUser || !window.confirm("Supprimer cette séance de votre agenda ?")) return;
     try {
+        const dateKey = `Exercise-${format(selectedDayDetail.date, 'MM-dd-yyyy')}`;
         const userRef = doc(db, "users", targetUserId || currentUser.uid);
-        await updateDoc(userRef, { workouts: arrayRemove(workout) });
+        await updateDoc(userRef, { [dateKey]: deleteField() });
         setSelectedDayDetail(null);
     } catch (e) { console.error(e); }
   };
@@ -421,10 +427,9 @@ export default function Dashboard() {
   };
 
   const getDayContent = (date) => {
-    const workout = userProfile?.workouts?.find(w =>
-        w.scheduledDays?.some(d => isSameDay(typeof d === 'string' ? parseISO(d) : new Date(d), date)) ||
-        w.scheduledDays?.includes(format(date, 'EEEE', { locale: fr }))
-    );
+    const dateKey = `Exercise-${format(date, 'MM-dd-yyyy')}`;
+    const workout = userProfile?.[dateKey] || null;
+
     const nutritionalPlan = userProfile?.nutritionalPlans?.find(p =>
         p.scheduledDays?.some(d => isSameDay(typeof d === 'string' ? parseISO(d) : new Date(d), date))
     );
@@ -442,6 +447,8 @@ export default function Dashboard() {
   const stepsGoal = 10000;
   const stepsProgress = Math.min(100, (liveStats.steps / stepsGoal) * 100);
 
+  const todayContent = getDayContent(new Date());
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20 p-4 md:p-8">
       {/* Header Widget */}
@@ -453,7 +460,7 @@ export default function Dashboard() {
           <p className="text-gray-400 mt-2 text-lg">Prêt à exploser les records aujourd'hui ?</p>
         </div>
         {!isCoachView && (
-            <Link to="/session"><Button className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 px-8 rounded-xl shadow-lg transition-transform hover:scale-105"><Zap className="mr-2 h-5 w-5 fill-black" /> {safe(t('start_session'))}</Button></Link>
+            <Link to="/session" state={{ workout: todayContent.workout }}><Button className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 px-8 rounded-xl shadow-lg transition-transform hover:scale-105"><Zap className="mr-2 h-5 w-5 fill-black" /> {safe(t('start_session'))}</Button></Link>
         )}
       </div>
 
@@ -697,7 +704,7 @@ export default function Dashboard() {
 
                     <div className="p-8 pt-0 flex gap-3">
                         <Button className="flex-1 bg-white/5 hover:bg-white/10 text-white font-black uppercase py-6 rounded-2xl border border-white/10" onClick={() => setSelectedDayDetail(null)}>Fermer</Button>
-                        {selectedDayDetail.workout && ( <Button asChild className="flex-1 bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black uppercase py-6 rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)]"><Link to="/session"><Zap className="mr-2 h-5 w-5 fill-black"/> Lancer Séance</Link></Button> )}
+                        {selectedDayDetail.workout && ( <Button asChild className="flex-1 bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black uppercase py-6 rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)]"><Link to="/session" state={{ workout: selectedDayDetail.workout }}><Zap className="mr-2 h-5 w-5 fill-black"/> Lancer Séance</Link></Button> )}
                     </div>
                 </div>
             )}

@@ -3,12 +3,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { db, app } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion, increment, onSnapshot } from 'firebase/firestore';
 import { getDatabase, ref, update, onValue, set } from "firebase/database";
 import {
-  Timer, CheckCircle, ChevronDown, ChevronUp, 
+  Timer, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Play, RotateCcw, Dumbbell, AlertCircle, XCircle, Save, 
-  Trophy, CalendarClock, ArrowRight, Activity, Flame, Zap, Clock, Coffee, Plus, Minus, Layers, Link2, Target, TrendingDown, TrendingUp, Repeat
+  Trophy, CalendarClock, ArrowRight, Activity, Flame, Zap, Clock, Coffee, Plus, Minus, Layers, Link2, Target, TrendingDown, TrendingUp, Repeat, Calendar, Footprints
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from 'react-i18next';
 import { WearPlugin } from '@/lib/wear';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { format, isSameDay, parseISO } from 'date-fns';
+import { format, isSameDay, parseISO, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { TimerManager } from '@/lib/timer';
 import PostSession from '@/components/PostSession';
@@ -50,9 +49,11 @@ export default function Session() {
   const [workout, setWorkout] = useState(null); 
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [viewDate, setViewDate] = useState(new Date());
+  const [liveSteps, setLiveSteps] = useState(0);
 
   // États Séance Active
-  const [isSessionStarted, setIsSessionStarted] = useState(false); 
+  const [isSessionStarted, setIsSessionStarted] = useState(false);
   const [isCompletedToday, setIsCompletedToday] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [expandedGroup, setExpandedGroup] = useState(0);
@@ -64,97 +65,107 @@ export default function Session() {
   const [showPostSession, setShowPostSession] = useState(false);
   const [sessionStats, setSessionStats] = useState({ volume: 0, sets: 0, time: 0, calories: 0 });
 
-  // --- 1. LOGIQUE DE CHARGEMENT ---
+  // --- GESTION DU BOUTON BACK ANDROID ---
   useEffect(() => {
-    const initSession = async () => {
-      // Si l'auth est encore en train de charger, on attend
-      if (authLoading) return;
-
-      // Si on n'a pas de targetId après le chargement de l'auth, on arrête le loading
-      if (!targetId) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-
-      try {
-        const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
-        if (startTime && !isCoachView) {
-          setIsSessionStarted(true);
-        }
-
-        if (isCoachView) {
-          const sessionRef = ref(rtdb, `users/${targetId}/live_data/session`);
-          onValue(sessionRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data && data.active) {
-              setWorkout({ name: data.workoutName, groups: data.groups || data.exercises });
-              setSessionLogs(data.logs || {});
-              setSeconds(data.elapsedSeconds || 0);
-              setIsSessionStarted(true);
-            }
-          });
-        }
-
-        if (location.state?.sessionData) {
-          setWorkout({ name: "Séance Express", groups: location.state.sessionData });
-          setLoading(false);
-          return;
-        }
-
-        if (location.state?.workout) {
-          const w = location.state.workout;
-          if (w.exercises && !w.groups) {
-            w.groups = w.exercises.map(ex => ({
-              id: Math.random(),
-              setType: 'straight',
-              exercises: [ex],
-              sets: ex.sets || 3,
-              rest: ex.rest || 60
-            }));
-          }
-          setWorkout(w);
-          setLoading(false);
-          return;
-        }
-
-        const docSnap = await getDoc(doc(db, "users", targetId));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setUserProfile(data);
-          const today = new Date();
-          const todayStr = format(today, 'yyyy-MM-dd');
-          if (data.history?.some(h => h.date?.startsWith(todayStr) && h.type === 'workout')) {
-              setIsCompletedToday(true);
-          }
-          const todayName = format(today, 'EEEE', { locale: fr });
-          let todayWorkout = data.workouts?.find(w =>
-            w.scheduledDays?.some(d => {
-                const dDate = typeof d === 'string' && d.includes('-') ? parseISO(d) : new Date(d);
-                return isSameDay(dDate, today);
-            }) || w.scheduledDays?.includes(todayName)
-          );
-
-          if (todayWorkout && todayWorkout.exercises && !todayWorkout.groups) {
-            todayWorkout.groups = todayWorkout.exercises.map(ex => ({
-              id: Math.random(),
-              setType: 'straight',
-              exercises: [ex],
-              sets: ex.sets || 3,
-              rest: ex.rest || 60
-            }));
-          }
-          setWorkout(todayWorkout || null);
-        }
-      } catch (e) {
-        console.error("Erreur lors de l'initialisation de la session:", e);
-      } finally {
-        setLoading(false);
+    const handleBack = (e) => {
+      if (showPostSession) {
+        e.preventDefault();
+        setShowPostSession(false);
+      } else if (showCancelModal) {
+        e.preventDefault();
+        setShowCancelModal(false);
+      } else if (isSessionStarted) {
+        e.preventDefault();
+        setShowCancelModal(true);
       }
     };
-    initSession();
-  }, [targetId, authLoading, isCoachView, rtdb, location.state]);
+
+    window.addEventListener('kbBackButton', handleBack);
+    return () => window.removeEventListener('kbBackButton', handleBack);
+  }, [showPostSession, showCancelModal, isSessionStarted]);
+
+  const normalizeWorkout = (sw) => {
+    if (!sw) return null;
+    const normalized = { ...sw };
+    if (!normalized.groups && normalized.exercises && Array.isArray(normalized.exercises)) {
+      normalized.groups = normalized.exercises.map(ex => ({
+        id: Math.random(),
+        setType: 'straight',
+        exercises: [ex],
+        sets: ex.sets || 3,
+        rest: ex.rest || 60
+      }));
+    } else if (!normalized.groups) {
+      normalized.groups = [];
+    }
+    return normalized;
+  };
+
+  // --- 1. LOGIQUE DE CHARGEMENT TEMPS RÉEL ---
+  useEffect(() => {
+    if (authLoading || !targetId) return;
+
+    setLoading(true);
+
+    const checkStartTime = async () => {
+      try {
+        const { value: startTime } = await (await import('@capacitor/preferences')).Preferences.get({ key: 'session_start_time' });
+        if (startTime && !isCoachView) setIsSessionStarted(true);
+      } catch (e) {}
+    };
+    checkStartTime();
+
+    // Snapshot temps réel Firestore
+    const unsub = onSnapshot(doc(db, "users", targetId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setUserProfile(data);
+
+        const dateKey = `Exercise-${format(viewDate, 'MM-dd-yyyy')}`;
+        let selectedWorkout = data[dateKey] || null;
+
+        if (!selectedWorkout && isSameDay(viewDate, new Date()) && location.state?.workout) {
+          selectedWorkout = location.state.workout;
+        }
+
+        setWorkout(normalizeWorkout(selectedWorkout));
+
+        const dateISO = format(viewDate, 'yyyy-MM-dd');
+        setIsCompletedToday(data.history?.some(h => h.date?.startsWith(dateISO) && h.type === 'workout') || false);
+      }
+      setLoading(false);
+    }, (err) => {
+      console.error("Firestore Sync Error:", err);
+      setLoading(false);
+    });
+
+    // Snapshot temps réel RTDB (Pas & Live Session)
+    const unsubRTDB = onValue(ref(rtdb, `users/${targetId}/live_data`), (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        // Mise à jour des pas
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (data.date === todayStr) {
+          setLiveSteps(Number(data.steps) || 0);
+        } else {
+          setLiveSteps(0);
+        }
+
+        // Si coach view, on récupère l'état de la séance
+        if (isCoachView && data.session && data.session.active) {
+          setWorkout({ name: data.session.workoutName, groups: data.session.groups || data.session.exercises });
+          setSessionLogs(data.session.logs || {});
+          setSeconds(data.session.elapsedSeconds || 0);
+          setIsSessionStarted(true);
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubRTDB();
+    };
+  }, [targetId, authLoading, isCoachView, viewDate, location.state, rtdb]);
 
   useEffect(() => {
     let interval = null;
@@ -195,10 +206,10 @@ export default function Session() {
     }
   };
 
-  const toggleSetComplete = async (groupIdx, exoIdx, setIdx) => {
+  const toggleSetComplete = async (groupIdx, exoIdx, sIdx) => {
     if (isCoachView || !currentUser) return;
     const group = workout.groups[groupIdx];
-    const key = `${groupIdx}-${exoIdx}-${setIdx}`;
+    const key = `${groupIdx}-${exoIdx}-${sIdx}`;
     const newDone = !sessionLogs[key]?.done;
 
     const exercise = group.exercises[exoIdx];
@@ -223,9 +234,9 @@ export default function Session() {
     update(ref(rtdb, `users/${currentUser.uid}/live_data/session/logs`), { [key]: updatedLogs[key] });
   };
 
-  const handleSetChange = (groupIdx, exoIdx, setIdx, field, value) => {
+  const handleSetChange = (groupIdx, exoIdx, sIdx, field, value) => {
     if (isCoachView || !currentUser) return;
-    const key = `${groupIdx}-${exoIdx}-${setIdx}`;
+    const key = `${groupIdx}-${exoIdx}-${sIdx}`;
     const updatedLogs = { ...sessionLogs, [key]: { ...sessionLogs[key], [field]: value } };
     setSessionLogs(updatedLogs);
     update(ref(rtdb, `users/${currentUser.uid}/live_data/session/logs`), { [key]: updatedLogs[key] });
@@ -262,42 +273,65 @@ export default function Session() {
         set(ref(rtdb, `users/${currentUser.uid}/live_data/session`), { active: false });
         await TimerManager.stopSession();
         try { await WearPlugin.sendDataToWatch({ path: "/stop-session", data: "{}" }); } catch(e){}
-        navigate('/dashboard'); 
+        navigate('/dashboard');
     } catch (e) { console.error(e); setIsSaving(false); }
   };
 
-  if (loading || authLoading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white">{t('loading')}...</div>;
+  if (loading || authLoading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white font-black uppercase italic animate-pulse">Sync Kaybee...</div>;
 
   if (!isSessionStarted) {
+    const isToday = isSameDay(viewDate, new Date());
+
     return (
       <div className="min-h-screen bg-[#0a0a0f] text-white p-6 flex flex-col items-center justify-center animate-in fade-in duration-700">
+
+        {/* Navigation de Date */}
+        <div className="w-full max-w-md flex items-center justify-between mb-8 bg-[#1a1a20]/50 p-2 rounded-2xl border border-white/5 shadow-2xl">
+          <Button variant="ghost" size="icon" onClick={() => setViewDate(prev => addDays(prev, -1))} className="text-gray-400 hover:text-white transition-all active:scale-90">
+            <ChevronLeft size={24} />
+          </Button>
+
+          <div className="flex flex-col items-center">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#7b2cbf] mb-1">
+              {isToday ? t('today') : format(viewDate, 'EEEE', { locale: fr })}
+            </span>
+            <span className="text-lg font-black italic uppercase text-white">
+              {format(viewDate, 'd MMMM', { locale: fr })}
+            </span>
+          </div>
+
+          <Button variant="ghost" size="icon" onClick={() => setViewDate(prev => addDays(prev, 1))} className="text-gray-400 hover:text-white transition-all active:scale-90">
+            <ChevronRight size={24} />
+          </Button>
+        </div>
+
         {workout ? (
           <div className="w-full max-w-md space-y-8">
             <div className="text-center space-y-4">
               <div className="inline-flex p-4 bg-[#7b2cbf]/20 rounded-full text-[#7b2cbf] mb-2 animate-bounce">
                 <Dumbbell size={48} />
               </div>
-              <h1 className="text-4xl font-black italic uppercase tracking-tighter text-white">
+              <h1 className="text-4xl font-black italic uppercase tracking-tighter text-white drop-shadow-[0_0_15px_rgba(123,44,191,0.5)]">
                 {workout.name}
               </h1>
               <p className="text-gray-400 font-medium italic">
-                {workout.groups?.length || 0} blocs d'exercices prévus.
+                {(workout.groups || []).length} blocs d'exercices prévus.
               </p>
             </div>
-            <div className="space-y-4 max-h-[45vh] overflow-y-auto pr-2 custom-scrollbar">
-              {workout.groups?.map((group, idx) => {
+            <div className="space-y-4 max-h-[35vh] overflow-y-auto pr-2 custom-scrollbar">
+              {(workout.groups || []).map((group, idx) => {
                 const typeInfo = SET_TYPE_INFO[group.setType] || SET_TYPE_INFO.straight;
                 return (
-                  <div key={idx} className="bg-[#1a1a20] p-4 rounded-3xl border border-gray-800 space-y-3">
+                  <div key={idx} className="bg-[#1a1a20] p-4 rounded-3xl border border-gray-800 space-y-3 hover:border-[#7b2cbf]/50 transition-colors">
                     <div className="flex justify-between items-center mb-1">
                       <Badge className={`${typeInfo.color} text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border-none`}>
                         {typeInfo.name}
                       </Badge>
                       <span className="text-[10px] font-bold text-gray-500 uppercase">{group.sets} Séries</span>
                     </div>
-                    {group.exercises.map((exo, eIdx) => (
+                    {group.exercises && Array.isArray(group.exercises) && group.exercises.map((exo, eIdx) => (
                       <div key={eIdx} className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gray-800 overflow-hidden shrink-0">
+                        <div className="w-10 h-10 rounded-xl bg-gray-800 overflow-hidden shrink-0 border border-white/5">
                           {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover" /> : <Activity size={16} className="m-3 text-gray-600"/>}
                         </div>
                         <p className="font-bold text-white uppercase italic text-sm truncate">{exo.name}</p>
@@ -307,16 +341,35 @@ export default function Session() {
                 );
               })}
             </div>
-            <Button onClick={handleStartSession} className="w-full h-20 bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black font-black text-2xl italic rounded-3xl shadow-[0_0_30px_rgba(123,44,191,0.4)] hover:scale-[1.02] transition-all group">
-              <Zap className="mr-3 h-8 w-8 fill-black group-hover:animate-pulse" /> DÉMARRER LA SÉANCE
-            </Button>
+
+            <div className="space-y-3 pt-4">
+              <Button onClick={handleStartSession} className="w-full h-20 bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] text-black font-black text-2xl italic rounded-3xl shadow-[0_0_30px_rgba(123,44,191,0.4)] hover:scale-[1.02] transition-all group active:scale-95">
+                <Zap className="mr-3 h-8 w-8 fill-black group-hover:animate-pulse" /> DÉMARRER LA SÉANCE
+              </Button>
+
+              {!isToday && (
+                <Button onClick={() => setViewDate(new Date())} variant="ghost" className="w-full text-[#7b2cbf] font-black uppercase text-xs tracking-[0.2em] hover:bg-[#7b2cbf]/10 rounded-xl py-4 transition-all">
+                  <RotateCcw className="mr-2 h-4 w-4" /> Retour à aujourd'hui
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="text-center space-y-6">
-            <div className="p-6 bg-gray-800/50 rounded-full inline-block text-gray-400"><CalendarClock size={64} /></div>
-            <h2 className="text-2xl font-black uppercase italic">Aucune séance prévue</h2>
-            <p className="text-gray-500 max-w-xs mx-auto">Repose-toi ou choisis une séance manuelle dans ton programme.</p>
-            <Button onClick={() => navigate('/exercises')} className="bg-[#7b2cbf] text-white font-bold h-12 px-8 rounded-xl"> VOIR LES PROGRAMMES </Button>
+            <div className="p-6 bg-gray-800/50 rounded-full inline-block text-gray-400 border border-white/5"><CalendarClock size={64} /></div>
+            <h2 className="text-2xl font-black uppercase italic text-white/80">Aucune séance prévue</h2>
+            <p className="text-gray-500 max-w-xs mx-auto italic font-medium">Repose-toi ou choisis une autre date.</p>
+
+            <div className="space-y-4 pt-6">
+              {!isToday && (
+                <Button onClick={() => setViewDate(new Date())} className="bg-[#7b2cbf]/20 text-[#7b2cbf] border border-[#7b2cbf]/30 font-black h-14 px-8 rounded-2xl w-full flex items-center justify-center uppercase italic tracking-widest hover:bg-[#7b2cbf]/30 transition-all shadow-lg">
+                  <RotateCcw className="mr-2 h-5 w-5" /> RETOUR À AUJOURD'HUI
+                </Button>
+              )}
+              <Button onClick={() => navigate('/exercises')} className="bg-[#7b2cbf] text-white font-black h-14 px-8 rounded-2xl w-full uppercase italic tracking-widest shadow-xl shadow-purple-900/20 active:scale-95 transition-all">
+                VOIR LES PROGRAMMES
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -327,11 +380,21 @@ export default function Session() {
     <div className="min-h-screen bg-[#0a0a0f] text-white p-4 pb-32 animate-in slide-in-from-bottom duration-500">
         <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-4 sticky top-0 bg-[#0a0a0f]/95 backdrop-blur-md z-20 pt-2">
             <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                    <Clock size={20} className="text-[#00f5d4] animate-pulse" />
-                    <span className="font-mono text-4xl font-black text-[#00f5d4] tracking-tighter shadow-sm">
-                        {Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, '0')}
-                    </span>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <Clock size={20} className="text-[#00f5d4] animate-pulse" />
+                        <span className="font-mono text-4xl font-black text-[#00f5d4] tracking-tighter shadow-sm">
+                            {Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, '0')}
+                        </span>
+                    </div>
+                    <div className="h-8 w-[1px] bg-gray-800 mx-1" />
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-1.5 text-[#7b2cbf]">
+                            <Footprints size={14} className="fill-[#7b2cbf]/20" />
+                            <span className="text-lg font-black italic leading-none">{liveSteps.toLocaleString()}</span>
+                        </div>
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Pas Aujourd'hui</span>
+                    </div>
                 </div>
                 {isCoachView && <Badge className="bg-[#7b2cbf] text-[10px] w-fit mt-1">VUE COACH (LIVE)</Badge>}
             </div>
@@ -364,7 +427,7 @@ export default function Session() {
         </AnimatePresence>
 
         <div className="space-y-6">
-            {workout?.groups?.map((group, groupIdx) => {
+            {(workout?.groups || []).map((group, groupIdx) => {
                 const isExpanded = expandedGroup === groupIdx;
                 const typeInfo = SET_TYPE_INFO[group.setType] || SET_TYPE_INFO.straight;
                 const TypeIcon = typeInfo.icon;
@@ -380,7 +443,7 @@ export default function Session() {
                                 {isExpanded ? <ChevronUp className="text-[#7b2cbf]"/> : <ChevronDown className="text-gray-500"/>}
                             </div>
                             <div className="space-y-1">
-                                {group.exercises.map((exo, eIdx) => (
+                                {group.exercises && Array.isArray(group.exercises) && group.exercises.map((exo, eIdx) => (
                                     <div key={eIdx} className="flex items-center gap-3">
                                         <div className="w-2 h-2 rounded-full bg-[#7b2cbf]/50" />
                                         <span className="font-black text-lg italic uppercase truncate text-white">{exo.name}</span>
@@ -395,51 +458,53 @@ export default function Session() {
 
                         {isExpanded && (
                             <div className="p-5 pt-0 space-y-8 bg-black/20">
-                                {Array.from({ length: group.sets }).map((_, sIdx) => (
-                                    <div key={sIdx} className="p-4 rounded-3xl bg-black/40 border border-white/5 space-y-6">
-                                        <h4 className="text-[10px] font-black text-[#7b2cbf] uppercase tracking-[0.2em] text-center">SET {sIdx + 1}</h4>
+                                {Array.from({ length: group.sets }).map((_, sIdx) => {
+                                    return (
+                                        <div key={sIdx} className="p-4 rounded-3xl bg-black/40 border border-white/5 space-y-6">
+                                            <h4 className="text-[10px] font-black text-[#7b2cbf] uppercase tracking-[0.2em] text-center">SET {sIdx + 1}</h4>
 
-                                        {group.exercises.map((exo, eIdx) => {
-                                            const logKey = `${groupIdx}-${eIdx}-${sIdx}`;
-                                            const isDone = sessionLogs[logKey]?.done;
+                                            {group.exercises && Array.isArray(group.exercises) && group.exercises.map((exo, eIdx) => {
+                                                const logKey = `${groupIdx}-${eIdx}-${sIdx}`;
+                                                const isDone = sessionLogs[logKey]?.done;
 
-                                            return (
-                                                <div key={eIdx} className="space-y-4 pb-6 last:pb-0 border-b last:border-0 border-white/5">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-3 min-w-0">
-                                                            <div className="w-10 h-10 rounded-xl bg-gray-900 overflow-hidden shrink-0 border border-white/5">
-                                                                {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover" /> : <Dumbbell className="m-2.5 text-gray-700" size={20}/>}
+                                                return (
+                                                    <div key={eIdx} className="space-y-4 pb-6 last:pb-0 border-b last:border-0 border-white/5">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3 min-w-0">
+                                                                <div className="w-10 h-10 rounded-xl bg-gray-900 overflow-hidden shrink-0 border border-white/5">
+                                                                    {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover" /> : <Dumbbell className="m-2.5 text-gray-700" size={20}/>}
+                                                                </div>
+                                                                <p className="font-black text-white uppercase italic text-sm truncate">{exo.name}</p>
                                                             </div>
-                                                            <p className="font-black text-white uppercase italic text-sm truncate">{exo.name}</p>
+                                                            <button disabled={isCoachView} onClick={() => toggleSetComplete(groupIdx, eIdx, sIdx)} className={`h-10 px-6 rounded-xl font-black italic transition-all ${isDone ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20' : 'bg-gray-800 text-gray-500'}`}>
+                                                                {isDone ? 'OK' : 'VALIDER'}
+                                                            </button>
                                                         </div>
-                                                        <button disabled={isCoachView} onClick={() => toggleSetComplete(groupIdx, eIdx, sIdx)} className={`h-10 px-6 rounded-xl font-black italic transition-all ${isDone ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20' : 'bg-gray-800 text-gray-500'}`}>
-                                                            {isDone ? 'OK' : 'VALIDER'}
-                                                        </button>
+
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Poids (LBS)</p>
+                                                                <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
+                                                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', Math.max(0, (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) - 2.5)))}><Minus size={14}/></Button>
+                                                                    <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.weight || exo.weight || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'weight', e.target.value)} />
+                                                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) + 2.5))}><Plus size={14}/></Button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Répétitions</p>
+                                                                <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
+                                                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', Math.max(0, (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) - 1)))}><Minus size={14}/></Button>
+                                                                    <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.reps || exo.reps || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'reps', e.target.value)} />
+                                                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) + 1))}><Plus size={14}/></Button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-
-                                                    <div className="grid grid-cols-2 gap-3">
-                                                        <div className="space-y-1.5">
-                                                            <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Poids (LBS)</p>
-                                                            <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
-                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', Math.max(0, (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) - 2.5)))}><Minus size={14}/></Button>
-                                                                <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.weight || exo.weight || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'weight', e.target.value)} />
-                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'weight', (parseFloat(sessionLogs[logKey]?.weight || exo.weight || 0) + 2.5))}><Plus size={14}/></Button>
-                                                            </div>
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest pl-1">Répétitions</p>
-                                                            <div className="flex items-center bg-[#1a1a20] rounded-2xl border border-white/5 p-1 h-12">
-                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', Math.max(0, (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) - 1)))}><Minus size={14}/></Button>
-                                                                <Input disabled={isCoachView} type="number" className="h-10 border-0 bg-transparent text-white text-center font-black text-lg focus-visible:ring-0 p-0" value={sessionLogs[logKey]?.reps || exo.reps || ''} onChange={(e) => handleSetChange(groupIdx, eIdx, sIdx, 'reps', e.target.value)} />
-                                                                <Button variant="ghost" size="icon" className="h-10 w-10 text-gray-500" onClick={() => handleSetChange(groupIdx, eIdx, sIdx, 'reps', (parseInt(sessionLogs[logKey]?.reps || exo.reps || 0) + 1))}><Plus size={14}/></Button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ))}
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
