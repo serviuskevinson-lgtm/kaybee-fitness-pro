@@ -10,12 +10,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
+import com.example.kaybeewear.health.HealthManager
 
 @Composable
 fun RunScreen(
     heartRate: Int,
     steps: Int,
-    calories: Int
+    calories: Int,
+    isRunning: Boolean,
+    onToggleRun: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -47,20 +50,24 @@ fun RunScreen(
             Spacer(modifier = Modifier.height(12.dp))
             
             Text(
-                "00:00:00",
+                if (isRunning) "EN COURS..." else "ARRÊTÉ",
                 color = Color.White,
-                fontSize = 24.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Black
             )
             
             Spacer(modifier = Modifier.height(8.dp))
             
             Button(
-                onClick = { /* Start/Stop */ },
-                modifier = Modifier.size(40.dp),
-                colors = ButtonDefaults.buttonColors(backgroundColor = PurplePrimary)
+                onClick = onToggleRun,
+                modifier = Modifier.size(44.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = if (isRunning) Color.Red else GreenAccent)
             ) {
-                Text("▶", color = Color.White)
+                if (isRunning) {
+                    Text("■", color = Color.White, fontSize = 20.sp)
+                } else {
+                    Text("▶", color = Color.Black, fontSize = 20.sp)
+                }
             }
         }
     }

@@ -9,6 +9,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.util.Log;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -33,6 +34,30 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.time.Instant;
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
+
+import androidx.health.connect.client.HealthConnectClient;
+import androidx.health.connect.client.records.ExerciseSessionRecord;
+import androidx.health.connect.client.records.ExerciseRoute;
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord;
+import androidx.health.connect.client.records.DistanceRecord;
+import androidx.health.connect.client.records.StepsRecord;
+import androidx.health.connect.client.records.HeartRateRecord;
+import androidx.health.connect.client.records.MindfulnessSessionRecord;
+import androidx.health.connect.client.records.SkinTemperatureRecord;
+import androidx.health.connect.client.records.SleepSessionRecord;
+import androidx.health.connect.client.records.metadata.Metadata;
+import androidx.health.connect.client.request.ReadRecordsRequest;
+import androidx.health.connect.client.time.TimeRangeFilter;
+import androidx.health.connect.client.units.Length;
+import androidx.health.connect.client.units.Energy;
+import androidx.health.connect.client.units.Temperature;
 
 @CapacitorPlugin(
     name = "WearPlugin",
@@ -115,9 +140,6 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        // On laisse le téléphone compter même si la montre est là (redondance safe)
-        // Mais on ne synchronise que si nécessaire dans syncPhoneStepsToFirebase
-        
         if (event.sensor.getType() == Sensor.TYPE_STEP_COUNTER) {
             long rawSensorSteps = (long) event.values[0];
             long todaySteps = calculateDailySteps(rawSensorSteps);
@@ -129,12 +151,8 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         if (currentUserId == null || firebaseDb == null) return;
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
-        
-        // Sécurité Midnight Reset : Si Firebase est encore sur hier, on force l'update à 0
         boolean isNewDay = !today.equals(firebaseDate);
         
-        // On ne synchronise que si on a vraiment progressé ou si c'est un nouveau jour
-        // On ignore les retours en arrière (sauf nouveau jour)
         if (!isNewDay && steps <= lastFirebaseSteps && lastFirebaseSteps > 0) {
             return; 
         }
@@ -184,7 +202,6 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         Wearable.getNodeClient(getContext()).getConnectedNodes()
             .addOnSuccessListener(nodes -> {
                 isWatchConnected = !nodes.isEmpty() && prefs.getBoolean(KEY_WATCH_ACTIVE, false);
-                // On démarre toujours le capteur téléphone par sécurité
                 startPhoneStepCounting();
             });
     }
@@ -258,6 +275,180 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
                 }
                 call.resolve();
             } catch (Exception e) { call.reject(e.getMessage()); }
+        }).start();
+    }
+
+    @PluginMethod
+    public void writeRunToHealthConnect(PluginCall call) {
+        if (HealthConnectClient.getSdkStatus(getContext(), "com.google.android.apps.healthdata") != HealthConnectClient.SDK_AVAILABLE) {
+            call.reject("Health Connect non disponible");
+            return;
+        }
+
+        HealthConnectClient client = HealthConnectClient.getOrCreate(getContext());
+        
+        try {
+            String startTimeStr = call.getString("startTime");
+            String endTimeStr = call.getString("endTime");
+            double distanceKm = call.getDouble("distance", 0.0);
+            double calories = call.getDouble("calories", 0.0);
+            JSArray routeArray = call.getArray("route");
+
+            Instant start = Instant.parse(startTimeStr);
+            Instant end = Instant.parse(endTimeStr);
+
+            List<ExerciseRoute.Location> locations = new ArrayList<>();
+            if (routeArray != null) {
+                for (int i = 0; i < routeArray.length(); i++) {
+                    JSObject point = routeArray.getObject(i);
+                    locations.add(new ExerciseRoute.Location(
+                        Instant.ofEpochMilli(point.getLong("timestamp")),
+                        point.getDouble("lat"),
+                        point.getDouble("lng"),
+                        point.getDouble("altitude", null),
+                        null,
+                        null
+                    ));
+                }
+            }
+
+            ExerciseRoute route = null;
+            if (!locations.isEmpty()) {
+                route = new ExerciseRoute(locations);
+            }
+
+            ExerciseSessionRecord session = new ExerciseSessionRecord(
+                start,
+                null, 
+                end,
+                null,
+                ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,
+                "Kaybee Run",
+                null,
+                Metadata.EMPTY,
+                route
+            );
+
+            TotalCaloriesBurnedRecord caloriesRecord = new TotalCaloriesBurnedRecord(
+                start,
+                null,
+                end,
+                null,
+                Energy.kilocalories(calories),
+                Metadata.EMPTY
+            );
+
+            DistanceRecord distanceRecord = new DistanceRecord(
+                start,
+                null,
+                end,
+                null,
+                Length.kilometers(distanceKm),
+                Metadata.EMPTY
+            );
+
+            new Thread(() -> {
+                try {
+                    Tasks.await(client.insertRecords(Arrays.asList(session, caloriesRecord, distanceRecord)));
+                    call.resolve();
+                } catch (Exception e) {
+                    call.reject(e.getMessage());
+                }
+            }).start();
+
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void writeHealthData(PluginCall call) {
+        HealthConnectClient client = HealthConnectClient.getOrCreate(getContext());
+        try {
+            String type = call.getString("type");
+            Instant now = Instant.now();
+            
+            if ("steps".equals(type)) {
+                long count = call.getLong("value", 0L);
+                StepsRecord record = new StepsRecord(now.minus(Duration.ofMinutes(1)), null, now, null, count, Metadata.EMPTY);
+                new Thread(() -> {
+                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
+                    catch (Exception e) { call.reject(e.getMessage()); }
+                }).start();
+            } else if ("mindfulness".equals(type)) {
+                MindfulnessSessionRecord record = new MindfulnessSessionRecord(now.minus(Duration.ofMinutes(10)), null, now, null, MindfulnessSessionRecord.MINDFULNESS_SESSION_TYPE_MEDITATION, "Méditation Kaybee", null, Metadata.EMPTY);
+                new Thread(() -> {
+                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
+                    catch (Exception e) { call.reject(e.getMessage()); }
+                }).start();
+            } else if ("skin_temperature".equals(type)) {
+                double temp = call.getDouble("value", 36.6);
+                SkinTemperatureRecord record = new SkinTemperatureRecord(now, null, Temperature.celsius(temp), SkinTemperatureRecord.MEASUREMENT_LOCATION_WRIST, Metadata.EMPTY);
+                new Thread(() -> {
+                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
+                    catch (Exception e) { call.reject(e.getMessage()); }
+                }).start();
+            } else if ("sleep".equals(type)) {
+                SleepSessionRecord record = new SleepSessionRecord(now.minus(Duration.ofHours(8)), null, now, null, "Sommeil Kaybee", null, Metadata.EMPTY);
+                new Thread(() -> {
+                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
+                    catch (Exception e) { call.reject(e.getMessage()); }
+                }).start();
+            }
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
+    @PluginMethod
+    public void getRunHistory(PluginCall call) {
+        if (HealthConnectClient.getSdkStatus(getContext(), "com.google.android.apps.healthdata") != HealthConnectClient.SDK_AVAILABLE) {
+            call.reject("Health Connect non disponible");
+            return;
+        }
+
+        HealthConnectClient client = HealthConnectClient.getOrCreate(getContext());
+        
+        new Thread(() -> {
+            try {
+                ReadRecordsRequest<ExerciseSessionRecord> request = new ReadRecordsRequest<>(
+                    ExerciseSessionRecord.class,
+                    TimeRangeFilter.after(Instant.now().minus(Duration.ofDays(30))),
+                    Collections.emptySet(),
+                    false
+                );
+                
+                List<ExerciseSessionRecord> records = Tasks.await(client.readRecords(request)).getRecords();
+                
+                JSArray results = new JSArray();
+                for (ExerciseSessionRecord record : records) {
+                    if (record.getExerciseType() == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING) {
+                        JSObject obj = new JSObject();
+                        obj.put("startTime", record.getStartTime().toString());
+                        obj.put("endTime", record.getEndTime().toString());
+                        obj.put("title", record.getTitle());
+                        
+                        ExerciseRoute route = record.getExerciseRoute();
+                        if (route != null) {
+                            JSArray path = new JSArray();
+                            for (ExerciseRoute.Location loc : route.getRoute()) {
+                                JSObject p = new JSObject();
+                                p.put("lat", loc.getLatitude());
+                                p.put("lng", loc.getLongitude());
+                                p.put("timestamp", loc.getTime().toEpochMilli());
+                                path.put(p);
+                            }
+                            obj.put("route", path);
+                        }
+                        results.put(obj);
+                    }
+                }
+                
+                JSObject ret = new JSObject();
+                ret.put("history", results);
+                call.resolve(ret);
+                
+            } catch (Exception e) {
+                call.reject(e.getMessage());
+            }
         }).start();
     }
 

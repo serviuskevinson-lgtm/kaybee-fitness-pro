@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/rationale_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Health Connect Permissions"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp"
+        android:textAlignment="center"/>
+
+    <TextView
+        android:id="@+id/rationale_description"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Kaybee Fitness needs access to Health Connect to sync your fitness data like steps and heart rate to provide personalized coaching and track your progress."
+        android:textSize="16sp"
+        android:layout_marginBottom="32dp"
+        android:textAlignment="center"/>
+
+    <Button
+        android:id="@+id/btn_close_rationale"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Close" />
+
+</LinearLayout>

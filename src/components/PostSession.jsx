@@ -8,13 +8,14 @@ import { db } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { motion, AnimatePresence } from 'framer-motion';
+import { WearPlugin } from '@/lib/wear';
+import { Capacitor } from '@capacitor/core';
 
 export default function PostSession({ isOpen, stats, workout, userId, onComplete }) {
   const [step, setStep] = useState(1); // 1: Summary/AI, 2: Weight, 3: Photo
   const [aiFeedback, setAiFeedback] = useState("");
   const [loadingAI, setLoadingAI] = useState(true);
   const [weight, setWeight] = useState("");
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen && step === 1 && !aiFeedback) {
@@ -29,8 +30,24 @@ export default function PostSession({ isOpen, stats, workout, userId, onComplete
         }
       };
       getFeedback();
+
+      // Write session to Health Connect
+      if (Capacitor.getPlatform() === 'android') {
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - (stats.time * 1000));
+
+        WearPlugin.writeRunToHealthConnect({
+          type: 'workout',
+          title: workout?.name || 'Musculation Kaybee',
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString(),
+          calories: stats.calories || 0,
+          distance: 0,
+          route: []
+        }).catch(err => console.error("Health Connect Session Error:", err));
+      }
     }
-  }, [isOpen, step]);
+  }, [isOpen, step, aiFeedback, workout, stats]);
 
   const handleNext = () => setStep(step + 1);
 
@@ -45,6 +62,14 @@ export default function PostSession({ isOpen, stats, workout, userId, onComplete
             value: parseFloat(weight)
           })
         });
+
+        // Sync weight to Health Connect
+        if (Capacitor.getPlatform() === 'android') {
+            WearPlugin.writeHealthData({
+                type: 'weight',
+                value: parseFloat(weight)
+            }).catch(e => console.error(e));
+        }
       } catch (e) { console.error("Error saving weight", e); }
     }
     handleNext();
@@ -59,7 +84,6 @@ export default function PostSession({ isOpen, stats, workout, userId, onComplete
         source: CameraSource.Camera
       });
 
-      // Simulation de sauvegarde dans la galerie privée
       const userRef = doc(db, "users", userId);
       await updateDoc(userRef, {
         gallery: arrayUnion({
@@ -73,11 +97,12 @@ export default function PostSession({ isOpen, stats, workout, userId, onComplete
       onComplete();
     } catch (e) {
       console.error("Camera error", e);
+      onComplete();
     }
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={() => {}}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if(!open) onComplete(); }}>
       <DialogContent className="bg-[#0a0a0f] border-none text-white max-w-lg p-0 overflow-hidden rounded-3xl">
         <div className="max-h-[90vh] overflow-y-auto custom-scrollbar">
           <AnimatePresence mode="wait">
@@ -195,7 +220,7 @@ export default function PostSession({ isOpen, stats, workout, userId, onComplete
                     <Camera size={28} />
                     PRENDRE LA PHOTO
                   </Button>
-                  <Button variant="ghost" onClick={onComplete} className="text-gray-500 font-bold">
+                  <Button variant="ghost" onClick={() => onComplete()} className="text-gray-500 font-bold">
                     PROCHAINE FOIS
                   </Button>
                 </div>

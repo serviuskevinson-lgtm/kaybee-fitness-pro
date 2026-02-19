@@ -4,12 +4,12 @@ apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 android {
     namespace "com.kaybeefitness.app"
-    compileSdkVersion 35 // Nécessaire pour Health Connect stable
+    compileSdkVersion 36 // Nécessaire pour Health Connect stable
 
     defaultConfig {
         applicationId "com.kaybeefitness.app"
         minSdkVersion 26
-        targetSdkVersion 35
+        targetSdkVersion 36
         versionCode 7
         versionName "6.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
