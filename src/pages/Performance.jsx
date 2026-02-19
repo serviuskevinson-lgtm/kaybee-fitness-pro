@@ -2,27 +2,24 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
-import { doc, getDoc, updateDoc, arrayRemove } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, AreaChart, Area, ReferenceLine, PieChart, Pie, Cell
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell
 } from 'recharts';
 import { 
-  TrendingUp, Calendar, Trophy, Activity, Dumbbell, ArrowUpRight, 
-  Users, Scale, Timer, Target, Zap, 
-  Download, Trash2, AlertTriangle, X, Footprints, Flame, Droplets, ZapOff, Utensils
+  TrendingUp, Activity, Dumbbell, ArrowUpRight,
+  Scale, Timer, Target, Zap,
+  X, Footprints, Flame, Droplets, Utensils, Trophy, ChevronRight, Info, Heart
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter 
-} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { motion, AnimatePresence } from 'framer-motion';
-import { format, subDays, isValid } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
 
@@ -30,13 +27,13 @@ import { useTranslation } from 'react-i18next';
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-[#1a1a20] border border-gray-700 p-4 rounded-xl shadow-2xl backdrop-blur-md bg-opacity-90">
-        <p className="text-white font-bold text-sm mb-2">{label}</p>
+      <div className="bg-[#1a1a20] border border-gray-700 p-3 rounded-xl shadow-2xl backdrop-blur-md">
+        <p className="text-white font-bold text-[10px] mb-1">{label}</p>
         {payload.map((entry, index) => (
-          <div key={index} className="flex items-center gap-2 text-xs">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-            <span className="text-gray-300 capitalize">{entry.name}:</span>
-            <span className="font-mono font-bold text-white">
+          <div key={index} className="flex items-center gap-2 text-[9px]">
+            <div className="size-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-gray-400 capitalize">{entry.name}:</span>
+            <span className="font-mono font-black text-white">
               {entry.value} {entry.name === 'weight' ? 'LBS' : entry.unit || ''}
             </span>
           </div>
@@ -47,47 +44,31 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const PerformanceSkeleton = () => (
-  <div className="space-y-6 animate-pulse p-8">
-    <div className="flex justify-between items-center mb-8">
-      <Skeleton className="h-10 w-64 bg-gray-800" />
-      <Skeleton className="h-10 w-32 bg-gray-800" />
-    </div>
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-      {[1, 2, 3, 4, 5, 6, 7, 8].map(i => <Skeleton key={i} className="h-32 bg-gray-800 rounded-2xl" />)}
-    </div>
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Skeleton className="h-80 bg-gray-800 rounded-2xl" />
-      <Skeleton className="h-80 bg-gray-800 rounded-2xl" />
-    </div>
-  </div>
-);
-
 const KPICard = ({ title, value, unit, icon: Icon, trend, color, description }) => {
   const isPositive = trend > 0;
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -5 }} className="h-full">
-      <Card className="bg-[#1a1a20] border-gray-800 hover:border-gray-700 transition-all h-full overflow-hidden relative group rounded-2xl shadow-lg">
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="h-full">
+      <Card className="bg-[#1a1a20] border-gray-800 h-full relative overflow-hidden rounded-2xl shadow-lg">
         <div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: color }} />
-        <CardContent className="p-6 flex flex-col justify-between h-full relative z-10">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 rounded-xl bg-opacity-10" style={{ backgroundColor: `${color}20`, color: color }}>
-              <Icon size={24} />
+        <CardContent className="p-4 sm:p-6 flex flex-col justify-between h-full">
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2 rounded-xl" style={{ backgroundColor: `${color}15`, color: color }}>
+              <Icon size={20} />
             </div>
             {trend !== undefined && trend !== 0 && (
-              <Badge variant="outline" className={`border-none px-2 py-0.5 rounded-lg text-xs font-bold ${isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                {isPositive ? <ArrowUpRight size={12} className="mr-1"/> : <X size={12} className="mr-1"/>}
+              <Badge variant="outline" className={`border-none px-1.5 py-0.5 rounded-lg text-[9px] font-black ${isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                {isPositive ? <ArrowUpRight size={10} className="mr-1"/> : <X size={10} className="mr-1"/>}
                 {Math.abs(trend)}%
               </Badge>
             )}
           </div>
           <div>
-            <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mb-1">{title}</p>
+            <p className="text-gray-500 text-[8px] sm:text-[10px] font-black uppercase tracking-widest mb-0.5">{title}</p>
             <div className="flex items-baseline gap-1">
-              <h3 className="text-3xl font-black text-white">{value}</h3>
-              <span className="text-sm text-gray-500 font-bold">{unit}</span>
+              <h3 className="text-xl sm:text-2xl font-black text-white">{value}</h3>
+              <span className="text-[10px] text-gray-500 font-bold">{unit}</span>
             </div>
-            {description && <p className="text-[10px] text-gray-600 mt-2 font-medium">{description}</p>}
+            {description && <p className="text-[8px] text-gray-600 mt-1 font-bold italic line-clamp-1">{description}</p>}
           </div>
         </CardContent>
       </Card>
@@ -143,7 +124,6 @@ export default function Performance() {
         return Math.round(((curr - old) / old) * 100);
     };
 
-    // Energy Balance
     const avgConsumed = dailyLogs.length > 0 ? dailyLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0) / dailyLogs.length : 0;
     const avgBurned = dailyLogs.length > 0 ? dailyLogs.reduce((acc, curr) => acc + (curr.burned || 0), 0) / dailyLogs.length : 0;
     const balance = avgConsumed - avgBurned;
@@ -170,8 +150,8 @@ export default function Performance() {
         totalRuns: runLogs.length,
         totalDistance: runLogs.reduce((acc, curr) => acc + (curr.distance || 0), 0),
         totalRunDuration: runLogs.reduce((acc, curr) => acc + (curr.duration || 0), 0),
-        avgCadence: runLogs.length > 0 ? runLogs.reduce((acc, curr) => acc + (curr.avgCadence || 0), 0) / runLogs.length : 0,
-        avgRunBpm: runLogs.length > 0 ? runLogs.reduce((acc, curr) => acc + (curr.avgHeartRate || 0), 0) / runLogs.length : 0
+        avgCadence: runLogs.length > 0 ? Math.round(runLogs.reduce((acc, curr) => acc + (curr.avgCadence || 0), 0) / runLogs.length) : 0,
+        avgRunBpm: runLogs.length > 0 ? Math.round(runLogs.reduce((acc, curr) => acc + (curr.avgBpm || curr.avgHeartRate || 0), 0) / runLogs.length) : 0
     };
   }, [filteredHistory, userProfile]);
 
@@ -186,142 +166,111 @@ export default function Performance() {
     }));
   }, [filteredHistory]);
 
-  if (loading) return <PerformanceSkeleton />;
+  if (loading) return <div className="h-screen bg-[#0a0a0f] flex items-center justify-center text-[#00f5d4] font-black uppercase animate-pulse">Sync Stats...</div>;
 
   return (
-    <div className="p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-24 font-sans">
-      <div className="max-w-7xl mx-auto space-y-12">
+    <div className="p-2 sm:p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-32 overflow-x-hidden">
+      <div className="max-w-7xl mx-auto space-y-8">
         
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 animate-in slide-in-from-top duration-500">
+        <header className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-[#1a1a20] p-4 sm:p-6 rounded-2xl border border-gray-800">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] rounded-2xl shadow-xl">
-              <Activity className="text-white w-8 h-8" />
+            <div className="p-2.5 bg-gradient-to-br from-[#7b2cbf] to-[#00f5d4] rounded-xl">
+              <Activity className="text-white size-6" />
             </div>
-            <div>
-              <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter">ANALYSE PERFORMANCE</h1>
-              <p className="text-gray-500 text-sm font-bold">Suivez vos progrès et votre constance.</p>
-            </div>
+            <h1 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter">PERFORMANCE</h1>
           </div>
 
-          <div className="flex items-center gap-2 bg-[#1a1a20] p-1.5 rounded-xl border border-gray-800">
+          <div className="flex bg-black/40 p-1 rounded-xl border border-gray-800 w-full sm:w-auto">
             {['week', 'month', 'year'].map((range) => (
-              <button key={range} onClick={() => setTimeRange(range)} className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${timeRange === range ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}>
+              <button key={range} onClick={() => setTimeRange(range)} className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${timeRange === range ? 'bg-[#00f5d4] text-black' : 'text-gray-500'}`}>
                 {range}
               </button>
             ))}
           </div>
         </header>
 
-        {/* --- ENERGY BALANCE ROW --- */}
-        <div className="space-y-6">
-          <div className="flex items-center gap-2 text-[#fdcb6e] opacity-80">
-            <Zap size={20} />
-            <h2 className="text-xl font-black italic uppercase tracking-tighter">Balance Énergétique</h2>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-2 bg-[#1a1a20] p-6 rounded-3xl border border-gray-800 flex flex-col md:flex-row items-center gap-8 shadow-2xl relative overflow-hidden group">
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-[#fdcb6e]/5 to-transparent pointer-events-none"></div>
-                <div className="relative w-40 h-40">
+        {/* ENERGY BALANCE COMPACT */}
+        <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden relative shadow-2xl">
+            <div className="p-4 sm:p-6 flex flex-col md:flex-row items-center gap-6">
+                <div className="relative size-32 sm:size-40 shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
-                            <Pie data={[{value: stats.avgConsumed}, {value: stats.avgBurned}]} innerRadius={55} outerRadius={75} paddingAngle={5} dataKey="value">
+                            <Pie data={[{value: stats.avgConsumed}, {value: stats.avgBurned}]} innerRadius={45} outerRadius={60} paddingAngle={5} dataKey="value">
                                 <Cell fill="#00f5d4" />
                                 <Cell fill="#ff7675" />
                             </Pie>
                         </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className={`text-2xl font-black ${stats.energyBalance > 0 ? 'text-[#00f5d4]' : 'text-[#ff7675]'}`}>{stats.energyBalance > 0 ? '+' : ''}{stats.energyBalance}</span>
-                        <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">Balance</span>
+                        <span className={`text-xl sm:text-2xl font-black ${stats.energyBalance > 0 ? 'text-[#00f5d4]' : 'text-[#ff7675]'}`}>{stats.energyBalance > 0 ? '+' : ''}{stats.energyBalance}</span>
+                        <span className="text-[7px] font-bold text-gray-500 uppercase">Balance</span>
                     </div>
                 </div>
-                <div className="flex-1 space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#00f5d4]"></div><span className="text-xs font-bold text-gray-400 uppercase">Moy. Consommée</span></div>
-                        <span className="font-black text-white">{stats.avgConsumed} Kcal</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#ff7675]"></div><span className="text-xs font-bold text-gray-400 uppercase">Moy. Brûlée</span></div>
-                        <span className="font-black text-white">{stats.avgBurned} Kcal</span>
-                    </div>
-                    <div className="pt-2 border-t border-gray-800">
-                        <p className="text-[10px] text-gray-500 font-medium italic leading-relaxed">
-                            {stats.energyBalance > 200 ? "Vous êtes en surplus calorique, idéal pour la prise de masse." :
-                             stats.energyBalance < -200 ? "Vous êtes en déficit calorique, favorable à la perte de gras." :
-                             "Votre balance est équilibrée, parfait pour la maintenance."}
-                        </p>
+                <div className="flex-1 w-full space-y-3">
+                    <h3 className="text-[10px] font-black uppercase text-gray-500 tracking-widest flex items-center gap-2"><Zap size={12} className="text-yellow-500"/> Balance Énergétique</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-black/40 p-3 rounded-2xl border border-white/5">
+                            <p className="text-[8px] text-gray-500 uppercase font-black mb-1">Moy. Consommée</p>
+                            <p className="text-lg font-black text-[#00f5d4]">{stats.avgConsumed} <span className="text-[8px] opacity-50">kcal</span></p>
+                        </div>
+                        <div className="bg-black/40 p-3 rounded-2xl border border-white/5">
+                            <p className="text-[8px] text-gray-500 uppercase font-black mb-1">Moy. Brûlée</p>
+                            <p className="text-lg font-black text-[#ff7675]">{stats.avgBurned} <span className="text-[8px] opacity-50">kcal</span></p>
+                        </div>
                     </div>
                 </div>
             </div>
-            <KPICard title="Déficit/Surplus" value={stats.energyBalance} unit="Kcal/j" icon={stats.energyBalance < 0 ? Flame : Activity} color={stats.energyBalance < 0 ? "#00f5d4" : "#ff7675"} description="Moyenne sur la période" />
-            <KPICard title="Métabolisme Est." value={stats.avgBurned} unit="Kcal" icon={TrendingUp} color="#a29bfe" description="Dépense quotidienne moy." />
-          </div>
+        </Card>
+
+        {/* METRICS GRID - 2 COLUMNS ON MOBILE */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+            <KPICard title="Derniers Pas" value={stats.steps.toLocaleString()} unit="Pas" icon={Footprints} color="#00f5d4" trend={stats.stepsTrend} description={`${stats.avgSteps} moy.`} />
+            <KPICard title="Kcal Hier" value={stats.cals} unit="Kcal" icon={Utensils} color="#ff7675" trend={stats.calsTrend} />
+            <KPICard title="Muscu Sess." value={stats.totalSessions} unit="Sessions" icon={Dumbbell} color="#7b2cbf" description={`${stats.avgIntensity}/10 Int.`} />
+            <KPICard title="Volume" value={(stats.volume / 1000).toFixed(1)} unit="T" icon={Trophy} color="#a29bfe" />
         </div>
 
-        {/* --- ROW 1 : DAILY HEALTH WIDGETS --- */}
+        {/* PERFORMANCE SECTIONS */}
         <div className="space-y-6">
-          <div className="flex items-center gap-2 text-[#00f5d4] opacity-80">
-            <Activity size={20} />
-            <h2 className="text-xl font-black italic uppercase tracking-tighter">Santé & Activité Quotidienne</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <KPICard title="Derniers Pas" value={stats.steps.toLocaleString()} unit="Pas" icon={Footprints} color="#00f5d4" trend={stats.stepsTrend} description={`Moyenne: ${stats.avgSteps} pas`} />
-            <KPICard title="Calories Consommées" value={stats.cals} unit="Kcal" icon={Utensils} color="#ff7675" trend={stats.calsTrend} description="Hier vs Avant-hier" />
-            <KPICard title="Hydratation" value={stats.water.toFixed(1)} unit="L" icon={Droplets} color="#74b9ff" description="Total journalier" />
-            <KPICard title="Poids Actuel" value={stats.weight} unit="LBS" icon={Scale} color="#fdcb6e" description="Dernière pesée" />
-          </div>
+            <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest flex items-center gap-2 px-2"><Dumbbell size={14} className="text-[#7b2cbf]"/> Performance Musculaire</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KPICard title="Sess. Totales" value={stats.totalSessions} unit="Sess." icon={Dumbbell} color="#7b2cbf" />
+                <KPICard title="Volume Cumulé" value={(stats.volume / 1000).toFixed(1)} unit="Tonnes" icon={Trophy} color="#a29bfe" />
+                <KPICard title="Temps Effort" value={Math.floor(stats.duration / 60)} unit="min" icon={Timer} color="#fab1a0" />
+                <KPICard title="Intensité Moy." value={stats.avgIntensity} unit="/10" icon={Zap} color="#e17055" />
+            </div>
         </div>
 
-        {/* --- ROW 2 : TRAINING PERFORMANCE WIDGETS --- */}
         <div className="space-y-6">
-          <div className="flex items-center gap-2 text-[#7b2cbf] opacity-80">
-            <Dumbbell size={20} />
-            <h2 className="text-xl font-black italic uppercase tracking-tighter">Performance Musculation</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <KPICard title={t('total_sessions')} value={stats.totalSessions} unit="Sess." icon={Dumbbell} color="#7b2cbf" description={t('selected_period')} />
-            <KPICard title={t('total_volume')} value={(stats.volume / 1000).toFixed(1)} unit="Tonnes" icon={Trophy} color="#a29bfe" description={t('cumulative_load')} />
-            <KPICard title={t('effort_time')} value={Math.floor(stats.duration / 60)} unit="min" icon={Timer} color="#fab1a0" description={`${stats.avgDuration} sec / sess`} />
-            <KPICard title={t('avg_intensity')} value={stats.avgIntensity} unit="/ 10" icon={Zap} color="#e17055" description="Moyenne RPE" />
-          </div>
+            <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest flex items-center gap-2 px-2"><Activity size={14} className="text-[#00f5d4]"/> Performance Cardiovasculaire</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KPICard title="Cadence Moy." value={stats.avgCadence} unit="SPM" icon={Activity} color="#00f5d4" />
+                <KPICard title="Dist. Totale" value={stats.totalDistance.toFixed(2)} unit="Km" icon={Target} color="#74b9ff" />
+                <KPICard title="Effort Cardio" value={stats.avgRunBpm} unit="BPM" icon={Heart} color="#ff7675" />
+                <KPICard title="Volume Course" value={Math.floor(stats.totalRunDuration / 60)} unit="Min" icon={Timer} color="#fdcb6e" />
+            </div>
         </div>
 
-        {/* --- ROW 3 : CARDIO PERFORMANCE WIDGETS --- */}
-        <div className="space-y-6">
-          <div className="flex items-center gap-2 text-[#00f5d4] opacity-80">
-            <Zap size={20} />
-            <h2 className="text-xl font-black italic uppercase tracking-tighter">Performance Cardiovasculaire</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <KPICard title="Cadence Moyenne" value={Math.round(stats.avgCadence)} unit="SPM" icon={Activity} color="#00f5d4" description="Pas par minute" />
-            <KPICard title="Distance Totale" value={stats.totalDistance.toFixed(2)} unit="Km" icon={Target} color="#74b9ff" description="Sur la période" />
-            <KPICard title="Effort Moyen" value={Math.round(stats.avgRunBpm)} unit="BPM" icon={Flame} color="#ff7675" description="Intensité cardiaque" />
-            <KPICard title="Temps de Course" value={Math.floor(stats.totalRunDuration / 60)} unit="Min" icon={Timer} color="#fdcb6e" description="Volume total" />
-          </div>
-        </div>
-
-        {/* --- CHART & HISTORY SECTION --- */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <Card className="lg:col-span-2 bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden shadow-2xl">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-white font-black italic flex items-center gap-2 uppercase tracking-tighter"><TrendingUp className="text-[#00f5d4]"/> Évolution Activité</CardTitle>
-                <CardDescription className="text-gray-500 text-xs uppercase font-bold">Analyse des données biométriques</CardDescription>
+        {/* CHART SECTION ADAPTED */}
+        <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl overflow-hidden shadow-2xl">
+            <CardHeader className="p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="text-center sm:text-left">
+                <CardTitle className="text-lg font-black italic uppercase tracking-tighter">ÉVOLUTION</CardTitle>
+                <CardDescription className="text-[10px] uppercase font-bold text-gray-500">Biométrie & Activité</CardDescription>
               </div>
               <Select value={selectedMetric} onValueChange={setSelectedMetric}>
-                <SelectTrigger className="w-[140px] bg-black border-gray-800 text-white h-9 text-[10px] font-black uppercase">
+                <SelectTrigger className="w-full sm:w-[160px] bg-black border-gray-800 text-white h-10 text-[10px] font-black uppercase rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1a1a20] border-gray-800 text-white">
-                  <SelectItem value="steps">Pas (Daily)</SelectItem>
-                  <SelectItem value="calories">Consommées (Kcal)</SelectItem>
-                  <SelectItem value="burned">Brûlées (Kcal)</SelectItem>
-                  <SelectItem value="water">Eau (Litre)</SelectItem>
-                  <SelectItem value="weight">Poids (LBS)</SelectItem>
+                  <SelectItem value="steps" className="text-[10px] font-bold uppercase">Pas (Daily)</SelectItem>
+                  <SelectItem value="calories" className="text-[10px] font-bold uppercase">Consommées</SelectItem>
+                  <SelectItem value="burned" className="text-[10px] font-bold uppercase">Brûlées</SelectItem>
+                  <SelectItem value="weight" className="text-[10px] font-bold uppercase">Poids (LBS)</SelectItem>
                 </SelectContent>
               </Select>
             </CardHeader>
-            <CardContent className="h-[350px] pt-4">
+            <CardContent className="h-[250px] sm:h-[350px] p-2 sm:p-6">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData}>
                   <defs>
@@ -331,44 +280,36 @@ export default function Performance() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-                  <XAxis dataKey="date" stroke="#444" tick={{fill: '#666', fontSize: 10}} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#444" tick={{fill: '#666', fontSize: 10}} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="date" stroke="#444" tick={{fill: '#666', fontSize: 9}} axisLine={false} tickLine={false} />
+                  <YAxis stroke="#444" tick={{fill: '#666', fontSize: 9}} axisLine={false} tickLine={false} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey={selectedMetric} stroke="#00f5d4" strokeWidth={3} fillOpacity={1} fill="url(#colorMetric)" />
+                  <Area type="monotone" dataKey={selectedMetric} stroke="#00f5d4" strokeWidth={2} fillOpacity={1} fill="url(#colorMetric)" />
                 </AreaChart>
               </ResponsiveContainer>
             </CardContent>
-          </Card>
+        </Card>
 
-          <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl shadow-2xl p-6">
-              <h3 className="text-white font-black italic uppercase text-lg mb-6 flex items-center gap-2"><Trophy className="text-[#ffd700]"/> Historique Activité</h3>
-              <ScrollArea className="h-[350px] pr-4">
-                  <div className="space-y-4">
-                      {history.length > 0 ? history.map((h, i) => (
-                          <div key={i} className="bg-black/40 p-3 rounded-xl border border-white/5 flex items-center justify-between group hover:border-[#00f5d4]/30 transition-all">
-                              <div>
-                                  <p className="text-white font-bold text-sm uppercase">{h.name || (h.type === 'run' ? "Course" : "Activité")}</p>
-                                  <p className="text-gray-500 text-[10px] uppercase font-bold">{format(new Date(h.date), 'dd MMMM yyyy', { locale: fr })}</p>
-                              </div>
-                              <div className="text-right">
-                                  {h.type === 'run' ? (
-                                      <>
-                                        <p className="text-[#00f5d4] font-black text-xs">{h.distance?.toFixed(2)} <span className="text-[8px] text-gray-600">KM</span></p>
-                                        <p className="text-gray-500 text-[8px] font-bold">{Math.floor((h.duration || 0) / 60)} MIN</p>
-                                      </>
-                                  ) : (
-                                      <>
-                                        {h.steps ? <p className="text-[#00f5d4] font-black text-xs">{h.steps} <span className="text-[8px] text-gray-600">PAS</span></p> : null}
-                                        {h.calories ? <p className="text-[#ff7675] font-black text-xs">{h.calories} <span className="text-[8px] text-gray-600">KCAL</span></p> : null}
-                                      </>
-                                  )}
-                              </div>
-                          </div>
-                      )) : <p className="text-gray-500 text-center py-10 italic">Aucune donnée enregistrée.</p>}
-                  </div>
-              </ScrollArea>
-          </Card>
-        </section>
+        {/* HISTORY LIST COMPACT */}
+        <Card className="bg-[#1a1a20] border-gray-800 rounded-3xl p-4 sm:p-6 shadow-2xl">
+            <h3 className="text-white font-black italic uppercase text-sm sm:text-lg mb-4 sm:mb-6 flex items-center gap-2 tracking-tighter"><Trophy className="text-yellow-500" size={18}/> HISTORIQUE RECENT</h3>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
+                {history.length > 0 ? history.map((h, i) => (
+                    <div key={i} className="bg-black/20 p-3 rounded-xl border border-white/5 flex items-center justify-between transition-all active:bg-white/5">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-white font-black uppercase text-[10px] sm:text-xs truncate italic">{h.name || (h.type === 'run' ? "Course" : "Activité")}</p>
+                            <p className="text-gray-600 text-[8px] sm:text-[9px] uppercase font-bold">{format(new Date(h.date), 'dd MMM yyyy', { locale: fr })}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                            {h.type === 'run' ? (
+                                <p className="text-[#00f5d4] font-black text-[10px] sm:text-xs">{h.distance?.toFixed(2)} <span className="text-[8px] opacity-50">KM</span></p>
+                            ) : (
+                                h.calories ? <p className="text-[#ff7675] font-black text-[10px] sm:text-xs">{h.calories} <span className="text-[8px] opacity-50">KCAL</span></p> : null
+                            )}
+                        </div>
+                    </div>
+                )) : <p className="text-gray-600 text-center py-10 text-[10px] uppercase font-bold italic tracking-widest opacity-50">Vide</p>}
+            </div>
+        </Card>
       </div>
     </div>
   );

@@ -128,7 +128,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     private void syncPhoneStepsToFirebase(long steps) {
         if (currentUserId == null || firebaseDb == null) return;
 
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date());
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
         
         // Sécurité Midnight Reset : Si Firebase est encore sur hier, on force l'update à 0
         boolean isNewDay = !today.equals(firebaseDate);
@@ -149,7 +149,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     }
 
     private long calculateDailySteps(long rawSteps) {
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date());
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
         String savedDate = prefs.getString(KEY_DATE, "");
         long offset = prefs.getLong(KEY_OFFSET, -1);
 

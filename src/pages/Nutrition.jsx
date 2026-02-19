@@ -5,9 +5,8 @@ import { db, app } from '@/lib/firebase';
 import { collection, query, orderBy, getDocs, limit, doc, getDoc } from 'firebase/firestore';
 import { getDatabase, ref, onValue } from "firebase/database";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Utensils, Calendar, ChevronRight, Apple, Beef, Wheat, Droplets, Candy, Activity } from 'lucide-react';
+import { Apple, Beef, Wheat, Droplets, Candy, Activity, Utensils } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -24,7 +23,6 @@ export default function Nutrition() {
   const targetId = targetUserId || currentUser?.uid;
   const rtdb = getDatabase(app);
 
-  // Objectifs par défaut ou venant du profil
   const goals = {
     calories: userProfile?.dailyCaloriesGoal || 2000,
     protein: userProfile?.dailyProteinGoal || 150,
@@ -39,11 +37,9 @@ export default function Nutrition() {
       if (!targetId) return;
       setLoading(true);
       try {
-        // 1. Profil pour les objectifs
         const userSnap = await getDoc(doc(db, "users", targetId));
         if (userSnap.exists()) setUserProfile(userSnap.data());
 
-        // 2. Historique Firestore
         const q = query(
           collection(db, "users", targetId, "nutrition_history"),
           orderBy("timestamp", "desc"),
@@ -52,7 +48,6 @@ export default function Nutrition() {
         const snap = await getDocs(q);
         setHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-        // 3. Live Data RTDB (pour voir ce que le client mange AUJOURD'HUI)
         const nutritionRef = ref(rtdb, `users/${targetId}/live_data/nutrition`);
         onValue(nutritionRef, (snapshot) => {
             if (snapshot.exists()) {
@@ -69,86 +64,91 @@ export default function Nutrition() {
     fetchData();
   }, [targetId, rtdb]);
 
-  if (loading) return <div className="p-8 text-white">{t('loading')}...</div>;
+  if (loading) return <div className="h-screen bg-[#0a0a0f] flex items-center justify-center text-[#00f5d4] font-black uppercase animate-pulse">Sync Nutrition...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3">
-            <Apple className="text-[#00f5d4] w-10 h-10" /> {t('nutrition_history')}
+    <div className="p-2 sm:p-4 lg:p-8 bg-[#0a0a0f] min-h-screen text-white pb-32 overflow-x-hidden">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="bg-[#1a1a20] p-5 rounded-2xl border border-gray-800 shadow-xl">
+          <h1 className="text-2xl sm:text-4xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3">
+            <Apple className="text-[#00f5d4] size-8 sm:size-10" /> {t('nutrition_history')}
           </h1>
-          {isCoachView && <Badge className="bg-[#7b2cbf] text-white">VUE COACH (LIVE)</Badge>}
+          {isCoachView && <Badge className="bg-[#7b2cbf] text-white mt-2 text-[10px] uppercase font-black">VUE COACH</Badge>}
+        </div>
+
+        {/* LIVE MACROS COMPACT */}
+        {liveMacros && (
+            <Card className="bg-gradient-to-br from-[#1a1a20] to-[#0a0a0f] border-[#00f5d4]/30 border-2 rounded-2xl overflow-hidden shadow-2xl">
+                <CardHeader className="p-4 border-b border-white/5 flex flex-row items-center justify-between bg-white/5">
+                    <CardTitle className="text-white flex items-center gap-2 text-[10px] sm:text-xs font-black uppercase tracking-widest"><Activity className="text-[#00f5d4]" size={14}/> Nutrition du jour</CardTitle>
+                    <Badge className="bg-[#00f5d4] text-black font-black">{Math.round(liveMacros.calories || 0)} KCAL</Badge>
+                </CardHeader>
+                <CardContent className="p-4 grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-4">
+                    <MacroItem label="Prot" value={liveMacros.protein} goal={goals.protein} color="#3b82f6" icon={Beef} />
+                    <MacroItem label="Gluc" value={liveMacros.carbs} goal={goals.carbs} color="#00f5d4" icon={Wheat} />
+                    <MacroItem label="Lip" value={liveMacros.fats} goal={goals.fats} color="#f59e0b" icon={Droplets} />
+                    <MacroItem label="Fibre" value={liveMacros.fiber} goal={goals.fiber} color="#10b981" icon={Utensils} />
+                    <MacroItem label="Sucre" value={liveMacros.sugar} goal={goals.sugar} color="#ec4899" icon={Candy} />
+                </CardContent>
+            </Card>
+        )}
+
+        <div className="space-y-4">
+          <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] px-2">Historique</h3>
+          {history.length === 0 ? (
+            <div className="py-20 text-center text-gray-600 bg-black/20 rounded-2xl border-2 border-dashed border-gray-800">
+              <Utensils size={40} className="mx-auto mb-2 opacity-20" />
+              <p className="font-black uppercase italic text-xs">Aucun historique</p>
+            </div>
+          ) : (
+            history.map((day) => (
+              <Card key={day.id} className="bg-[#1a1a20] border-gray-800 rounded-2xl overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="flex flex-col sm:flex-row">
+                    <div className="p-4 sm:p-6 bg-black/20 sm:w-40 flex flex-col justify-center items-center text-center border-b sm:border-b-0 sm:border-r border-gray-800">
+                      <p className="text-[10px] font-black text-[#7b2cbf] uppercase mb-1">
+                        {day.date ? format(new Date(day.date), 'EEE d MMM', { locale: fr }) : "..."}
+                      </p>
+                      <p className="text-2xl font-black text-white">{Math.round(day.calories || 0)}</p>
+                      <p className="text-[8px] font-bold text-gray-600 uppercase">KCAL</p>
+                    </div>
+                    <div className="flex-1 p-4 grid grid-cols-3 sm:grid-cols-5 gap-3">
+                      <MacroMini label="P" value={day.protein} color="text-blue-400" />
+                      <MacroMini label="G" value={day.carbs} color="text-[#00f5d4]" />
+                      <MacroMini label="L" value={day.fats} color="text-orange-400" />
+                      <MacroMini label="F" value={day.fiber} color="text-emerald-400" />
+                      <MacroMini label="S" value={day.sugar} color="text-pink-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
       </div>
-
-      {/* LIVE MACROS (TODAY) */}
-      {liveMacros && (
-          <Card className="bg-gradient-to-br from-[#1a1a20] to-[#0a0a0f] border-[#00f5d4]/30 border-2">
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                  <CardTitle className="text-white flex items-center gap-2 text-sm font-black uppercase"><Activity className="text-[#00f5d4]"/> Nutrition du jour (Live)</CardTitle>
-                  <Badge variant="outline" className="text-[#00f5d4] border-[#00f5d4]">{Math.round(liveMacros.calories || 0)} KCAL</Badge>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-4">
-                  <MacroProgress label="Prot" value={liveMacros.protein} goal={goals.protein} color="#3b82f6" icon={Beef} />
-                  <MacroProgress label="Gluc" value={liveMacros.carbs} goal={goals.carbs} color="#00f5d4" icon={Wheat} />
-                  <MacroProgress label="Lip" value={liveMacros.fats} goal={goals.fats} color="#f59e0b" icon={Droplets} />
-                  <MacroProgress label="Fibres" value={liveMacros.fiber} goal={goals.fiber} color="#10b981" icon={ChevronRight} />
-                  <MacroProgress label="Sucre" value={liveMacros.sugar} goal={goals.sugar} color="#ec4899" icon={Candy} />
-              </CardContent>
-          </Card>
-      )}
-
-      {history.length === 0 ? (
-        <Card className="bg-[#1a1a20] border-dashed border-gray-800 p-12 text-center">
-          <Utensils className="mx-auto text-gray-600 mb-4" size={48} />
-          <p className="text-gray-500 italic">Aucun historique nutritionnel.</p>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Historique des 30 derniers jours</p>
-          {history.map((day) => (
-            <Card key={day.id} className="bg-[#1a1a20] border-gray-800 hover:border-[#7b2cbf]/50 transition-all overflow-hidden group">
-              <CardContent className="p-0">
-                <div className="flex flex-col md:flex-row">
-                  <div className="p-6 bg-black/20 md:w-48 flex flex-col justify-center items-center text-center border-b md:border-b-0 md:border-r border-gray-800">
-                    <p className="text-xs font-bold text-[#7b2cbf] uppercase mb-1">
-                      {day.date ? format(new Date(day.date), 'EEEE d MMMM', { locale: fr }) : "Date inconnue"}
-                    </p>
-                    <p className="text-3xl font-black text-white">{Math.round(day.calories || 0)}</p>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase">KCAL</p>
-                  </div>
-                  <div className="flex-1 p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-                    <MacroProgress label="Protéines" value={day.protein} goal={goals.protein} color="#3b82f6" icon={Beef} />
-                    <MacroProgress label="Glucides" value={day.carbs} goal={goals.carbs} color="#00f5d4" icon={Wheat} />
-                    <MacroProgress label="Lipides" value={day.fats} goal={goals.fats} color="#f59e0b" icon={Droplets} />
-                    <MacroProgress label="Fibres" value={day.fiber} goal={goals.fiber} color="#10b981" icon={ChevronRight} />
-                    <MacroProgress label="Sucre" value={day.sugar} goal={goals.sugar} color="#ec4899" icon={Candy} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-function MacroProgress({ label, value = 0, goal, color, icon: Icon }) {
+function MacroItem({ label, value = 0, goal, color, icon: Icon }) {
   const percent = Math.min(100, (value / (goal || 1)) * 100);
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-1.5">
-          <Icon size={12} style={{ color }} />
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">{label}</span>
-        </div>
-        <span className="text-[10px] font-black text-white">{Math.round(value)}g</span>
-      </div>
-      <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+    <div className="bg-black/40 p-2 rounded-xl border border-white/5 flex flex-col items-center justify-center">
+      <Icon size={12} style={{ color }} className="mb-1" />
+      <p className="text-[7px] font-black text-gray-500 uppercase mb-1">{label}</p>
+      <p className="text-xs font-black italic mb-1" style={{ color }}>{Math.round(value)}g</p>
+      <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
         <div className="h-full transition-all duration-1000" style={{ width: `${percent}%`, backgroundColor: color }} />
       </div>
     </div>
   );
+}
+
+function MacroMini({ label, value, color }) {
+    return (
+        <div className="text-center">
+            <p className={`text-[10px] font-black ${color}`}>{Math.round(value || 0)}g</p>
+            <p className="text-[7px] text-gray-600 font-bold uppercase">{label}</p>
+        </div>
+    );
 }

@@ -29,8 +29,6 @@ public class KaybeeWearableListenerService extends WearableListenerService {
 
     @Override
     public void onMessageReceived(MessageEvent messageEvent) {
-        Log.d(TAG, "Message received: " + messageEvent.getPath());
-        
         if (messageEvent.getPath().equals("/health-data")) {
             byte[] data = messageEvent.getData();
             processHealthData(new String(data));
@@ -40,19 +38,20 @@ public class KaybeeWearableListenerService extends WearableListenerService {
     private void processHealthData(String dataString) {
         try {
             JSONObject json = new JSONObject(dataString);
-            // We need the userId to save data. Since this is a background service, 
-            // we'll try to get it from SharedPreferences if the app is not running.
             String userId = getSharedPreferences("KaybeePhoneSteps", MODE_PRIVATE).getString("userId", null);
             
             if (userId != null && firebaseDb != null) {
                 Map<String, Object> updates = new HashMap<>();
-                if (json.has("steps")) updates.put("steps", json.getLong("steps"));
-                if (json.has("heart_rate")) updates.put("heart_rate", json.getInt("heart_rate"));
-                updates.put("source", "watch_background");
-                updates.put("last_update", System.currentTimeMillis());
-
-                firebaseDb.child("users").child(userId).child("live_data").updateChildren(updates);
-                Log.d(TAG, "Background health data synced for " + userId);
+                
+                // POINT 4 FIX : ON NE PREND PLUS LES STEPS DE LA MONTRE
+                // On garde uniquement le rythme cardiaque de la montre
+                if (json.has("heart_rate")) {
+                    updates.put("heart_rate", json.getInt("heart_rate"));
+                    updates.put("source", "watch_background");
+                    updates.put("last_update", System.currentTimeMillis());
+                    firebaseDb.child("users").child(userId).child("live_data").updateChildren(updates);
+                    Log.d(TAG, "Heart rate synced from watch (Steps ignored as per request)");
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing background health data", e);

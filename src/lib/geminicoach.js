@@ -9,76 +9,60 @@ const model = getGenerativeModel(vertexAI, {
 });
 
 /**
- * RECHERCHE HYBRIDE DE COACHS ET ÉTABLISSEMENTS RÉELS VIA GEMINI AI
- * Cette version utilise l'IA pour trouver des lieux réels au lieu d'appels API directs potentiellement bloqués.
+ * RECHERCHE HYBRIDE : Harmonise les résultats de Google et de Kaybee
+ * Gemini sert ici d'intelligence pour "qualifier" les établissements réels
  */
-export const searchCoachesWithGemini = async (location, specialty, budget, type, currentCoaches = []) => {
+export const searchCoachesWithGemini = async (location, specialty, budget, type, internalCoaches = [], googleResults = []) => {
   try {
-    const targetTotal = 12;
-    const internalLimit = 6;
+    // Si on n'a aucun résultat, on demande à Gemini d'en suggérer de nouveaux
+    const hasResults = internalCoaches.length > 0 || googleResults.length > 0;
 
-    // On limite les coachs internes pour laisser de la place aux résultats externes
-    const kaybeeCoaches = currentCoaches.slice(0, internalLimit);
-    const neededFromAI = targetTotal - kaybeeCoaches.length;
-
-    // Si on a déjà assez de coachs et pas de localisation, on s'arrête
-    if (!location || location.length < 2) {
-        return kaybeeCoaches.map(c => ({ ...c, isExternal: false, source: 'Kaybee Certified' }));
-    }
-
-    // Prompt pour Gemini afin de trouver de vrais lieux
     const prompt = `
-      En tant qu'expert fitness local, trouve ${neededFromAI} établissements de sport ou coachs RÉELS et EXISTANTS à "${location}".
-      Discipline : ${specialty}.
-      Budget indicatif : ${budget}$ (session ou abonnement).
+      Tu es un expert fitness à ${location}.
+      On cherche des établissements ou coachs pour : ${specialty}.
+      Budget: ${budget}$. Type: ${type}.
 
-      IMPORTANT : Donne des noms de vraies entreprises ou studios que l'on peut trouver sur Google Maps à ${location}.
+      Voici les résultats actuels trouvés :
+      KAYBEE (Internes): ${JSON.stringify(internalCoaches.map(c => ({ name: c.full_name, bio: c.bio })))}
+      GOOGLE (Réels): ${JSON.stringify(googleResults.map(g => ({ name: g.full_name, rating: g.rating, address: g.address })))}
+
+      TA MISSION :
+      1. Analyse si les lieux Google correspondent bien à la discipline "${specialty}".
+      2. Si tu connais d'autres lieux RÉELS et CÉLÈBRES à ${location} qui manquent, ajoute-les.
+      3. Pour chaque lieu, génère une "bio_ai" accrocheuse de 10 mots max.
 
       Format de réponse (JSON uniquement) :
       [
         {
-          "name": "Nom de l'établissement ou du coach",
-          "location": "Adresse ou quartier précis à ${location}",
-          "phone": "Téléphone format local",
-          "website": "URL réelle du site web",
-          "rating": 4.5,
-          "priceStart": 50,
-          "bio": "Une phrase courte décrivant leur expertise à ${location}.",
-          "specialty": "${specialty}"
+          "name": "Nom exact",
+          "bio_ai": "Description courte",
+          "match_score": 95,
+          "is_recommended": true
         }
       ]
     `;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-
-    // Nettoyage et parsing du JSON
     const jsonMatch = text.match(/\[[\s\S]*\]/);
-    const aiResults = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    const aiAnalysis = JSON.parse(jsonMatch ? jsonMatch[0] : "[]");
 
-    // Formattage des résultats internes
-    const internalFormatted = kaybeeCoaches.map(c => ({
-        ...c,
-        isAi: false,
-        isExternal: false,
-        source: 'Kaybee Certified'
-    }));
+    // Fusion et enrichissement
+    const enrichedResults = [...internalCoaches.map(c => ({ ...c, isExternal: false, source: 'Kaybee Certified' }))];
 
-    // Formattage des résultats externes (IA)
-    const externalFormatted = aiResults.map((c, i) => ({
-        ...c,
-        id: `ai_${Date.now()}_${i}`,
-        full_name: c.name,
-        isAi: true,
-        isExternal: true,
-        source: 'Gemini AI Search',
-        coverImage: `https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80`
-    }));
+    googleResults.forEach(gr => {
+        const analysis = aiAnalysis.find(a => a.name.toLowerCase() === gr.full_name.toLowerCase());
+        enrichedResults.push({
+            ...gr,
+            bio: analysis?.bio_ai || gr.bio || "Établissement de fitness réputé.",
+            matchScore: analysis?.match_score || 80,
+            isRecommended: analysis?.is_recommended || false
+        });
+    });
 
-    return [...internalFormatted, ...externalFormatted];
+    return enrichedResults.sort((a, b) => (b.rating || 0) - (a.rating || 0));
   } catch (error) {
     console.error("Erreur Recherche Gemini Coach:", error);
-    // Retourne au moins les coachs internes en cas d'échec de l'IA
-    return currentCoaches.map(c => ({ ...c, isExternal: false, source: 'Kaybee Certified' }));
+    return [...internalCoaches, ...googleResults];
   }
 };

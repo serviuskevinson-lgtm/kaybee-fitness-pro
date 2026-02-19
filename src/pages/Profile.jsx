@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
   Award, Trophy, Target, TrendingUp, User, 
   Ruler, Weight, Activity, AlertCircle, Save, Camera, Edit2, X, Calendar,
   Clock, Info, Flame, Dumbbell, Heart, Zap, CheckCircle2, ChevronRight,
@@ -48,7 +49,9 @@ export default function Profile() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [coachPhotoUploading, setCoachPhotoUploading] = useState(false);
   const fileInputRef = useRef(null);
-  const coachPhotoInputRef = useRef(null);
+  const placePickerRef = useRef(null);
+
+  const activeUserId = targetUserId || currentUser?.uid;
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -86,15 +89,11 @@ export default function Profile() {
     challenges: 0
   });
 
-  const [addressSearch, setAddressSearch] = useState('');
-  const [addressSuggestions, setAddressSuggestions] = useState([]);
-
   useEffect(() => {
     const fetchUserData = async () => {
-      const targetId = targetUserId || currentUser?.uid;
-      if (targetId) {
+      if (activeUserId) {
         try {
-          const docRef = doc(db, "users", targetId);
+          const docRef = doc(db, "users", activeUserId);
           const docSnap = await getDoc(docRef);
 
           if (docSnap.exists()) {
@@ -103,7 +102,7 @@ export default function Profile() {
               firstName: data.first_name || data.firstName || '',
               lastName: data.last_name || data.lastName || '',
               username: data.username || '',
-              email: data.email || currentUser.email,
+              email: data.email || (activeUserId === currentUser?.uid ? currentUser.email : ''),
               birthDate: data.birth_date || data.birthDate || '',
               sex: data.sex || '',
               height: data.height || '',
@@ -123,8 +122,6 @@ export default function Profile() {
               location: data.location || { city: '', district: '', country: '', formattedAddress: '' }
             });
 
-            setAddressSearch(data.location?.formattedAddress || '');
-
             setStats({
               level: data.level || 1,
               points: data.points || 0,
@@ -139,34 +136,36 @@ export default function Profile() {
       setLoading(false);
     };
     fetchUserData();
-  }, [currentUser, targetUserId]);
+  }, [activeUserId, currentUser]);
 
-  // --- GESTION LOCALISATION ---
-  const handleAddressSearch = async (val) => {
-    setAddressSearch(val);
-    if (val.length < 3) return setAddressSuggestions([]);
+  useEffect(() => {
+    const picker = placePickerRef.current;
+    if (picker) {
+        const handlePlaceChange = () => {
+            const place = picker.value;
+            if (place) {
+                const addr = place.address_components || [];
+                const city = addr.find(c => c.types.includes('locality'))?.long_name ||
+                             addr.find(c => c.types.includes('administrative_area_level_1'))?.long_name || '';
+                const district = addr.find(c => c.types.includes('administrative_area_level_2'))?.long_name || '';
+                const country = addr.find(c => c.types.includes('country'))?.long_name || '';
 
-    // Simulation simple pour la démo
-    const mockResults = [
-      { city: 'Paris', district: '16ème Arr.', country: 'France', formattedAddress: 'Paris, 16ème Arr., France' },
-      { city: 'Montréal', district: 'Le Plateau', country: 'Canada', formattedAddress: 'Montréal, Le Plateau, Canada' },
-      { city: 'Lyon', district: '3ème Arr.', country: 'France', formattedAddress: 'Lyon, 3ème Arr., France' },
-      { city: 'New York', district: 'Brooklyn', country: 'USA', formattedAddress: 'Brooklyn, NY, USA' },
-    ].filter(r => r.formattedAddress.toLowerCase().includes(val.toLowerCase()));
-
-    setAddressSuggestions(mockResults);
-  };
-
-  const selectLocation = (loc) => {
-    setFormData(prev => ({ ...prev, location: loc }));
-    setAddressSearch(loc.formattedAddress);
-    setAddressSuggestions([]);
-  };
-
-  const currency = getCurrencyFromLocation ? getCurrencyFromLocation(formData.location) : '€';
+                const newLoc = {
+                    city,
+                    district,
+                    country,
+                    formattedAddress: place.formatted_address || ''
+                };
+                setFormData(prev => ({ ...prev, location: newLoc }));
+            }
+        };
+        picker.addEventListener('gmpx-placechange', handlePlaceChange);
+        return () => picker.removeEventListener('gmpx-placechange', handlePlaceChange);
+    }
+  }, [isEditing]);
 
   const toggleGoal = (goalId) => {
-    if (!isEditing || isCoachView) return;
+    if (!isEditing) return;
     setFormData(prev => ({
       ...prev,
       selectedGoals: prev.selectedGoals.includes(goalId)
@@ -176,7 +175,7 @@ export default function Profile() {
   };
 
   const toggleDay = (day) => {
-    if (!isEditing || isCoachView) return;
+    if (!isEditing) return;
     setFormData(prev => ({
       ...prev,
       availability: prev.availability.includes(day)
@@ -185,102 +184,24 @@ export default function Profile() {
     }));
   };
 
-  // --- GESTION PRICING COACH ---
-  const addPricingTier = () => {
-    const newTier = {
-      id: Date.now(),
-      type: 'subscription',
-      category: 'private', // Nouveau champ
-      price: 0,
-      description: '',
-      showDiscount: false,
-      discount: { type: 'percent', value: 0 }
-    };
-    setFormData(prev => ({ ...prev, pricing: [...prev.pricing, newTier] }));
-  };
-
-  const removePricingTier = (id) => {
-    setFormData(prev => ({ ...prev, pricing: prev.pricing.filter(p => p.id !== id) }));
-  };
-
-  const updatePricingTier = (id, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      pricing: prev.pricing.map(p => p.id === id ? { ...p, [field]: value } : p)
-    }));
-  };
-
-  const toggleDiscount = (id) => {
-    setFormData(prev => ({
-      ...prev,
-      pricing: prev.pricing.map(p => p.id === id ? { ...p, showDiscount: !p.showDiscount } : p)
-    }));
-  };
-
-  const updateDiscount = (id, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      pricing: prev.pricing.map(p => p.id === id ? { ...p, discount: { ...p.discount, [field]: value } } : p)
-    }));
-  };
-
-  const calculateCompletion = () => {
-    const required = [
-      formData.firstName, formData.lastName, formData.birthDate,
-      formData.sex, formData.height, formData.weight,
-      formData.selectedGoals.length > 0,
-      formData.location?.city
-    ];
-    if (formData.role === 'coach') required.push(formData.pricing.length > 0);
-    const filled = required.filter(Boolean).length;
-    return Math.round((filled / required.length) * 100);
-  };
-
   const handleAvatarChange = async (e) => {
-    if (isCoachView) return;
     const file = e.target.files[0];
     if (!file) return;
     setAvatarUploading(true);
-    const targetId = currentUser?.uid;
     try {
-        const storageRef = ref(storage, `avatars/${targetId}_${Date.now()}`);
+        const storageRef = ref(storage, `avatars/${activeUserId}_${Date.now()}`);
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", targetId), { avatar: downloadURL });
+        await updateDoc(doc(db, "users", activeUserId), { avatar: downloadURL });
         setFormData(prev => ({ ...prev, avatar: downloadURL }));
-    } catch (error) {
-        console.error(error);
-    } finally { setAvatarUploading(false); }
-  };
-
-  const handleCoachPhotoUpload = async (e) => {
-    if (isCoachView) return;
-    const file = e.target.files[0];
-    if (!file) return;
-    setCoachPhotoUploading(true);
-    const targetId = targetUserId || currentUser?.uid;
-    try {
-        const storageRef = ref(storage, `coach_updates/${targetId}_${Date.now()}`);
-        await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", targetId), { coachUpdatePhoto: downloadURL });
-        setFormData(prev => ({ ...prev, coachUpdatePhoto: downloadURL }));
-    } catch (error) {
-        console.error(error);
-    } finally { setCoachPhotoUploading(false); }
+    } catch (error) { console.error(error); } finally { setAvatarUploading(false); }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (isCoachView) return;
-    if (formData.role === 'coach' && formData.pricing.length === 0) {
-      return alert("En tant que coach, vous devez impérativement définir au moins un tarif.");
-    }
-
     setSaving(true);
-    const targetId = currentUser?.uid;
     try {
-      const docRef = doc(db, "users", targetId);
+      const docRef = doc(db, "users", activeUserId);
       await updateDoc(docRef, {
         height: formData.height,
         weight: formData.weight,
@@ -297,579 +218,209 @@ export default function Profile() {
         goals: formData.customGoals,
         availabilityDays: formData.availability,
         weightUnit: formData.weightUnit,
-        pricing: formData.pricing,
         location: formData.location,
-        priceStart: formData.pricing.length > 0 ? Math.min(...formData.pricing.map(p => calculateDiscountedPrice(p.price, p.discount))) : 0,
-        keywords: [
-            formData.username?.toLowerCase(), 
-            formData.firstName?.toLowerCase(), 
-            formData.lastName?.toLowerCase(),
-            formData.location?.city?.toLowerCase(),
-            formData.location?.district?.toLowerCase()
-        ].filter(Boolean)
+        priceStart: formData.pricing?.length > 0 ? Math.min(...formData.pricing.map(p => calculateDiscountedPrice(p.price, p.discount))) : 0,
       });
       setIsEditing(false);
       alert("Profil mis à jour !");
-    } catch (error) {
-      console.error(error);
-      alert("Erreur lors de la sauvegarde.");
-    }
+    } catch (error) { console.error(error); }
     setSaving(false);
   };
 
-  if (loading) return (
-    <div className="h-[60vh] flex items-center justify-center">
-      <Loader2 className="w-12 h-12 text-[#00f5d4] animate-spin" />
-    </div>
-  );
-
-  const completion = calculateCompletion();
+  if (loading) return <div className="h-screen bg-[#0a0a0f] flex items-center justify-center text-[#00f5d4] font-black uppercase animate-pulse">Sync Profil...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-20 px-4">
-      
-      {/* --- TOP PROFILE HEADER --- */}
-      <div className="relative pt-6">
-        <div className="flex flex-col md:flex-row items-center gap-8 bg-gradient-to-br from-[#1a1a20] to-black/40 p-8 rounded-[2rem] border border-gray-800 shadow-2xl relative overflow-hidden">
-          {!isCoachView && (
-            <div className="absolute top-0 right-0 p-6">
-                <Button
-                    onClick={() => setIsEditing(!isEditing)}
-                    className={`gap-2 rounded-full px-6 transition-all duration-300 font-black uppercase italic ${isEditing ? "bg-red-500 hover:bg-red-600 text-white" : "bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black shadow-[0_0_15px_rgba(0,245,212,0.3)]"}`}
-                >
-                    {isEditing ? <><X size={16}/> Annuler</> : <><Edit2 size={16}/> Modifier</>}
-                </Button>
-            </div>
-          )}
+    <div className="p-2 sm:p-4 bg-[#0a0a0f] min-h-screen text-white pb-32 overflow-x-hidden">
 
-          <div className="relative group">
-            <motion.div
-              whileHover={{ scale: 1.05 }}
-              className="w-36 h-36 rounded-full p-1 bg-gradient-to-tr from-[#7b2cbf] via-[#9d4edd] to-[#00f5d4] shadow-[0_0_30px_rgba(123,44,191,0.3)]"
-            >
-                <Avatar className="w-full h-full border-4 border-[#0a0a0f]">
+      {/* HEADER */}
+      <div className="bg-[#1a1a20] p-5 sm:p-8 rounded-2xl border border-gray-800 shadow-xl mb-6 relative">
+        <div className="absolute top-4 right-4">
+            <Button onClick={() => setIsEditing(!isEditing)} size="sm" className={`h-9 px-4 rounded-xl font-black uppercase text-[10px] italic transition-all ${isEditing ? "bg-red-500" : "bg-[#00f5d4] text-black"}`}>
+                {isEditing ? <><X size={14} className="mr-1"/> Annuler</> : <><Edit2 size={14} className="mr-1"/> Modifier</>}
+            </Button>
+        </div>
+
+        <div className="flex flex-col items-center sm:flex-row sm:items-start gap-6">
+            <div className="relative">
+                <Avatar className="size-24 sm:size-32 border-4 border-[#0a0a0f] ring-2 ring-[#00f5d4]">
                     <AvatarImage src={formData.avatar} className="object-cover"/>
-                    <AvatarFallback className="text-4xl font-black bg-[#1a1a20] text-white">
-                        {formData.firstName?.[0] || 'K'}
-                    </AvatarFallback>
+                    <AvatarFallback className="bg-[#1a1a20] text-2xl font-black text-white">{formData.firstName?.[0]}</AvatarFallback>
                 </Avatar>
-            </motion.div>
-            {!isCoachView && (
-              <button
-                onClick={() => fileInputRef.current.click()}
-                className="absolute bottom-0 right-0 bg-[#00f5d4] text-black p-2.5 rounded-full border-4 border-[#0a0a0f] shadow-xl hover:scale-110 transition"
-              >
-                  {avatarUploading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Camera size={18} />}
-              </button>
-            )}
-            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarChange} />
-          </div>
+                <button onClick={() => fileInputRef.current.click()} className="absolute bottom-0 right-0 bg-[#00f5d4] text-black size-8 rounded-full border-4 border-[#0a0a0f] flex items-center justify-center">
+                    {avatarUploading ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
+                </button>
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarChange} />
+            </div>
 
-          <div className="text-center md:text-left flex-1 space-y-2">
-            <h1 className="text-4xl font-black text-white uppercase italic tracking-tighter">
-              {formData.firstName || 'Athlète'} <span className="text-[#00f5d4]">{formData.lastName}</span>
-            </h1>
-            <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
-              <span className="text-[#9d4edd] font-bold text-lg tracking-wider">@{formData.username || 'user'}</span>
-              <Badge className="bg-[#7b2cbf]/20 text-[#00f5d4] border-[#7b2cbf]/50">{formData.role === 'coach' ? 'COACH ÉLITE' : `Niveau ${stats.level}`}</Badge>
-              {formData.location?.city && (
-                <div className="flex items-center gap-1 text-gray-400 text-xs font-bold uppercase">
-                  <MapPin size={12} className="text-red-500" /> {formData.location.city}, {formData.location.district}
+            <div className="text-center sm:text-left flex-1 min-w-0">
+                <h1 className="text-2xl sm:text-4xl font-black uppercase italic tracking-tighter truncate text-white drop-shadow-md">
+                    {formData.firstName} {formData.lastName}
+                </h1>
+                <p className="text-[#9d4edd] font-black text-sm tracking-widest mt-1">@{formData.username}</p>
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3">
+                    <Badge className="bg-[#7b2cbf]/20 text-[#00f5d4] border-none text-[10px] font-black uppercase">Lv. {stats.level}</Badge>
+                    {formData.location?.city && <Badge variant="outline" className="text-[10px] uppercase border-white/10 text-white font-bold"><MapPin size={8} className="mr-1 text-red-500"/> {formData.location.city}</Badge>}
                 </div>
-              )}
             </div>
-
-            <div className="mt-4 max-w-xs mx-auto md:mx-0">
-              <div className="flex justify-between text-[10px] uppercase font-black text-gray-500 mb-1">
-                <span>Complétion du Profil</span>
-                <span className={completion < 100 ? "text-yellow-500" : "text-[#00f5d4]"}>{completion}%</span>
-              </div>
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${completion}%` }}
-                  className={`h-full ${completion < 100 ? 'bg-yellow-500' : 'bg-[#00f5d4]'}`}
-                />
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* --- COLONNE GAUCHE --- */}
+      <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6">
+
+        {/* COLONNE GAUCHE */}
         <div className="lg:col-span-4 space-y-6">
-
-          {/* LOCALISATION */}
-          <Card className={`kb-card border-gray-800 bg-[#1a1a20]/60 transition-all ${isEditing ? 'ring-2 ring-[#00f5d4]/30' : ''}`}>
-            <CardHeader className="pb-2 border-b border-gray-800/50 mb-4">
-              <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
-                <MapPin className="text-red-500" size={16} /> Ma Localisation
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {isEditing && !isCoachView ? (
-                <div className="space-y-2 relative">
-                  <label className="text-[10px] text-gray-500 uppercase font-bold">Chercher ma zone d'habitation</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
-                    <Input
-                      placeholder="Ville, Quartier, Arrondissement..."
-                      value={addressSearch}
-                      onChange={(e) => handleAddressSearch(e.target.value)}
-                      className="bg-black/40 border-gray-800 pl-10 focus:border-[#00f5d4]"
-                    />
-                  </div>
-                  {addressSuggestions.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-[#1a1a20] border border-gray-700 rounded-xl shadow-2xl overflow-hidden">
-                      {addressSuggestions.map((loc, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => selectLocation(loc)}
-                          className="w-full text-left p-3 text-sm text-gray-300 hover:bg-[#00f5d4]/10 hover:text-white transition-colors flex items-center gap-3 border-b border-gray-800 last:border-0"
-                        >
-                          <MapPin size={14} className="text-red-500 shrink-0" />
-                          <div>
-                            <p className="font-bold">{loc.city}, {loc.district}</p>
-                            <p className="text-[10px] text-gray-500 uppercase tracking-widest">{loc.country}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="p-4 bg-black/40 rounded-2xl border border-gray-800 flex items-center gap-4">
-                    <div className="w-10 h-10 bg-red-500/10 rounded-full flex items-center justify-center">
-                      <MapPin size={20} className="text-red-500" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase font-black tracking-widest">Zone d'habitation</p>
-                      <p className="text-white font-bold">{formData.location?.formattedAddress || 'Non renseignée'}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="kb-card border-gray-800 bg-[#1a1a20]/60">
-            <CardHeader className="pb-2 border-b border-gray-800/50 mb-4">
-              <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
-                <User className="text-[#9d4edd]" size={16} /> Identité & Sexe
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-gray-500 uppercase font-bold">Prénom</label>
-                  <Input value={formData.firstName} onChange={(e)=>setFormData({...formData, firstName:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-gray-500 uppercase font-bold">Nom</label>
-                  <Input value={formData.lastName} onChange={(e)=>setFormData({...formData, lastName:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 focus:border-[#00f5d4] h-10"/>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-gray-500 uppercase font-bold">Pseudo</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9d4edd] font-black">@</span>
-                  <Input value={formData.username} onChange={(e)=>setFormData({...formData, username:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 pl-8 focus:border-[#00f5d4] h-10"/>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-gray-500 uppercase font-bold">Date de naissance</label>
-                <Input type="date" value={formData.birthDate} onChange={(e)=>setFormData({...formData, birthDate:e.target.value})} disabled={!isEditing || isCoachView} className="bg-black/40 border-gray-800 h-10 text-xs text-white"/>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 uppercase font-bold">Sexe</label>
-                <div className="flex gap-2">
-                  {['male', 'female'].map(s => (
-                    <button key={s} type="button" onClick={() => isEditing && !isCoachView && setFormData({...formData, sex: s})} className={`flex-1 py-3 rounded-xl border-2 transition-all font-black text-xs uppercase ${formData.sex === s ? 'border-[#9d4edd] bg-[#9d4edd]/10 text-white shadow-[0_0_15px_rgba(157,78,221,0.2)]' : 'border-gray-800 bg-black/20 text-gray-500'}`}>
-                      {s === 'male' ? 'Homme' : 'Femme'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="kb-card border-gray-800">
-            <CardHeader className="pb-2 border-b border-gray-800/50 mb-4">
-              <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
-                <Ruler className="text-[#00f5d4]" size={16} /> Biométrie
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-black/40 p-4 rounded-2xl border border-gray-800 text-center relative overflow-hidden group">
-                  <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">Taille</label>
-                  <div className="flex items-center justify-center gap-1">
-                    <input type="number" value={formData.height} onChange={(e)=>setFormData({...formData, height:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
-                    <span className="text-xs text-[#00f5d4] font-bold">cm</span>
-                  </div>
-                </div>
-                <div className="bg-black/40 p-4 rounded-2xl border border-gray-800 text-center relative overflow-hidden group">
-                  <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">Poids Actuel</label>
-                  <div className="flex items-center justify-center gap-1">
-                    <input type="number" value={formData.weight} onChange={(e)=>setFormData({...formData, weight:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-20 text-center focus:outline-none placeholder:text-gray-800" placeholder="0"/>
-                    <span className="text-xs text-[#00f5d4] font-bold">{formData.weightUnit}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-black/40 p-4 rounded-2xl border-2 border-dashed border-[#9d4edd]/30 text-center relative overflow-hidden group">
-                <label className="text-[10px] text-[#9d4edd] uppercase font-black mb-2 block flex items-center justify-center gap-1"><Goal size={12} /> Poids Cible</label>
-                <div className="flex items-center justify-center gap-1">
-                  <input type="number" value={formData.targetWeight} onChange={(e)=>setFormData({...formData, targetWeight:e.target.value})} disabled={!isEditing || isCoachView} className="bg-transparent text-3xl font-black text-white w-24 text-center focus:outline-none placeholder:text-gray-800" placeholder="--"/>
-                  <span className="text-xs text-[#9d4edd] font-bold">{formData.weightUnit}</span>
-                </div>
-              </div>
-              {isEditing && !isCoachView && (
-                <div className="flex justify-center p-1 bg-black/60 rounded-full border border-gray-800 w-fit mx-auto">
-                  {['kg', 'lbs'].map(unit => (
-                    <button key={unit} type="button" onClick={() => setFormData({...formData, weightUnit: unit})} className={`px-6 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${formData.weightUnit === unit ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}>{unit}</button>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-
-          {/* --- SECTION TARIFS (COACH SEULEMENT) --- */}
-          {formData.role === 'coach' && !isCoachView && (
-            <Card className="kb-card border-[#00f5d4]/30 bg-black/20 overflow-hidden shadow-[0_0_30px_rgba(0,245,212,0.05)]">
-              <CardHeader className="bg-gradient-to-r from-[#00f5d4]/10 to-transparent flex flex-row items-center justify-between border-b border-[#00f5d4]/10">
-                <div>
-                  <CardTitle className="text-xl flex items-center gap-3 text-white italic uppercase font-black tracking-tighter">
-                    <CreditCard className="text-[#00f5d4]" size={24} /> Mes Tarifs & Services
-                  </CardTitle>
-                  <p className="text-[10px] text-[#00f5d4] mt-1 uppercase font-black tracking-widest opacity-70">Offres obligatoires pour votre visibilité</p>
-                </div>
-                {isEditing && (
-                  <Button type="button" onClick={addPricingTier} size="sm" className="bg-[#00f5d4] hover:bg-[#00d1b5] text-black font-black uppercase italic gap-1 rounded-xl px-4 shadow-[0_0_15px_rgba(0,245,212,0.3)]">
-                    <Plus size={14} /> Ajouter un tarif
-                  </Button>
-                )}
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <AnimatePresence>
-                  {formData.pricing.map((tier) => (
-                    <motion.div
-                      key={tier.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      className="p-5 bg-[#0a0a0f] rounded-[1.5rem] border border-gray-800 space-y-4 relative group hover:border-[#00f5d4]/30 transition-all shadow-xl"
-                    >
-                      {isEditing && (
-                        <button onClick={() => removePricingTier(tier.id)} className="absolute top-4 right-4 text-red-500 hover:text-red-400 transition-colors">
-                          <Trash2 size={18} />
-                        </button>
-                      )}
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-3">
-                          <label className="text-[10px] text-gray-500 uppercase font-black">Type d'offre & Catégorie</label>
-                          <div className="flex flex-col gap-3">
-                            {/* SUBSCRIPTION VS SESSION */}
-                            <div className="flex gap-2 p-1 bg-black/40 rounded-xl border border-gray-800">
-                              {['subscription', 'session'].map(t => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  onClick={() => isEditing && updatePricingTier(tier.id, 'type', t)}
-                                  className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${tier.type === t ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
-                                >
-                                  {t === 'subscription' ? 'Abonnement' : 'Par Séance'}
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* CATEGORY (GROUPE, PRIVÉ, SEMI, DISTANCE) */}
-                            <div className="grid grid-cols-2 gap-2">
-                              {SERVICE_CATEGORIES.map(cat => (
-                                <button
-                                  key={cat.id}
-                                  type="button"
-                                  onClick={() => isEditing && updatePricingTier(tier.id, 'category', cat.id)}
-                                  className={`flex items-center gap-2 p-2 rounded-xl border-2 transition-all ${tier.category === cat.id ? 'border-[#00f5d4] bg-[#00f5d4]/5' : 'border-gray-800 bg-black/40 opacity-50'}`}
-                                >
-                                  <cat.icon size={14} className={tier.category === cat.id ? cat.color : 'text-gray-600'} />
-                                  <span className={`text-[10px] font-black uppercase ${tier.category === cat.id ? 'text-white' : 'text-gray-600'}`}>{cat.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+            {/* LOCALISATION EDITABLE */}
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-lg">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-[0.2em]">Localisation Mondiale</CardTitle></CardHeader>
+                <CardContent className="p-4 space-y-4">
+                    {isEditing ? (
+                        <div className="space-y-2 dark-theme-picker">
+                            <gmpx-place-picker
+                                ref={placePickerRef}
+                                placeholder="Rechercher Ville, Région, Pays..."
+                                style={{
+                                    "--gmpx-color-surface": "#000",
+                                    "--gmpx-color-on-surface": "#fff",
+                                    "--gmpx-font-family": "inherit",
+                                    "width": "100%",
+                                    "borderRadius": "12px"
+                                }}
+                            ></gmpx-place-picker>
                         </div>
-
-                        <div className="space-y-3">
-                          <label className="text-[10px] text-gray-500 uppercase font-black">Tarification ({currency})</label>
-                          <div className="space-y-4">
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                value={tier.price}
-                                onChange={(e) => updatePricingTier(tier.id, 'price', Number(e.target.value))}
-                                disabled={!isEditing}
-                                className="bg-black/60 border-gray-800 h-12 pr-10 text-xl font-black text-[#00f5d4] focus:border-[#00f5d4] rounded-xl shadow-inner"
-                              />
-                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#00f5d4] font-black text-lg">{currency}</span>
-                            </div>
-
-                            {isEditing && (
-                              <Button
-                                type="button"
-                                onClick={() => toggleDiscount(tier.id)}
-                                variant="outline"
-                                size="sm"
-                                className={`w-full h-10 gap-2 text-[10px] font-black uppercase rounded-xl transition-all ${tier.showDiscount ? 'border-red-500/50 text-red-400 bg-red-500/5' : 'border-[#9d4edd]/50 text-[#9d4edd] bg-[#9d4edd]/5 hover:bg-[#9d4edd]/10'}`}
-                              >
-                                <Tag size={14} /> {tier.showDiscount ? 'Retirer la remise' : 'Appliquer une remise'}
-                              </Button>
-                            )}
-                          </div>
+                    ) : (
+                        <div className="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                            <MapPin size={14} className="text-red-500 shrink-0"/>
+                            <p className="text-xs text-white font-black truncate">{formData.location?.formattedAddress || 'Non renseignée'}</p>
                         </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] text-gray-500 uppercase font-black">Description du pack (Ce qui est inclus)</label>
-                        <Input
-                          placeholder="Ex: Coaching 24/7 + Plan nutri personnalisé..."
-                          value={tier.description}
-                          onChange={(e) => updatePricingTier(tier.id, 'description', e.target.value)}
-                          disabled={!isEditing}
-                          className="bg-black/60 border-gray-800 h-12 rounded-xl focus:border-[#00f5d4] italic text-sm"
-                        />
-                      </div>
-
-                      <AnimatePresence>
-                        {(tier.showDiscount || tier.discount?.value > 0) && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden space-y-3"
-                          >
-                            <div className="flex items-center gap-4 bg-[#9d4edd]/10 p-4 rounded-2xl border border-[#9d4edd]/30 shadow-inner">
-                              <div className="flex-1 flex gap-2">
-                                <div className="flex bg-black/60 p-1.5 rounded-xl border border-gray-800">
-                                  <button
-                                    type="button"
-                                    onClick={() => isEditing && updateDiscount(tier.id, 'type', 'percent')}
-                                    className={`px-4 py-1.5 rounded-lg text-sm font-black transition-all ${tier.discount?.type === 'percent' ? 'bg-[#9d4edd] text-white shadow-lg' : 'text-gray-500'}`}
-                                  >
-                                    <Percent size={14} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => isEditing && updateDiscount(tier.id, 'type', 'amount')}
-                                    className={`px-4 py-1.5 rounded-lg text-sm font-black transition-all ${tier.discount?.type === 'amount' ? 'bg-[#9d4edd] text-white shadow-lg' : 'text-gray-500'}`}
-                                  >
-                                    {currency}
-                                  </button>
-                                </div>
-                                <Input
-                                  type="number"
-                                  value={tier.discount?.value || 0}
-                                  onChange={(e) => updateDiscount(tier.id, 'value', Number(e.target.value))}
-                                  disabled={!isEditing}
-                                  placeholder="Valeur"
-                                  className="bg-black/60 border-gray-800 h-12 flex-1 rounded-xl text-lg font-black text-white"
-                                />
-                              </div>
-                              <div className="text-right">
-                                <p className="text-[10px] text-[#9d4edd] uppercase font-black tracking-widest text-shadow-sm">Nouveau Tarif Élite</p>
-                                <p className="text-[#00f5d4] font-black text-2xl tracking-tighter">
-                                  {calculateDiscountedPrice ? calculateDiscountedPrice(tier.price, tier.discount).toFixed(2) : tier.price}{currency}
-                                </p>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      {!isEditing && (
-                        <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
-                          <div className="flex flex-col gap-1">
-                            <p className="text-xs text-gray-400 font-bold italic flex items-center gap-2">
-                              <Sparkles size={12} className="text-[#00f5d4]" /> {tier.description}
-                            </p>
-                            <Badge className="w-fit bg-[#00f5d4]/10 text-[#00f5d4] border-[#00f5d4]/20 text-[9px] uppercase font-black tracking-widest">
-                              {SERVICE_CATEGORIES.find(c => c.id === tier.category)?.label}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {tier.discount?.value > 0 ? (
-                              <div className="flex flex-col items-end">
-                                <span className="text-gray-500 line-through text-xs font-black">{tier.price}{currency}</span>
-                                <span className="text-[#00f5d4] font-black text-2xl tracking-tighter text-shadow-[0_0_10px_rgba(0,245,212,0.5)]">
-                                  {calculateDiscountedPrice ? calculateDiscountedPrice(tier.price, tier.discount).toFixed(2) : tier.price}{currency}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-white font-black text-2xl tracking-tighter">{tier.price}{currency}</span>
-                            )}
-                            <span className="text-[10px] text-gray-500 font-bold uppercase">{tier.type === 'subscription' ? 'mois' : 'séance'}</span>
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-
-                {formData.pricing.length === 0 && (
-                  <div className="text-center py-12 border-2 border-dashed border-gray-800 rounded-[2.5rem] bg-black/20">
-                    <div className="w-16 h-16 bg-[#00f5d4]/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <CreditCard size={32} className="text-[#00f5d4]" />
-                    </div>
-                    <p className="text-sm text-gray-400 font-bold uppercase tracking-widest">Aucun tarif défini</p>
-                    {isEditing && (
-                      <Button onClick={addPricingTier} variant="link" className="text-[#00f5d4] font-black uppercase text-xs mt-2 underline underline-offset-4">
-                        Créer mon offre maintenant
-                      </Button>
                     )}
-                  </div>
-                )}
-              </CardContent>
+                </CardContent>
             </Card>
-          )}
 
-          <Card className="kb-card border-gray-800 overflow-hidden bg-black/20">
-            <div className="bg-gradient-to-r from-[#7b2cbf]/20 via-[#7b2cbf]/5 to-transparent p-6 border-b border-gray-800/50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-xl flex items-center gap-3 text-white italic uppercase font-black tracking-tighter">
-                    <Sparkles className="text-[#00f5d4]" size={24} /> {isCoachView ? "Ses Objectifs Élite" : "Mes Objectifs Élite"}
-                  </CardTitle>
-                  <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold tracking-widest">Cliquez pour définir vos priorités</p>
-                </div>
-                <Target className="text-gray-800 w-12 h-12" />
-              </div>
-            </div>
-            <CardContent className="p-6 space-y-8">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                {GOAL_OPTIONS.map((goal) => {
-                  const Icon = goal.icon;
-                  const isSelected = formData.selectedGoals.includes(goal.id);
-                  return (
-                    <motion.button
-                      key={goal.id}
-                      type="button"
-                      whileHover={isEditing && !isCoachView ? { scale: 1.05, y: -2 } : {}}
-                      whileTap={isEditing && !isCoachView ? { scale: 0.95 } : {}}
-                      onClick={() => toggleGoal(goal.id)}
-                      className={`relative flex flex-col items-center justify-center aspect-square p-4 rounded-[1.5rem] border-2 transition-all duration-300 ${
-                        isSelected
-                        ? `border-[#00f5d4] ${goal.bg} shadow-[0_0_20px_rgba(0,245,212,0.15)]`
-                        : 'border-gray-800 bg-black/40 opacity-40 grayscale'
-                      } ${!isEditing && !isSelected ? 'hidden' : ''}`}
-                    >
-                      <Icon className={`w-10 h-10 mb-3 ${isSelected ? goal.color : 'text-gray-600'}`} />
-                      <span className={`text-[10px] font-black uppercase text-center leading-tight ${isSelected ? 'text-white' : 'text-gray-600'}`}>
-                        {goal.label}
-                      </span>
-                      {isSelected && (
-                        <div className="absolute -top-2 -right-2 bg-[#00f5d4] text-black rounded-full p-1 border-2 border-[#0a0a0f]">
-                          <CheckCircle2 size={12} />
+            {/* BIOMÉTRIE (MODIFIABLE) */}
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-lg">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-[0.2em]">Poids & Taille</CardTitle></CardHeader>
+                <CardContent className="p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-black/40 p-3 rounded-xl border border-white/5 text-center shadow-inner">
+                            <p className="text-[8px] text-gray-400 font-black uppercase mb-1">Taille</p>
+                            <div className="flex items-center justify-center gap-1">
+                                <input type="number" value={formData.height} onChange={(e)=>setFormData({...formData, height:e.target.value})} disabled={!isEditing} className="bg-transparent text-xl font-black w-12 text-center text-white focus:outline-none"/>
+                                <span className="text-[8px] text-[#00f5d4] font-black">CM</span>
+                            </div>
                         </div>
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </div>
-              <div className="space-y-3">
-                <label className="text-xs text-gray-400 uppercase font-black flex items-center gap-2">
-                  <Edit2 size={12} className="text-[#9d4edd]" /> Précisions pour votre coach
-                </label>
-                <Textarea value={formData.customGoals} onChange={(e)=>setFormData({...formData, customGoals:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Décrivez vos attentes, vos motivations ou vos dates clés..." className="bg-black/60 border-gray-800 focus:border-[#00f5d4] min-h-[120px] rounded-2xl text-sm p-4"/>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="kb-card border-gray-800 bg-[#1a1a20]/60">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
-                  <Calendar className="text-[#9d4edd]" size={16} /> Jours d'entraînement
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {DAYS.map(day => {
-                    const isAvailable = formData.availability.includes(day);
-                    return (
-                      <button key={day} type="button" onClick={() => toggleDay(day)} className={`w-11 h-11 rounded-[12px] flex items-center justify-center text-xs font-black transition-all border-2 ${isAvailable ? 'bg-[#9d4edd] border-[#9d4edd] text-white shadow-[0_0_15px_rgba(157,78,221,0.3)]' : 'bg-black/40 border-gray-800 text-gray-600'} ${!isEditing && !isAvailable ? 'opacity-20 grayscale' : ''}`}>
-                        {day}
-                      </button>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="kb-card border-gray-800">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-sm flex items-center gap-2 text-gray-400 uppercase font-black">
-                  <AlertCircle className="text-red-500" size={16} /> Santé & Sécurité
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-red-400/70 uppercase font-black">Blessures / Limites</label>
-                  <Input value={formData.injuries} onChange={(e)=>setFormData({...formData, injuries:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-red-500/50"/>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-yellow-500/70 uppercase font-black">Allergies</label>
-                  <Input value={formData.allergies} onChange={(e)=>setFormData({...formData, allergies:e.target.value})} disabled={!isEditing || isCoachView} placeholder="Aucune signalée" className="bg-black/40 border-gray-800 h-10 text-xs focus:border-yellow-500/50"/>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <AnimatePresence>
-            {isEditing && !isCoachView && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="flex justify-center pt-6">
-                <Button onClick={handleSubmit} disabled={saving} className="bg-gradient-to-r from-[#00f5d4] to-[#00d1b5] text-black font-black uppercase italic px-16 py-7 rounded-[1.5rem] shadow-[0_10px_30px_rgba(0,245,212,0.3)] hover:scale-105 transition-all flex items-center gap-3 text-lg tracking-tighter">
-                  {saving ? <Loader2 className="animate-spin" /> : <><Save size={24}/> Enregistrer mon profil</>}
-                </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {(formData.coachId || isCoachView) && !isEditing && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-10">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-px flex-1 bg-gray-800" />
-                <h2 className="text-xs font-black uppercase text-gray-500 tracking-widest flex items-center gap-2">
-                  <TrendingUp size={14} className="text-[#00f5d4]" /> Suivi Évolution
-                </h2>
-                <div className="h-px flex-1 bg-gray-800" />
-              </div>
-              <Card className="kb-card border-dashed border-[#00f5d4]/20 bg-black/20 overflow-hidden">
-                <div className="flex flex-col sm:flex-row items-center gap-8 p-8">
-                  <div className="relative group shrink-0">
-                    <div className="w-32 h-44 bg-black rounded-[1.5rem] border-2 border-dashed border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-[#00f5d4]/40">
-                      {formData.coachUpdatePhoto ? <img src={formData.coachUpdatePhoto} className="w-full h-full object-cover" alt="Evolution" /> : <ImageIcon size={40} className="text-gray-800" />}
+                        <div className="bg-black/40 p-3 rounded-xl border border-white/5 text-center shadow-inner">
+                            <p className="text-[8px] text-gray-400 font-black uppercase mb-1">Poids</p>
+                            <div className="flex items-center justify-center gap-1">
+                                <input type="number" value={formData.weight} onChange={(e)=>setFormData({...formData, weight:e.target.value})} disabled={!isEditing} className="bg-transparent text-xl font-black w-12 text-center text-white focus:outline-none"/>
+                                <span className="text-[8px] text-[#00f5d4] font-black">{formData.weightUnit}</span>
+                            </div>
+                        </div>
                     </div>
-                    {!isCoachView && <button onClick={() => coachPhotoInputRef.current.click()} className="absolute -bottom-2 -right-2 bg-[#00f5d4] text-black p-2.5 rounded-2xl shadow-xl hover:scale-110 transition"><Camera size={20} /></button>}
-                    <input type="file" ref={coachPhotoInputRef} className="hidden" accept="image/*" onChange={handleCoachPhotoUpload} />
-                  </div>
-                  <div className="flex-1 space-y-4 text-center sm:text-left">
-                    <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">Photo pour votre Coach</h3>
-                    <p className="text-sm text-gray-400 font-medium leading-relaxed max-w-md">Mettez à jour votre photo régulièrement. Elle permet à votre coach de visualiser vos progrès physiques et d'ajuster vos macros et entraînements.</p>
-                    {coachPhotoUploading && <div className="flex items-center gap-2 text-[#00f5d4] text-xs font-black uppercase animate-pulse justify-center sm:justify-start"><Loader2 className="animate-spin" size={16} /> Mise à jour...</div>}
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-          )}
+                    <div className="bg-black/40 p-3 rounded-xl border-2 border-dashed border-[#9d4edd]/30 text-center shadow-inner">
+                        <p className="text-[8px] text-[#9d4edd] font-black uppercase mb-1">Poids Cible</p>
+                        <div className="flex items-center justify-center gap-1">
+                            <input type="number" value={formData.targetWeight} onChange={(e)=>setFormData({...formData, targetWeight:e.target.value})} disabled={!isEditing} className="bg-transparent text-xl font-black w-12 text-center text-white focus:outline-none" placeholder="--"/>
+                            <span className="text-[8px] text-[#9d4edd] font-black">{formData.weightUnit}</span>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-lg">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-[0.2em]">Données Personnelles</CardTitle></CardHeader>
+                <CardContent className="p-4 space-y-4">
+                    <div className="space-y-1">
+                        <label className="text-[8px] text-gray-400 font-black uppercase">Date de naissance</label>
+                        <Input type="date" value={formData.birthDate} onChange={(e)=>setFormData({...formData, birthDate:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-9 text-xs text-white font-black"/>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[8px] text-gray-400 font-black uppercase">Sexe</label>
+                        <Select value={formData.sex} onValueChange={(val)=>setFormData({...formData, sex:val})} disabled={!isEditing}>
+                            <SelectTrigger className="bg-black/40 border-gray-800 h-9 text-xs text-white font-black"><SelectValue placeholder="Choisir..."/></SelectTrigger>
+                            <SelectContent className="bg-[#1a1a20] border-gray-800 text-white"><SelectItem value="M">Masculin</SelectItem><SelectItem value="F">Féminin</SelectItem><SelectItem value="O">Autre</SelectItem></SelectContent>
+                        </Select>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-lg">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-[0.2em]">Santé</CardTitle></CardHeader>
+                <CardContent className="p-4 space-y-3">
+                    <div className="space-y-1"><label className="text-[8px] text-red-400 font-black uppercase">Blessures</label><Input value={formData.injuries} onChange={(e)=>setFormData({...formData, injuries:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-9 text-xs text-white font-black" placeholder="Néant"/></div>
+                    <div className="space-y-1"><label className="text-[8px] text-yellow-500 font-black uppercase">Allergies</label><Input value={formData.allergies} onChange={(e)=>setFormData({...formData, allergies:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-9 text-xs text-white font-black" placeholder="Néant"/></div>
+                </CardContent>
+            </Card>
         </div>
-      </form>
+
+        {/* COLONNE DROITE */}
+        <div className="lg:col-span-8 space-y-6">
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-xl">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-[0.2em]">Compte & Identité</CardTitle></CardHeader>
+                <CardContent className="p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1"><label className="text-[8px] text-white font-black uppercase">Prénom</label><Input value={formData.firstName} onChange={(e)=>setFormData({...formData, firstName:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-10 text-xs text-white font-black shadow-inner"/></div>
+                        <div className="space-y-1"><label className="text-[8px] text-white font-black uppercase">Nom</label><Input value={formData.lastName} onChange={(e)=>setFormData({...formData, lastName:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-10 text-xs text-white font-black shadow-inner"/></div>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[8px] text-white font-black uppercase">Pseudo Personnel (@)</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9d4edd] font-black text-xs">@</span>
+                            <Input value={formData.username} onChange={(e)=>setFormData({...formData, username:e.target.value})} disabled={!isEditing} className="bg-black/40 border-gray-800 h-10 text-xs text-white pl-7 font-black shadow-inner"/>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl overflow-hidden shadow-xl">
+                <CardHeader className="p-4 bg-gradient-to-r from-[#7b2cbf]/10 to-transparent border-b border-white/5">
+                    <CardTitle className="text-xs font-black text-white uppercase italic tracking-widest flex items-center gap-2"><Target className="text-[#00f5d4]"/> Objectifs prioritaires</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 sm:p-6 space-y-6">
+                    <div className="flex overflow-x-auto gap-3 pb-2 no-scrollbar">
+                        {GOAL_OPTIONS.map(goal => {
+                            const isSel = formData.selectedGoals.includes(goal.id);
+                            if (!isEditing && !isSel) return null;
+                            return (
+                                <button key={goal.id} type="button" onClick={() => toggleGoal(goal.id)} className={`flex-shrink-0 size-24 rounded-xl border-2 flex flex-col items-center justify-center transition-all ${isSel ? 'border-[#00f5d4] bg-[#00f5d4]/5' : 'border-gray-800 bg-black/40 opacity-40'}`}>
+                                    <goal.icon size={24} className={isSel ? goal.color : 'text-white opacity-40'}/>
+                                    <span className={`text-[9px] font-black uppercase text-center mt-2 px-1 ${isSel ? 'text-white font-black' : 'text-gray-400'}`}>{goal.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[8px] text-gray-400 font-black uppercase">Détails de mes objectifs</label>
+                        <Textarea value={formData.customGoals} onChange={(e)=>setFormData({...formData, customGoals:e.target.value})} disabled={!isEditing} placeholder="Décrivez vos objectifs en détail..." className="bg-black/40 border-gray-800 min-h-[100px] text-xs rounded-xl italic text-white font-black shadow-inner"/>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl shadow-xl">
+                <CardHeader className="p-4 border-b border-white/5"><CardTitle className="text-[10px] font-black text-[#00f5d4] uppercase tracking-widest">Jours d'entraînement</CardTitle></CardHeader>
+                <CardContent className="p-4">
+                    <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                        {DAYS.map(day => (
+                            <button key={day} type="button" onClick={() => toggleDay(day)} className={`size-12 rounded-lg flex items-center justify-center text-[10px] font-black border-2 transition-all ${formData.availability.includes(day) ? 'bg-[#9d4edd] border-[#9d4edd] text-white shadow-lg shadow-purple-900/30' : 'bg-black/40 border-gray-800 text-white font-black'}`}>{day}</button>
+                        ))}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {isEditing && (
+                <div className="fixed bottom-6 left-0 w-full px-6 z-40 lg:relative lg:bottom-0 lg:px-0">
+                    <Button onClick={handleSubmit} disabled={saving} className="w-full bg-[#00f5d4] text-black font-black uppercase italic h-14 rounded-2xl shadow-[0_0_30px_rgba(0,245,212,0.3)] active:scale-95 transition-all">
+                        {saving ? <Loader2 className="animate-spin mr-2" /> : <><Save size={18} className="mr-2"/> ENREGISTRER MON PROFIL</>}
+                    </Button>
+                </div>
+            )}
+        </div>
+      </div>
+      <style>{`
+        gmpx-place-picker {
+            border-radius: 12px;
+            overflow: hidden;
+        }
+      `}</style>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   Dumbbell, Search, Plus, Trash2, Save, Play, 
   ChevronRight, ChevronLeft, LayoutList, History, Filter, Info, 
-  Upload, CheckCircle, Loader2, Clock, Calendar as CalendarIcon, Star, Image as ImageIcon, Video, Sparkles, Wand2, Check
+  Upload, CheckCircle, Loader2, Clock, Calendar as CalendarIcon, Star, Image as ImageIcon, Video, Sparkles, Wand2, Check, ShoppingCart, X
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import CustomCalendar from "@/components/CustomCalendar";
 import WorkoutCart from "@/components/WorkoutCart";
 import { useTranslation } from 'react-i18next';
@@ -394,34 +395,34 @@ export default function Exercises() {
   const currentExercises = filteredExercises.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
-    <div className="p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-32">
-      <div className="max-w-7xl mx-auto mb-10">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 shadow-xl">
-            <div className="flex-1">
-                <h1 className="text-4xl font-black italic uppercase flex items-center gap-3 text-white">
-                    <Dumbbell className="text-[#9d4edd] w-10 h-10 fill-[#9d4edd]/20"/> {t('workout_builder')}
+    <div className="p-2 sm:p-4 lg:p-8 min-h-screen bg-[#0a0a0f] text-white pb-32 overflow-x-hidden">
+      <div className="max-w-7xl mx-auto mb-6 sm:mb-10">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 sm:gap-6 bg-[#1a1a20] p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-gray-800 shadow-xl">
+            <div className="flex-1 text-center md:text-left">
+                <h1 className="text-2xl sm:text-4xl font-black italic uppercase flex items-center justify-center md:justify-start gap-3 text-white tracking-tighter">
+                    <Dumbbell className="text-[#9d4edd] size-8 sm:size-10 fill-[#9d4edd]/20"/> {t('workout_builder')}
                 </h1>
-                <p className="text-gray-400 text-sm font-medium mt-2">{isDbLoading ? t('loading') : t('exercises_available', {count: allExercises.length})}</p>
+                <p className="text-gray-400 text-[10px] sm:text-sm font-medium mt-1 sm:mt-2">{isDbLoading ? t('loading') : t('exercises_available', {count: allExercises.length})}</p>
             </div>
-            <div className="flex gap-4">
-                <Button onClick={() => { setIsAutoBuildModalOpen(true); setAutoBuildStep(1); }} className="bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white font-black h-14 px-8 rounded-xl shadow-[0_0_20px_rgba(157,78,221,0.3)] transition-all hover:scale-105 border border-white/10">
-                    <Wand2 size={20} className="mr-2 animate-pulse"/> AUTO BUILD (IA)
+            <div className="flex gap-2 sm:gap-4 w-full md:w-auto">
+                <Button onClick={() => { setIsAutoBuildModalOpen(true); setAutoBuildStep(1); }} className="flex-1 md:flex-none bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd] text-white font-black h-12 sm:h-14 px-4 sm:px-8 rounded-xl shadow-[0_0_20px_rgba(157,78,221,0.3)] transition-all text-xs sm:text-base border border-white/10">
+                    <Wand2 size={16} className="mr-2 animate-pulse sm:size-5"/> AI BUILD
                 </Button>
-                {isCoachView && ( <Button onClick={() => setIsCreateOpen(true)} className="bg-white text-black hover:bg-gray-200 font-black h-14 px-8 rounded-xl shadow-lg transition-all hover:scale-105 border-none"> <Plus size={24} className="mr-2"/> {t('create_exercise')} </Button> )}
+                {isCoachView && ( <Button onClick={() => setIsCreateOpen(true)} className="flex-1 md:flex-none bg-white text-black hover:bg-gray-200 font-black h-12 sm:h-14 px-4 sm:px-8 rounded-xl shadow-lg text-xs sm:text-base border-none"> <Plus size={18} className="mr-2 sm:size-6"/> {t('create_exercise')} </Button> )}
             </div>
         </div>
       </div>
 
       {templates.length > 0 && (
-        <div className="max-w-7xl mx-auto mb-10 animate-in slide-in-from-top duration-500">
-            <h3 className="text-sm font-bold text-[#9d4edd] uppercase mb-4 flex items-center gap-2 tracking-widest pl-2"> <Star size={14} className="fill-[#9d4edd]" /> {t('favorite_workouts')} </h3>
-            <ScrollArea className="w-full whitespace-nowrap rounded-3xl border border-[#7b2cbf]/30 bg-[#15151a]/90 backdrop-blur-md p-4 shadow-2xl">
-                <div className="flex space-x-4">
+        <div className="max-w-7xl mx-auto mb-6 sm:mb-10 animate-in slide-in-from-top duration-500">
+            <h3 className="text-[10px] sm:text-sm font-bold text-[#9d4edd] uppercase mb-3 sm:mb-4 flex items-center gap-2 tracking-widest pl-2"> <Star size={12} className="fill-[#9d4edd] sm:size-3.5" /> {t('favorite_workouts')} </h3>
+            <ScrollArea className="w-full whitespace-nowrap rounded-2xl sm:rounded-3xl border border-[#7b2cbf]/30 bg-[#15151a]/90 backdrop-blur-md p-3 sm:p-4 shadow-2xl">
+                <div className="flex space-x-3 sm:space-x-4">
                     {templates.map((tpl) => (
-                        <div key={tpl.id} onClick={() => setTemplateToLoad(tpl)} className={`relative group flex-shrink-0 w-72 p-5 rounded-2xl border cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-lg ${tpl.createdBy === 'coach' ? 'bg-gradient-to-br from-[#7b2cbf]/20 to-[#9d4edd]/10 border-[#7b2cbf]/50 hover:border-[#9d4edd]' : 'bg-[#1a1a20] border-gray-700 hover:border-[#9d4edd]'}`}>
-                            <div className="flex justify-between items-start mb-3"> <h4 className="font-bold text-white truncate pr-6 text-lg">{tpl.name}</h4> {tpl.createdBy === 'coach' && <Badge className="bg-[#7b2cbf] text-white text-[10px] px-2 py-0.5">Coach</Badge>} </div>
-                            <div className="flex items-center justify-between text-xs text-gray-400 mb-4"> <span className="flex items-center gap-1"><LayoutList size={12}/> {tpl.groups?.length || tpl.exercises?.length || 0} Blocs</span> <span>{tpl.createdAt?.seconds ? new Date(tpl.createdAt.seconds * 1000).toLocaleDateString() : ""}</span> </div>
-                            <div className="flex gap-2 opacity-80 group-hover:opacity-100 transition-opacity"> <Button size="sm" className="h-8 text-xs w-full font-bold bg-white/10 hover:bg-white/20 text-white"><Play size={12} className="mr-2"/> {t('load')}</Button> <button onClick={(e) => {e.stopPropagation(); deleteTemplate(e, tpl.id)}} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"><Trash2 size={16}/></button> </div>
+                        <div key={tpl.id} onClick={() => setTemplateToLoad(tpl)} className={`relative group flex-shrink-0 w-56 sm:w-72 p-4 sm:p-5 rounded-xl sm:rounded-2xl border cursor-pointer transition-all duration-300 hover:scale-[1.02] ${tpl.createdBy === 'coach' ? 'bg-gradient-to-br from-[#7b2cbf]/20 to-[#9d4edd]/10 border-[#7b2cbf]/50 hover:border-[#9d4edd]' : 'bg-[#1a1a20] border-gray-700 hover:border-[#9d4edd]'}`}>
+                            <div className="flex justify-between items-start mb-2 sm:mb-3"> <h4 className="font-bold text-white truncate pr-4 sm:pr-6 text-sm sm:text-lg">{tpl.name}</h4> {tpl.createdBy === 'coach' && <Badge className="bg-[#7b2cbf] text-white text-[8px] sm:text-[10px] px-1.5 py-0 sm:px-2 sm:py-0.5">Coach</Badge>} </div>
+                            <div className="flex items-center justify-between text-[10px] sm:text-xs text-gray-400 mb-3 sm:mb-4"> <span className="flex items-center gap-1"><LayoutList size={10} className="sm:size-3"/> {tpl.groups?.length || tpl.exercises?.length || 0} Blocs</span> <span>{tpl.createdAt?.seconds ? new Date(tpl.createdAt.seconds * 1000).toLocaleDateString() : ""}</span> </div>
+                            <div className="flex gap-2 opacity-100 sm:opacity-80 sm:group-hover:opacity-100 transition-opacity"> <Button size="sm" className="h-7 sm:h-8 text-[10px] sm:text-xs w-full font-bold bg-white/10 hover:bg-white/20 text-white"><Play size={10} className="mr-1.5 sm:size-3"/> {t('load')}</Button> <button onClick={(e) => {e.stopPropagation(); deleteTemplate(e, tpl.id)}} className="p-1.5 sm:p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"><Trash2 size={14} className="sm:size-4"/></button> </div>
                         </div>
                     ))}
                 </div>
@@ -430,61 +431,62 @@ export default function Exercises() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-            <div className="bg-[#1a1a20]/90 backdrop-blur p-5 rounded-3xl border border-gray-800 sticky top-4 z-10 shadow-2xl">
-                <div className="relative mb-5">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20}/>
-                    <Input value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} placeholder={t('search_exercise')} className="pl-12 bg-black/50 border-gray-700 text-white h-12 rounded-xl focus:border-[#9d4edd] focus:ring-[#9d4edd]"/>
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+            <div className="bg-[#1a1a20]/90 backdrop-blur p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-gray-800 sticky top-2 sm:top-4 z-10 shadow-2xl">
+                <div className="relative mb-4 sm:mb-5">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18}/>
+                    <Input value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} placeholder={t('search_exercise')} className="pl-11 bg-black/50 border-gray-700 text-white h-11 sm:h-12 rounded-xl focus:border-[#9d4edd] text-sm"/>
                 </div>
-                <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex flex-col gap-3 sm:gap-4">
                     <Tabs value={activeTab} onValueChange={(val) => { setActiveTab(val); setCurrentPage(1); }} className="flex-1 min-w-0">
                         <ScrollArea className="w-full whitespace-nowrap rounded-xl bg-black/50 border border-gray-800">
-                            <TabsList className="bg-transparent w-full justify-start h-auto p-1.5">
-                                <TabsTrigger value="all" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all">{t('all')}</TabsTrigger>
-                                {customExercises.length > 0 && ( <TabsTrigger value="custom" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all border border-[#9d4edd]/50 mx-1"> <span className="mr-1.5">👑</span> Coach </TabsTrigger> )}
-                                {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => ( <TabsTrigger key={g.id} value={g.id} className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-xs py-2.5 font-bold transition-all whitespace-nowrap"> <span className="mr-1.5 opacity-80">{g.icon}</span> {g.name} </TabsTrigger> ))}
+                            <TabsList className="bg-transparent w-full justify-start h-auto p-1">
+                                <TabsTrigger value="all" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] sm:text-xs py-2 px-3 sm:px-4 font-bold transition-all">{t('all')}</TabsTrigger>
+                                {customExercises.length > 0 && ( <TabsTrigger value="custom" className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] sm:text-xs py-2 px-3 sm:px-4 font-bold transition-all border border-[#9d4edd]/50 mx-1"> 👑 Coach </TabsTrigger> )}
+                                {MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => ( <TabsTrigger key={g.id} value={g.id} className="rounded-lg data-[state=active]:bg-[#9d4edd] data-[state=active]:text-white text-[10px] sm:text-xs py-2 px-3 sm:px-4 font-bold transition-all whitespace-nowrap"> {g.icon} {g.name} </TabsTrigger> ))}
                             </TabsList>
                             <ScrollBar orientation="horizontal" className="invisible"/>
                         </ScrollArea>
                     </Tabs>
-                    <div className="w-full md:w-48 shrink-0">
+                    <div className="w-full lg:w-48 shrink-0">
                         <Select value={activeEquipment} onValueChange={(val) => { setActiveEquipment(val); setCurrentPage(1); }}>
-                            <SelectTrigger className="w-full bg-[#2d2d35] border-[#9d4edd]/30 text-white h-[52px] rounded-xl font-bold hover:border-[#9d4edd] transition-colors"><Filter size={14} className="mr-2 text-[#9d4edd]"/><SelectValue placeholder="Équipement" /></SelectTrigger>
-                            <SelectContent className="bg-[#1a1a20] border-gray-700 text-white"> {EQUIPMENTS.map(eq => <SelectItem key={eq.id} value={eq.id} className="focus:bg-[#9d4edd] focus:text-white cursor-pointer font-medium">{t(eq.name)}</SelectItem>)} </SelectContent>
+                            <SelectTrigger className="w-full bg-[#2d2d35] border-[#9d4edd]/30 text-white h-10 sm:h-[52px] rounded-xl font-bold text-xs sm:text-sm"><Filter size={14} className="mr-2 text-[#9d4edd]"/><SelectValue placeholder="Équipement" /></SelectTrigger>
+                            <SelectContent className="bg-[#1a1a20] border-gray-700 text-white"> {EQUIPMENTS.map(eq => <SelectItem key={eq.id} value={eq.id} className="focus:bg-[#9d4edd] focus:text-white cursor-pointer font-medium text-xs sm:text-sm">{t(eq.name)}</SelectItem>)} </SelectContent>
                         </Select>
                     </div>
                 </div>
             </div>
 
-            {isDbLoading ? ( <div className="py-20 text-center"><Loader2 className="animate-spin w-12 h-12 text-[#9d4edd] mx-auto mb-4"/><p className="text-gray-500">{t('loading')}</p></div> ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {isDbLoading ? ( <div className="py-20 text-center"><Loader2 className="animate-spin w-10 h-10 sm:w-12 sm:h-12 text-[#9d4edd] mx-auto mb-4"/><p className="text-gray-500 text-sm">{t('loading')}</p></div> ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
                     {currentExercises.map(exo => {
                         const isPending = pendingExercises.find(e => e.name === exo.name);
                         const isInGroups = groups.some(g => g.exercises.some(e => e.name === exo.name));
                         const isAdded = isPending || isInGroups;
 
                         return (
-                            <div key={exo.id} className={`rounded-2xl border transition-all group overflow-hidden flex flex-col h-full ${exo.isCustom ? 'bg-[#1a1a25] border-[#9d4edd]/30 hover:border-[#9d4edd] hover:shadow-[0_0_20px_rgba(157,78,221,0.2)]' : 'bg-[#1a1a20] border-gray-800 hover:border-[#9d4edd]'}`}>
-                                <div className="relative h-40 bg-gray-900 cursor-pointer overflow-hidden" onClick={() => { setSelectedExo(exo); setIsDetailOpen(true); }}>
-                                    {exo.mediaType === 'video' ? ( <div className="w-full h-full flex items-center justify-center bg-black"> <video src={exo.imageUrl} className="w-full h-full object-cover opacity-80 transition-opacity" muted loop onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()}/> <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Play className="fill-white text-white opacity-50" size={32}/></div> </div> ) : ( <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" loading="lazy" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
-                                    <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a20] to-transparent opacity-80 pointer-events-none"></div>
-                                    <div className="absolute bottom-2 left-3 pointer-events-none"> <Badge className={`text-[10px] font-bold border-none px-2 mb-1 capitalize ${exo.isCustom ? 'bg-white text-[#9d4edd]' : 'bg-[#9d4edd] text-white'}`}> {exo.isCustom ? 'Coach' : MUSCLE_GROUPS.find(g => g.id === exo.group)?.name || exo.group} </Badge> </div>
-                                    <div className="absolute top-2 right-2 bg-black/60 rounded-full p-1.5 backdrop-blur-md pointer-events-none"><Info size={14} className="text-white"/></div>
+                            <div key={exo.id} className={`rounded-xl sm:rounded-2xl border transition-all group overflow-hidden flex flex-col h-full ${exo.isCustom ? 'bg-[#1a1a25] border-[#9d4edd]/30' : 'bg-[#1a1a20] border-gray-800'}`}>
+                                <div className="relative h-28 sm:h-40 bg-gray-900 cursor-pointer overflow-hidden" onClick={() => { setSelectedExo(exo); setIsDetailOpen(true); }}>
+                                    {exo.mediaType === 'video' ? ( <div className="w-full h-full flex items-center justify-center bg-black"> <video src={exo.imageUrl} className="w-full h-full object-cover opacity-80" muted loop playsInline onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()}/> <Play className="absolute fill-white text-white opacity-50 size-6 sm:size-8" /> </div> ) : ( <img src={exo.imageUrl} className="w-full h-full object-cover opacity-80 transition-all duration-500" loading="lazy" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
+                                    <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a20] to-transparent opacity-60 pointer-events-none"></div>
+                                    <div className="absolute bottom-1.5 left-2 pointer-events-none"> <Badge className={`text-[7px] sm:text-[9px] font-bold border-none px-1.5 py-0 sm:py-0.5 capitalize ${exo.isCustom ? 'bg-white text-[#9d4edd]' : 'bg-[#9d4edd] text-white'}`}> {exo.isCustom ? 'Coach' : MUSCLE_GROUPS.find(g => g.id === exo.group)?.name || exo.group} </Badge> </div>
+                                    <div className="absolute top-1.5 right-1.5 bg-black/60 rounded-full p-1 backdrop-blur-md pointer-events-none"><Info size={12} className="text-white"/></div>
                                 </div>
-                                <div className="p-4 flex-1 flex flex-col justify-between">
-                                    <div> <h3 className="font-bold text-white text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[#00f5d4] transition-colors">{exo.name}</h3> <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wide truncate">{t(EQUIPMENTS.find(e => e.id === exo.equipment)?.name) || exo.equipment}</p> </div>
-                                    <Button size="sm" className={`w-full mt-3 h-9 font-bold text-xs rounded-lg transition-all ${isAdded ? 'bg-[#00f5d4]/10 text-[#00f5d4] border border-[#00f5d4]/50' : 'bg-[#9d4edd] text-white hover:bg-[#7b2cbf] shadow-lg shadow-purple-500/20'}`} onClick={() => !isAdded && addToCart(exo)}> {isAdded ? <><Check size={14} className="mr-1"/> AJOUTÉ</> : <><Plus size={14} className="mr-1"/> {t('add')}</>} </Button>
+                                <div className="p-2.5 sm:p-4 flex-1 flex flex-col justify-between">
+                                    <div> <h3 className="font-bold text-white text-[11px] sm:text-sm line-clamp-2 leading-tight mb-0.5">{exo.name}</h3> <p className="text-[8px] sm:text-[10px] text-gray-500 uppercase font-black tracking-tight truncate">{t(EQUIPMENTS.find(e => e.id === exo.equipment)?.name) || exo.equipment}</p> </div>
+                                    <Button size="sm" className={`w-full mt-2 sm:mt-3 h-8 sm:h-9 font-bold text-[10px] sm:text-xs rounded-lg transition-all ${isAdded ? 'bg-[#00f5d4]/10 text-[#00f5d4] border border-[#00f5d4]/50' : 'bg-[#9d4edd] text-white'}`} onClick={() => !isAdded && addToCart(exo)}> {isAdded ? <><Check size={12} className="mr-1 sm:size-3.5"/> OK</> : <><Plus size={12} className="mr-1 sm:size-3.5"/> {t('add')}</>} </Button>
                                 </div>
                             </div>
                         );
                     })}
                 </div>
             )}
-            {!isDbLoading && filteredExercises.length > ITEMS_PER_PAGE && ( <div className="flex justify-center items-center gap-4 py-6"> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft size={20}/></Button> <span className="text-sm font-bold text-[#9d4edd] bg-[#9d4edd]/10 px-4 py-2 rounded-full border border-[#9d4edd]/20">Page {currentPage} / {totalPages}</span> <Button variant="outline" size="icon" className="bg-[#1a1a20] border border-[#7b2cbf] text-[#9d4edd] hover:bg-[#7b2cbf] hover:text-white rounded-full transition-colors" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight size={20}/></Button> </div> )}
+            {!isDbLoading && filteredExercises.length > ITEMS_PER_PAGE && ( <div className="flex justify-center items-center gap-3 py-6"> <Button variant="outline" size="icon" className="bg-[#1a1a20] border-[#7b2cbf] text-[#9d4edd] rounded-full size-8 sm:size-10" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft size={16} className="sm:size-5"/></Button> <span className="text-[10px] sm:text-sm font-bold text-[#9d4edd] bg-[#9d4edd]/10 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-[#9d4edd]/20">Page {currentPage} / {totalPages}</span> <Button variant="outline" size="icon" className="bg-[#1a1a20] border-[#7b2cbf] text-[#9d4edd] rounded-full size-8 sm:size-10" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight size={16} className="sm:size-5"/></Button> </div> )}
         </div>
 
-        <div className="lg:col-span-1">
+        {/* WORKOUT CART : VISIBLE ON DESKTOP, HIDDEN ON MOBILE (Sheet used instead) */}
+        <div className="hidden lg:block lg:col-span-1">
             <WorkoutCart
                 groups={groups}
                 setGroups={setGroups}
@@ -501,19 +503,61 @@ export default function Exercises() {
         </div>
       </div>
 
+      {/* MOBILE FLOATING CART BUTTON */}
+      <div className="lg:hidden fixed bottom-6 right-6 z-40">
+        <Sheet>
+            <SheetTrigger asChild>
+                <Button className="size-14 rounded-full bg-[#9d4edd] text-white shadow-2xl shadow-purple-900/50 border-4 border-[#0a0a0f] flex items-center justify-center relative">
+                    <ShoppingCart size={24} />
+                    {(groups.length > 0 || pendingExercises.length > 0) && (
+                        <span className="absolute -top-1 -right-1 size-6 bg-[#00f5d4] text-black font-black text-[10px] rounded-full flex items-center justify-center border-2 border-[#0a0a0f]">
+                            {groups.length + pendingExercises.length}
+                        </span>
+                    )}
+                </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[90vh] bg-[#0a0a0f] border-gray-800 p-0 rounded-t-[2.5rem]">
+                <SheetHeader className="p-6 border-b border-gray-800 bg-[#1a1a20]">
+                    <div className="flex justify-between items-center">
+                        <SheetTitle className="text-white font-black italic uppercase tracking-tighter flex items-center gap-2">
+                            <LayoutList className="text-[#9d4edd]" /> Ma Séance
+                        </SheetTitle>
+                    </div>
+                </SheetHeader>
+                <div className="h-full overflow-y-auto pb-32">
+                    <WorkoutCart
+                        groups={groups}
+                        setGroups={setGroups}
+                        pendingExercises={pendingExercises}
+                        setPendingExercises={setPendingExercises}
+                        selectedSetType={selectedSetType}
+                        setSelectedSetType={setSelectedSetType}
+                        onSaveTemplate={() => setIsSaveModalOpen(true)}
+                        onProgramWeek={() => setIsProgramModalOpen(true)}
+                        onStartSession={() => navigate('/session', { state: { workout: { name: "Séance Express", groups: groups } } })}
+                        isCoachView={isCoachView}
+                        t={t}
+                    />
+                </div>
+            </SheetContent>
+        </Sheet>
+      </div>
+
+      {/* DIALOGS ADAPTED FOR MOBILE */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white max-w-2xl rounded-3xl overflow-hidden p-0">
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white max-w-2xl rounded-2xl sm:rounded-3xl overflow-hidden p-0 w-[95vw] sm:w-full">
             {selectedExo && (
                 <div className="flex flex-col">
-                    <div className="h-64 relative bg-gray-900 flex items-center justify-center">
-                        {selectedExo.mediaType === 'video' ? ( <video src={selectedExo.imageUrl} controls className="w-full h-full object-contain" autoPlay muted loop /> ) : ( <img src={selectedExo.imageUrl} className="w-full h-full object-cover" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
-                        <div className="absolute bottom-6 left-6 pointer-events-none"> <Badge className="bg-[#9d4edd] text-white font-bold border-none mb-2 capitalize">{selectedExo.isCustom ? 'Coach' : MUSCLE_GROUPS.find(g => g.id === selectedExo.group)?.name || selectedExo.group}</Badge> <DialogTitle className="text-3xl font-black italic uppercase text-white leading-none shadow-black drop-shadow-md">{selectedExo.name}</DialogTitle> </div>
+                    <div className="h-48 sm:h-64 relative bg-gray-900 flex items-center justify-center">
+                        {selectedExo.mediaType === 'video' ? ( <video src={selectedExo.imageUrl} controls className="w-full h-full object-contain" autoPlay muted loop playsInline /> ) : ( <img src={selectedExo.imageUrl} className="w-full h-full object-cover" onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80"; }}/> )}
+                        <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6"> <Badge className="bg-[#9d4edd] text-white font-bold mb-1 sm:mb-2 capitalize text-[8px] sm:text-xs">{selectedExo.isCustom ? 'Coach' : MUSCLE_GROUPS.find(g => g.id === selectedExo.group)?.name || selectedExo.group}</Badge> <DialogTitle className="text-xl sm:text-3xl font-black italic uppercase text-white drop-shadow-md">{selectedExo.name}</DialogTitle> </div>
+                        <button onClick={() => setIsDetailOpen(false)} className="absolute top-4 right-4 bg-black/40 p-1.5 rounded-full"><X size={18}/></button>
                     </div>
-                    <div className="p-8">
-                        <h4 className="text-sm font-bold text-[#9d4edd] uppercase tracking-widest mb-3 flex items-center gap-2"><Info size={16}/> Instructions</h4>
-                        <p className="text-gray-300 leading-relaxed text-sm whitespace-pre-line">{selectedExo.description}</p>
-                        <div className="grid grid-cols-2 gap-4 mt-6"> <div className="bg-black/30 p-3 rounded-xl border border-gray-800"><p className="text-[10px] text-gray-500 uppercase font-bold">Équipement</p><p className="font-bold text-white capitalize">{selectedExo.equipment}</p></div> <div className="bg-black/30 p-3 rounded-xl border border-gray-800"><p className="text-[10px] text-gray-500 uppercase font-bold">Type</p><p className="font-bold text-white capitalize">{selectedExo.isCustom ? 'Personnalisé' : 'Standard'}</p></div> </div>
-                        <Button className="w-full mt-8 bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold py-6 rounded-xl shadow-lg" onClick={() => { addToCart(selectedExo); setIsDetailOpen(false); }}>{t('add_to_session')}</Button>
+                    <div className="p-5 sm:p-8 space-y-4 sm:space-y-6 overflow-y-auto max-h-[50vh]">
+                        <h4 className="text-[10px] sm:text-xs font-black text-[#9d4edd] uppercase tracking-widest flex items-center gap-2"><Info size={14}/> Instructions</h4>
+                        <p className="text-gray-300 leading-relaxed text-[11px] sm:text-sm italic">{selectedExo.description}</p>
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4 mt-4"> <div className="bg-black/30 p-2 sm:p-3 rounded-xl border border-gray-800"><p className="text-[8px] sm:text-[10px] text-gray-500 uppercase font-black">Équipement</p><p className="font-bold text-white text-[10px] sm:text-xs capitalize">{t(EQUIPMENTS.find(e => e.id === selectedExo.equipment)?.name) || selectedExo.equipment}</p></div> <div className="bg-black/30 p-2 sm:p-3 rounded-xl border border-gray-800"><p className="text-[8px] sm:text-[10px] text-gray-500 uppercase font-black">Type</p><p className="font-bold text-white text-[10px] sm:text-xs capitalize">{selectedExo.isCustom ? 'Custom' : 'Standard'}</p></div> </div>
+                        <Button className="w-full mt-4 sm:mt-6 bg-[#9d4edd] text-white font-black py-5 sm:py-6 rounded-xl text-xs sm:text-sm" onClick={() => { addToCart(selectedExo); setIsDetailOpen(false); }}>{t('add_to_session')}</Button>
                     </div>
                 </div>
             )}
@@ -521,95 +565,57 @@ export default function Exercises() {
       </Dialog>
 
       <Dialog open={isAutoBuildModalOpen} onOpenChange={setIsAutoBuildModalOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-xl">
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-2xl sm:rounded-3xl max-w-xl w-[95vw] sm:w-full">
             <DialogHeader>
-                <DialogTitle className="text-2xl font-black italic text-[#9d4edd] flex items-center gap-2 uppercase"> <Sparkles className="animate-pulse" /> Auto Build AI </DialogTitle>
-                <DialogDescription className="text-gray-400">Génère un programme complet basé sur tes besoins.</DialogDescription>
+                <DialogTitle className="text-xl sm:text-2xl font-black italic text-[#9d4edd] flex items-center gap-2 uppercase"> <Sparkles size={20} /> AI BUILDER </DialogTitle>
             </DialogHeader>
             {autoBuildStep === 1 ? (
-                <div className="space-y-6 py-4 animate-in fade-in duration-300 flex flex-col items-center">
-                    <h4 className="text-lg font-bold text-[#00f5d4] italic uppercase w-full text-center">1. Sélectionne tes dates</h4>
-                    <div className="w-full flex justify-center">
+                <div className="space-y-4 sm:space-y-6 py-2 flex flex-col items-center">
+                    <h4 className="text-xs sm:text-sm font-bold text-[#00f5d4] uppercase">1. Sélectionnez vos dates</h4>
+                    <div className="w-full scale-90 sm:scale-100 flex justify-center">
                         <CustomCalendar selectedDates={autoBuildDates} onSelect={setAutoBuildDates} />
                     </div>
-                    <DialogFooter className="w-full"> <Button disabled={autoBuildDates.length === 0} onClick={() => setAutoBuildStep(2)} className="bg-[#9d4edd] text-white font-bold w-full h-12 rounded-xl shadow-[0_0_15px_rgba(157,78,221,0.4)]">Continuer <ChevronRight className="ml-2" size={16}/></Button> </DialogFooter>
+                    <Button disabled={autoBuildDates.length === 0} onClick={() => setAutoBuildStep(2)} className="bg-[#9d4edd] text-white font-black w-full h-12 rounded-xl">Suivant <ChevronRight className="ml-2" size={16}/></Button>
                 </div>
             ) : (
-                <div className="space-y-6 py-4 animate-in slide-in-from-right duration-300">
-                    <h4 className="text-lg font-bold text-[#00f5d4] italic uppercase text-center">2. Focus de travail</h4>
-                    <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                        {FOCUS_AREAS.map(focus => ( <button key={focus} onClick={() => toggleAutoFocus(focus)} className={`h-12 px-4 rounded-xl text-[10px] font-bold text-left transition-all border flex items-center justify-between ${autoBuildFocus.includes(focus) ? 'bg-[#9d4edd] text-white border-[#9d4edd] shadow-lg shadow-purple-500/20 scale-[1.02]' : 'bg-black/30 text-gray-400 border-gray-700 hover:border-gray-500'}`}> {focus} {autoBuildFocus.includes(focus) && <Check size={14}/>} </button> ))}
+                <div className="space-y-4 sm:space-y-6 py-2">
+                    <h4 className="text-xs sm:text-sm font-bold text-[#00f5d4] uppercase text-center">2. Choisissez vos focus</h4>
+                    <div className="grid grid-cols-2 gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
+                        {FOCUS_AREAS.map(focus => ( <button key={focus} onClick={() => toggleAutoFocus(focus)} className={`h-10 px-3 rounded-lg text-[9px] sm:text-[10px] font-black text-left transition-all border flex items-center justify-between uppercase ${autoBuildFocus.includes(focus) ? 'bg-[#9d4edd] text-white border-[#9d4edd]' : 'bg-black/30 text-gray-500 border-gray-800'}`}> {focus} {autoBuildFocus.includes(focus) && <Check size={12}/>} </button> ))}
                     </div>
-                    <DialogFooter className="flex gap-3">
+                    <div className="flex gap-2">
                         <Button variant="ghost" onClick={() => setAutoBuildStep(1)} className="text-gray-500 font-bold h-12">Retour</Button>
-                        <Button disabled={autoBuildFocus.length === 0 || isGenerating} onClick={handleAutoBuild} className="bg-[#00f5d4] text-black font-black flex-1 h-12 rounded-xl shadow-[0_0_20px_rgba(0,245,212,0.3)] hover:scale-[1.02] transition-transform"> {isGenerating ? <><Loader2 className="animate-spin mr-2"/> Génération...</> : "Générer mon programme"} </Button>
-                    </DialogFooter>
+                        <Button disabled={autoBuildFocus.length === 0 || isGenerating} onClick={handleAutoBuild} className="bg-[#00f5d4] text-black font-black flex-1 h-12 rounded-xl"> {isGenerating ? <Loader2 className="animate-spin" size={18}/> : "Générer"} </Button>
+                    </div>
                 </div>
             )}
         </DialogContent>
       </Dialog>
 
+      {/* OTHER DIALOGS (CREATE, SAVE, PROGRAM) - SIMILAR ADAPTATIONS */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-lg">
-            <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('create_exercise')}</DialogTitle><DialogDescription>Cet exercice sera visible par vos clients.</DialogDescription></DialogHeader>
-            <div className="space-y-4 py-4">
-                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nom</label><Input value={newExoData.name} onChange={(e) => setNewExoData({...newExoData, name: e.target.value})} className="bg-black border-gray-700"/></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Groupe</label><Select value={newExoData.group} onValueChange={(val) => setNewExoData({...newExoData, group: val})}><SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-700 text-white">{MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent></Select></div>
-                    <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Équipement</label><Select value={newExoData.equipment} onValueChange={(val) => setNewExoData({...newExoData, equipment: val})}><SelectTrigger className="bg-black border-gray-700"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-700 text-white">{EQUIPMENTS.filter(e => e.id !== 'all').map(e => <SelectItem key={e.id} value={e.id}>{t(e.name)}</SelectItem>)}</SelectContent></Select></div>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-2xl w-[95vw]">
+            <DialogHeader><DialogTitle className="text-xl font-black italic text-white uppercase">{t('create_exercise')}</DialogTitle></DialogHeader>
+            <div className="space-y-3 py-2">
+                <div><label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Nom</label><Input value={newExoData.name} onChange={(e) => setNewExoData({...newExoData, name: e.target.value})} className="bg-black border-gray-800 h-10 text-sm"/></div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Groupe</label><Select value={newExoData.group} onValueChange={(val) => setNewExoData({...newExoData, group: val})}><SelectTrigger className="bg-black border-gray-800 h-10 text-xs"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-800 text-white">{MUSCLE_GROUPS.filter(g => g.id !== 'custom').map(g => <SelectItem key={g.id} value={g.id} className="text-xs">{g.name}</SelectItem>)}</SelectContent></Select></div>
+                    <div><label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Matériel</label><Select value={newExoData.equipment} onValueChange={(val) => setNewExoData({...newExoData, equipment: val})}><SelectTrigger className="bg-black border-gray-800 h-10 text-xs"><SelectValue/></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-800 text-white">{EQUIPMENTS.filter(e => e.id !== 'all').map(e => <SelectItem key={e.id} value={e.id} className="text-xs">{t(e.name)}</SelectItem>)}</SelectContent></Select></div>
                 </div>
-                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Instructions</label><Textarea value={newExoData.description} onChange={(e) => setNewExoData({...newExoData, description: e.target.value})} className="bg-black border-gray-700 min-h-[100px]"/></div>
-                <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Média</label><div className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center cursor-pointer hover:border-[#9d4edd] relative group"><input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setUploadFile(e.target.files[0])}/>{uploadFile ? <div className="flex items-center justify-center gap-2 text-[#9d4edd] font-bold"><CheckCircle size={16}/> {uploadFile.name}</div> : <div className="text-gray-500 group-hover:text-white transition-colors"><Upload className="mx-auto mb-2"/> <span className="text-xs">{t('drag_drop_media')}</span></div>}</div></div>
+                <div><label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Média</label><div className="border-2 border-dashed border-gray-800 rounded-xl p-4 text-center cursor-pointer relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setUploadFile(e.target.files[0])}/>{uploadFile ? <div className="text-[#9d4edd] font-bold text-[10px] truncate">{uploadFile.name}</div> : <div className="text-gray-600"><Upload className="mx-auto mb-1" size={16}/> <span className="text-[10px]">Photo/Vidéo</span></div>}</div></div>
             </div>
-            <DialogFooter><Button onClick={handleCreateExercise} disabled={isUploading} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold w-full h-12 rounded-xl">{isUploading ? <><Loader2 className="animate-spin mr-2"/> {t('uploading')}</> : t('create_exercise')}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isSaveModalOpen} onOpenChange={setIsSaveModalOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl">
-            <DialogHeader><DialogTitle className="text-2xl font-black italic text-white">{t('name_session')}</DialogTitle></DialogHeader>
-            <div className="py-6"><Input value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="Ex: Leg Day Intense..." className="bg-black border-gray-700 text-white h-14 text-lg rounded-xl"/></div>
-            <DialogFooter><Button onClick={handleSaveTemplate} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-bold w-full h-12 rounded-xl">{t('save')}</Button></DialogFooter>
+            <Button onClick={handleCreateExercise} disabled={isUploading} className="bg-[#9d4edd] text-white font-black w-full h-12 rounded-xl mt-2">{isUploading ? <Loader2 className="animate-spin" size={18}/> : "CRÉER"}</Button>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isProgramModalOpen} onOpenChange={setIsProgramModalOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-md">
-            <DialogHeader><DialogTitle className="text-2xl font-black italic text-[#9d4edd] uppercase">Programmer</DialogTitle><DialogDescription className="text-gray-400">Sélectionne les dates pour cette séance.</DialogDescription></DialogHeader>
-            <div className="space-y-6 py-4 flex flex-col items-center">
-                <Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Nom de la séance" className="bg-black border-gray-700 text-white h-12 rounded-xl w-full"/>
-                <div className="w-full flex justify-center">
-                    <CustomCalendar selectedDates={programDates} onSelect={setProgramDates} />
-                </div>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-2xl w-[95vw]">
+            <DialogHeader><DialogTitle className="text-xl font-black italic text-[#9d4edd] uppercase">Programmer</DialogTitle></DialogHeader>
+            <div className="space-y-4 py-2 flex flex-col items-center">
+                <Input value={programName} onChange={(e) => setProgramName(e.target.value)} placeholder="Nom de la séance" className="bg-black border-gray-800 text-white h-10 text-sm w-full"/>
+                <div className="scale-90"><CustomCalendar selectedDates={programDates} onSelect={setProgramDates} /></div>
             </div>
-            <DialogFooter>
-                <Button
-                    onClick={handleProgramWeek}
-                    disabled={isSaving}
-                    className="w-full bg-[#00f5d4] text-black font-bold h-12 rounded-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-                >
-                    {isSaving ? (
-                        <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Enregistrement...
-                        </>
-                    ) : (
-                        "Confirmer la planification"
-                    )}
-                </Button>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!templateToLoad} onOpenChange={() => setTemplateToLoad(null)}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-3xl max-w-sm p-0 overflow-hidden">
-            <div className="h-2 w-full bg-gradient-to-r from-[#7b2cbf] to-[#9d4edd]"></div>
-            <div className="flex flex-col items-center text-center p-8">
-                <div className="w-20 h-20 rounded-full bg-[#9d4edd]/20 flex items-center justify-center mb-6 text-[#9d4edd] border-4 border-[#1a1a20] shadow-[0_0_20px_rgba(157,78,221,0.3)]"><Star size={40} /></div>
-                <h3 className="text-2xl font-black text-white mb-2 leading-tight">Charger "{templateToLoad?.name}" ?</h3>
-                <p className="text-gray-400 text-sm mb-8 px-4">Attention, cela va <span className="text-red-400 font-bold">remplacer</span> votre sélection.</p>
-                <div className="grid grid-cols-2 gap-4 w-full"> <Button variant="outline" onClick={() => setTemplateToLoad(null)} className="border-gray-700 hover:bg-gray-800 h-14 rounded-xl font-bold">{t('cancel')}</Button> <Button onClick={confirmLoadTemplate} className="bg-[#9d4edd] hover:bg-[#7b2cbf] text-white font-black h-14 rounded-xl shadow-lg">{t('load')}</Button> </div>
-            </div>
+            <Button onClick={handleProgramWeek} disabled={isSaving} className="w-full bg-[#00f5d4] text-black font-black h-12 rounded-xl"> {isSaving ? <Loader2 className="animate-spin" size={18}/> : "CONFIRMER"} </Button>
         </DialogContent>
       </Dialog>
     </div>

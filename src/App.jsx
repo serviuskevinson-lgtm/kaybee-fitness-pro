@@ -54,17 +54,15 @@ const AppContent = () => {
 
   useEffect(() => {
     const backListener = CapacitorApp.addListener('backButton', (e) => {
-      const backEvent = new CustomEvent('kbBackButton', { cancelable: true });
-      window.dispatchEvent(backEvent);
-
-      if (backEvent.defaultPrevented) {
-        return;
-      }
-
+      // Si on est déjà au Dashboard ou sur la page de Login, on demande confirmation pour quitter
       if (location.pathname === '/' || location.pathname === '/dashboard' || location.pathname === '/login') {
-        CapacitorApp.exitApp();
+        const confirmed = window.confirm("Quitter Kaybee Fitness Pro ?");
+        if (confirmed) {
+            CapacitorApp.exitApp();
+        }
       } else {
-        navigate(-1);
+        // Peu importe où on se trouve ailleurs, on revient au dashboard
+        navigate('/dashboard');
       }
     });
 

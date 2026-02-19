@@ -3,7 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useClient } from '@/context/ClientContext';
 import { db, app } from '@/lib/firebase';
 import { 
-  doc, onSnapshot, updateDoc, arrayRemove, increment as firestoreIncrement, getDoc, setDoc
+  doc, onSnapshot, updateDoc, arrayRemove, increment as firestoreIncrement, getDoc, setDoc, deleteField
 } from 'firebase/firestore';
 import { getDatabase, ref, onValue, update } from "firebase/database";
 
@@ -287,7 +287,6 @@ export default function Dashboard() {
 
             setLiveStats(prev => ({
                 ...prev,
-                // On n'utilise plus Math.max pour permettre le reset à 0 à minuit
                 steps: isTodayData ? (Number(data.steps) || 0) : 0,
                 caloriesBurned: isTodayData ? (Number(data.calories_burned) || 0) : 0,
                 caloriesConsumed: isTodayData ? (Number(data.calories_consumed) || 0) : 0,
@@ -450,311 +449,162 @@ export default function Dashboard() {
   const todayContent = getDayContent(new Date());
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-20 p-4 md:p-8">
-      {/* Header Widget */}
-      <div className="flex flex-col md:flex-row justify-between items-end gap-6 bg-gradient-to-r from-[#7b2cbf]/10 to-transparent p-8 rounded-3xl border border-[#7b2cbf]/20 relative overflow-hidden">
+    <div className="space-y-6 animate-in fade-in duration-500 pb-24 p-4">
+      {/* Header Widget Compact Mobile */}
+      <div className="bg-gradient-to-r from-[#7b2cbf]/10 to-transparent p-6 rounded-3xl border border-[#7b2cbf]/20 relative overflow-hidden">
         <div className="relative z-10">
-          <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase">
+          <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase">
             {safe(t('welcome'))} <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf]">{safe(userProfile?.firstName?.toUpperCase())}</span>
           </h1>
-          <p className="text-gray-400 mt-2 text-lg">Prêt à exploser les records aujourd'hui ?</p>
         </div>
-        {!isCoachView && (
-            <Link to="/session" state={{ workout: todayContent.workout }}><Button className="bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-6 px-8 rounded-xl shadow-lg transition-transform hover:scale-105"><Zap className="mr-2 h-5 w-5 fill-black" /> {safe(t('start_session'))}</Button></Link>
+        {!isCoachView && todayContent.workout && (
+            <div className="mt-4">
+                <Link to="/session" state={{ workout: todayContent.workout }}><Button className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95"><Zap className="mr-2 h-4 w-4 fill-black" /> {safe(t('start_session'))}</Button></Link>
+            </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-4">
                 {weightStats && <WeightGoalWidget stats={weightStats} />}
-                <div className="bg-[#1a1a20] p-6 rounded-3xl border-l-4 border-l-[#7b2cbf] shadow-xl flex flex-col justify-between">
-                    <div className="flex justify-between items-start mb-4"><div className="flex items-center gap-2"><Utensils className="text-[#7b2cbf]" size={20}/><h3 className="font-bold text-gray-200">Nutrition</h3></div><Badge className="bg-[#7b2cbf]/20 text-[#7b2cbf] border-none">{liveStats.caloriesConsumed} Kcal</Badge></div>
+                <div className="bg-[#1a1a20] p-5 rounded-3xl border-l-4 border-l-[#7b2cbf] shadow-xl flex flex-col justify-between">
+                    <div className="flex justify-between items-start mb-3"><div className="flex items-center gap-2"><Utensils className="text-[#7b2cbf]" size={16}/><h3 className="text-xs font-bold text-gray-200 uppercase">Nutrition</h3></div><Badge className="bg-[#7b2cbf]/20 text-[#7b2cbf] border-none text-[10px]">{liveStats.caloriesConsumed} Kcal</Badge></div>
                     <div className="space-y-2">
                         <Progress value={(liveStats.caloriesConsumed / (userProfile?.nutritionalGoal || 2500)) * 100} className="h-2 bg-gray-800 [&>div]:bg-[#7b2cbf]" />
-                        <p className="text-[10px] text-gray-500 font-bold text-right uppercase">Objectif: {userProfile?.nutritionalGoal || 2500} Kcal</p>
                     </div>
                 </div>
             </div>
 
-            {/* INTELLIGENCE KAYBEE AVEC SÉLECTEUR DE MODE */}
-            <Card className="bg-gradient-to-br from-[#1a1a20] to-[#0a0a0f] border-[#7b2cbf]/40 border-2 rounded-3xl overflow-hidden shadow-2xl">
-                <CardHeader className="pb-3 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                        <BrainCircuit className="text-[#00f5d4] animate-pulse" size={24} />
-                        <CardTitle className="text-xl font-black italic uppercase text-white tracking-tight">{safe(t('intelligence_title'))}</CardTitle>
+            {/* INTELLIGENCE KAYBEE COMPACT */}
+            <Card className="bg-gradient-to-br from-[#1a1a20] to-[#0a0a0f] border-[#7b2cbf]/40 border-2 rounded-[2rem] overflow-hidden shadow-2xl">
+                <CardHeader className="p-4 border-b border-white/5 bg-white/5 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <BrainCircuit className="text-[#00f5d4] animate-pulse" size={20} />
+                        <CardTitle className="text-md font-black italic uppercase text-white">{safe(t('intelligence_title'))}</CardTitle>
                     </div>
-                    <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 w-full sm:w-auto">
-                        {[
-                            { id: 'accountability', icon: Target, label: 'Mindset' },
-                            { id: 'training', icon: Dumbbell, label: 'Exercices' },
-                            { id: 'nutrition', icon: Utensils, label: 'Nutrition' }
-                        ].map(m => (
-                            <button
-                                key={m.id}
-                                onClick={() => setIntelMode(m.id)}
-                                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
-                                    intelMode === m.id
-                                    ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20'
-                                    : 'text-gray-500 hover:text-white hover:bg-white/5'
-                                }`}
-                            >
-                                <m.icon size={12} />
-                                <span className="hidden xs:inline">{m.label}</span>
-                            </button>
+                    <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 w-full">
+                        {['accountability', 'training', 'nutrition'].map(m => (
+                            <button key={m} onClick={() => setIntelMode(m)} className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${intelMode === m ? 'bg-[#00f5d4] text-black shadow-lg shadow-[#00f5d4]/20' : 'text-gray-500'}`}>{m === 'accountability' ? 'Mind' : m}</button>
                         ))}
                     </div>
                 </CardHeader>
-                <CardContent className="p-6">
+                <CardContent className="p-5">
                     <AnimatePresence mode="wait">
                         {isIntelLoading ? (
-                            <motion.div
-                                key="loading"
-                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                className="py-10 flex flex-col items-center justify-center gap-4"
-                            >
-                                <Loader2 className="animate-spin text-[#00f5d4]" size={40} />
-                                <p className="text-xs font-black text-gray-500 uppercase tracking-widest animate-pulse">L'IA analyse tes données...</p>
-                            </motion.div>
+                            <div className="py-6 flex flex-col items-center justify-center gap-2"><Loader2 className="animate-spin text-[#00f5d4]" size={24} /></div>
                         ) : (
-                            <motion.div
-                                key={intelMode}
-                                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                                className="flex items-start gap-4"
-                            >
-                                <div className={`p-4 rounded-2xl bg-yellow-500/20 text-yellow-400 shrink-0`}>
-                                    <Lightbulb size={28} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">
-                                        Focus : <span className="text-white font-black">{safe(accountability.improveWidget)}</span>
-                                    </h4>
-                                    <p className="text-2xl font-black text-white italic leading-tight uppercase truncate sm:whitespace-normal">
-                                        {safe(accountability.primaryNeed)}
-                                    </p>
-                                    <p className="text-gray-400 mt-2 text-sm leading-relaxed font-medium italic">
-                                        "{safe(accountability.recommendation)}"
-                                    </p>
-                                </div>
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
+                                <p className="text-lg font-black text-white italic leading-tight uppercase">{safe(accountability.primaryNeed)}</p>
+                                <p className="text-gray-400 text-xs leading-relaxed font-medium italic">"{safe(accountability.recommendation)}"</p>
                             </motion.div>
                         )}
                     </AnimatePresence>
                 </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 flex items-center justify-between shadow-xl relative overflow-hidden group">
-                    <div className="relative z-10"><p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Calories Brûlées (⌚)</p><h3 className="text-3xl font-black text-white">{Math.floor((Number(userProfile?.nutritionalGoal) || 2000) + liveStats.caloriesBurned)} KCAL</h3></div>
-                    <Flame className="text-yellow-500 w-10 h-10 group-hover:scale-110 transition-transform relative z-10" />
-                </div>
-                <div className="bg-[#1a1a20] p-6 rounded-2xl border border-gray-800 flex items-center justify-between shadow-xl relative overflow-hidden group">
-                    <div className="relative z-10"><p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Pouls en Direct (⌚)</p><h3 className="text-3xl font-black text-white">{liveStats.heartRate > 0 ? liveStats.heartRate : "--"} BPM</h3></div>
-                    <HeartPulse className={`text-blue-500 w-10 h-10 ${liveStats.heartRate > 0 ? 'animate-pulse' : 'opacity-20'} relative z-10`} />
-                </div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 shadow-xl"><p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-1">Calories (⌚)</p><h3 className="text-xl font-black text-white">{Math.floor((Number(userProfile?.nutritionalGoal) || 2000) + liveStats.caloriesBurned)}</h3></div>
+                <div className="bg-[#1a1a20] p-4 rounded-2xl border border-gray-800 shadow-xl"><p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-1">Pouls (⌚)</p><h3 className="text-xl font-black text-white">{liveStats.heartRate > 0 ? liveStats.heartRate : "--"} BPM</h3></div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card className="bg-[#1a1a20] border-gray-800 shadow-xl min-h-[200px] overflow-hidden group relative"><CardHeader className="pb-2"><CardTitle className="text-white flex items-center gap-2 text-sm font-bold uppercase tracking-widest relative z-10"><Footprints className="text-[#7b2cbf]"/> Pas</CardTitle></CardHeader>
-                    <CardContent className="flex flex-col justify-between h-[120px] relative z-10">
-                        <div className="flex justify-between items-end mb-2">
-                            <h3 className="text-4xl font-black text-white tracking-tighter">{liveStats.steps.toLocaleString()}</h3>
-                            <Badge className="bg-[#7b2cbf]/20 text-[#7b2cbf] border-none text-[10px] font-black">{Math.round(stepsProgress)}%</Badge>
-                        </div>
-                        <div className="space-y-2">
-                            <Progress value={stepsProgress} className="h-3 bg-gray-900 [&>div]:bg-gradient-to-r from-[#7b2cbf] to-[#00f5d4] rounded-full" />
-                            <div className="flex justify-between items-center text-[10px] font-bold text-gray-500 uppercase">
-                                <span>But: {stepsGoal.toLocaleString()}</span>
-                                <span>{(liveStats.steps * 0.000762).toFixed(2)} km</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                    <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                        <Footprints size={120} className="text-[#7b2cbf]" />
+            <Card className="bg-[#1a1a20] border-gray-800 shadow-xl overflow-hidden relative"><CardHeader className="p-4 pb-2"><CardTitle className="text-white flex items-center gap-2 text-xs font-bold uppercase tracking-widest"><Footprints className="text-[#7b2cbf]" size={14}/> Pas</CardTitle></CardHeader>
+                <CardContent className="p-4 pt-0">
+                    <div className="flex justify-between items-end mb-2">
+                        <h3 className="text-3xl font-black text-white">{liveStats.steps.toLocaleString()}</h3>
+                        <Badge className="bg-[#7b2cbf]/20 text-[#7b2cbf] border-none text-[10px] font-black">{Math.round(stepsProgress)}%</Badge>
                     </div>
-                </Card>
-                <HydrationWidget current={liveStats.water} onAdd={handleAddWater} isCoachView={isCoachView} />
-            </div>
+                    <Progress value={stepsProgress} className="h-2 bg-gray-900 [&>div]:bg-[#7b2cbf]" />
+                </CardContent>
+            </Card>
 
+            <HydrationWidget current={liveStats.water} onAdd={handleAddWater} isCoachView={isCoachView} />
             <SmartCalorieWidget userProfile={userProfile} consumed={liveStats.caloriesConsumed} burned={liveStats.caloriesBurned} />
-        </div>
 
-        <div className="lg:col-span-1 space-y-6">
-            <div className="bg-[#1a1a20] p-6 rounded-3xl border border-gray-800 shadow-xl">
-                <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black italic text-white uppercase flex items-center gap-2"><CalendarIcon className="text-[#00f5d4]"/> Agenda</h3><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))} className="h-8 w-8"><ChevronLeft/></Button><Button size="icon" variant="ghost" onClick={() => setCurrentWeekStart(addWeeks(currentWeekStart, 1))} className="h-8 w-8"><ChevronRight/></Button></div></div>
-                <div className="space-y-2">
+            <div className="bg-[#1a1a20] p-5 rounded-3xl border border-gray-800 shadow-xl">
+                <div className="flex justify-between items-center mb-4"><h3 className="text-sm font-black italic text-white uppercase flex items-center gap-2"><CalendarIcon size={14} className="text-[#00f5d4]"/> Agenda</h3><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))} className="h-8 w-8"><ChevronLeft size={16}/></Button><Button size="icon" variant="ghost" onClick={() => setCurrentWeekStart(addWeeks(currentWeekStart, 1))} className="h-8 w-8"><ChevronRight size={16}/></Button></div></div>
+                <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar">
                     {weekDays.map((date) => {
                         const content = getDayContent(date);
                         const isToday = isSameDay(date, new Date());
                         return (
-                            <motion.div key={date.toISOString()} whileHover={{ x: 5 }} onClick={() => setSelectedDayDetail({ date, ...content })} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${isToday ? 'bg-[#7b2cbf]/20 border-[#7b2cbf] shadow-[0_0_15px_rgba(123,44,191,0.2)]' : 'bg-black/20 border-gray-800 hover:border-gray-600'}`}>
-                                <div className="flex items-center w-full">
-                                    <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center mr-3 ${isToday ? 'bg-[#7b2cbf] text-white' : 'bg-gray-800 text-gray-500'}`}><span className="text-[8px] font-black uppercase">{format(date, 'EEE', { locale: fr })}</span><span className="text-sm font-black">{format(date, 'd')}</span></div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className={`text-xs font-black truncate uppercase tracking-tight ${isToday ? 'text-[#00f5d4]' : 'text-gray-300'}`}>{safe(content.workout?.name) || "Repos"}</p>
-                                        {content.nutritionalPlan && (
-                                            <p className="text-[9px] text-gray-500 font-bold uppercase flex items-center gap-1 mt-0.5"><Utensils size={10} className="text-[#00f5d4]"/> {content.nutritionalPlan.meals.length} plats prévus</p>
-                                        )}
-                                    </div>
-                                    {(content.workout || content.nutritionalPlan) && <div className={`w-2 h-2 rounded-full bg-[#00f5d4] animate-pulse`}></div>}
-                                </div>
-                            </motion.div>
+                            <div key={date.toISOString()} onClick={() => setSelectedDayDetail({ date, ...content })} className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-16 rounded-xl border transition-all ${isToday ? 'bg-[#7b2cbf] border-[#7b2cbf] text-white shadow-lg shadow-purple-900/40' : 'bg-black/20 border-gray-800 text-gray-500'}`}>
+                                <span className="text-[8px] font-black uppercase mb-1">{format(date, 'EEE', { locale: fr })}</span>
+                                <span className="text-md font-black">{format(date, 'd')}</span>
+                                {(content.workout || content.nutritionalPlan) && !isToday && <div className="w-1 h-1 rounded-full bg-[#00f5d4] mt-1"></div>}
+                            </div>
                         )
                     })}
                 </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-                <StatCard label="POINTS" value={userProfile?.points || 0} color="red" />
-                <StatCard label="SÉANCES" value={userProfile?.history?.filter(h => h.type === 'workout').length || 0} color="purple" />
-                <StatCard label="DÉFIS" value={userProfile?.challengesCompleted?.length || 0} color="teal" />
-                <StatCard label="OBJECTIF" value={`${userProfile?.targetWeight} LBS`} color="orange" />
-            </div>
-        </div>
       </div>
 
-      {/* MODAL DÉTAIL JOURNÉE */}
+      {/* MODAL DÉTAIL JOURNÉE MOBILE */}
       <Dialog open={!!selectedDayDetail} onOpenChange={() => setSelectedDayDetail(null)}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-[2rem] max-w-lg overflow-hidden p-0 shadow-2xl">
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-t-[2rem] md:rounded-[2rem] max-w-full p-0 overflow-hidden shadow-2xl fixed bottom-0 md:relative">
             {selectedDayDetail && (
-                <div className="flex flex-col">
-                    <div className="p-8 bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-8 opacity-10"><Target size={100} /></div>
-                        <h2 className="text-3xl font-black italic uppercase text-white drop-shadow-md">{format(selectedDayDetail.date, 'EEEE d MMMM', { locale: fr })}</h2>
-                        <button onClick={() => setSelectedDayDetail(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors"><X size={24}/></button>
+                <div className="flex flex-col max-h-[85vh]">
+                    <div className="p-6 bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] shrink-0">
+                        <h2 className="text-xl font-black italic uppercase text-white">{format(selectedDayDetail.date, 'EEEE d MMMM', { locale: fr })}</h2>
                     </div>
 
-                    <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                        <section className="space-y-4">
-                            <div className="flex items-center gap-2 mb-2"><Dumbbell size={16} className="text-[#9d4edd]"/><h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Entraînement</h3></div>
+                    <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                        <section className="space-y-3">
+                            <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Entraînement</h3>
                             {selectedDayDetail.workout ? (
-                                <>
-                                    <div className="flex justify-between items-center bg-black/40 p-4 rounded-2xl border border-white/5">
-                                        <p className="text-xl font-black text-white uppercase italic">{selectedDayDetail.workout.name}</p>
-                                        <div className="flex gap-2">
-                                            <Button size="icon" variant="ghost" onClick={() => handleEditWorkout(selectedDayDetail.workout)} className="h-10 w-10 bg-white/5 hover:bg-white/10 text-white rounded-xl"><Edit3 size={18}/></Button>
-                                            <Button size="icon" variant="ghost" onClick={() => handleDeleteWorkout(selectedDayDetail.workout)} className="h-10 w-10 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl"><Trash2 size={18}/></Button>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4">
-                                        {(selectedDayDetail.workout.groups || (selectedDayDetail.workout.exercises?.map(ex => ({ id: Math.random(), setType: 'straight', exercises: [ex], sets: ex.sets || 3, rest: 60 }))))?.map((group, idx) => {
-                                            const typeInfo = SET_TYPE_INFO[group.setType] || SET_TYPE_INFO.straight;
-                                            const TypeIcon = typeInfo.icon;
-
-                                            return (
-                                                <div key={group.id || idx} className="space-y-2">
-                                                    <div className="flex items-center gap-2 pl-2">
-                                                        <Badge className={`${typeInfo.color} text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border-none flex items-center gap-1`}>
-                                                            <TypeIcon size={10} /> {typeInfo.name}
-                                                        </Badge>
-                                                        {group.rest && (
-                                                            <span className="text-[9px] font-bold text-gray-500 uppercase flex items-center gap-1">
-                                                                <Clock size={10}/> {group.rest}s repos
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        {group.exercises?.map((exo, i) => (
-                                                            <div key={i} className="flex items-center gap-4 p-4 bg-black/20 rounded-2xl border border-white/5 group hover:border-[#7b2cbf]/30 transition-all">
-                                                                <div className="w-12 h-12 bg-gray-900 rounded-xl overflow-hidden border border-white/5 shrink-0">
-                                                                    {exo.imageUrl ? <img src={exo.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/> : <Dumbbell className="w-full h-full p-3 text-gray-600"/>}
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <p className="font-black text-white uppercase text-sm italic truncate">{exo.name}</p>
-                                                                    <div className="flex gap-3 mt-1">
-                                                                        <Badge className="bg-[#7b2cbf]/20 text-[#9d4edd] border-none text-[10px] font-bold">{group.sets || exo.sets || 3} séries</Badge>
-                                                                        <Badge className="bg-[#00f5d4]/10 text-[#00f5d4] border-none text-[10px] font-bold">{exo.reps || "10-12"} reps</Badge>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </>
-                            ) : ( <div className="bg-black/20 p-6 rounded-2xl border border-dashed border-gray-800 text-center"><p className="text-xs text-gray-600 font-bold uppercase">Pas de séance prévue</p></div> )}
+                                <div className="bg-black/40 p-4 rounded-2xl border border-white/5 flex justify-between items-center">
+                                    <p className="font-black text-white uppercase italic text-sm">{selectedDayDetail.workout.name}</p>
+                                    <Button size="icon" variant="ghost" onClick={() => handleDeleteWorkout(selectedDayDetail.workout)} className="text-red-500"><Trash2 size={16}/></Button>
+                                </div>
+                            ) : ( <p className="text-xs text-gray-600 font-bold uppercase italic text-center py-2">Jour de repos</p> )}
                         </section>
 
-                        <section className="space-y-4">
-                            <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><Utensils size={16} className="text-[#00f5d4]"/><h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Plan Nutritionnel</h3></div>{selectedDayDetail.nutritionalPlan && ( <Button size="icon" variant="ghost" onClick={() => handleDeleteNutritionPlan(selectedDayDetail.nutritionalPlan)} className="h-8 w-8 text-red-500 hover:bg-red-500/10 rounded-lg"><Trash2 size={14}/></Button> )}</div>
+                        <section className="space-y-3">
+                            <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nutrition</h3>
                             {selectedDayDetail.nutritionalPlan ? (
-                                <div className="space-y-3">
+                                <div className="space-y-2">
                                     {selectedDayDetail.nutritionalPlan.meals.map((meal) => (
-                                        <div key={meal.logId} onClick={() => handleToggleMeal(selectedDayDetail.nutritionalPlan.id, meal.logId)} className={`flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer ${meal.eaten ? 'bg-[#00f5d4]/10 border-[#00f5d4]/30 opacity-60' : 'bg-black/20 border-white/5 hover:border-[#00f5d4]/30 group'}`}>
-                                            <div className="w-12 h-12 bg-gray-800 rounded-xl overflow-hidden border border-white/5 shrink-0">
-                                                {meal.imageUrl ? <img src={meal.imageUrl} className="w-full h-full object-cover"/> : <Utensils className="w-full h-full p-3 text-gray-600"/>}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`font-black uppercase text-sm italic truncate ${meal.eaten ? 'text-[#00f5d4] line-through' : 'text-white'}`}>{meal.name}</p>
-                                                <div className="flex gap-2 mt-1">
-                                                    <span className="text-[10px] font-black text-gray-500">{meal.calories} KCAL</span>
-                                                    <span className="text-[10px] font-bold text-blue-400">P: {meal.protein}g</span>
-                                                </div>
-                                            </div>
-                                            <div className={`p-2 rounded-full transition-colors ${meal.eaten ? 'bg-[#00f5d4] text-black' : 'bg-white/5 text-gray-600 group-hover:bg-[#00f5d4]/20 group-hover:text-[#00f5d4]'}`}>
-                                                {meal.eaten ? <CheckCircle2 size={20} /> : <Circle size={20} />}
-                                            </div>
+                                        <div key={meal.logId} className="flex items-center gap-3 p-3 rounded-xl bg-black/20 border border-white/5">
+                                            <div className="w-10 h-10 bg-gray-800 rounded-lg shrink-0"></div>
+                                            <div className="flex-1"><p className="font-black uppercase text-xs italic text-white truncate">{meal.name}</p><p className="text-[9px] text-gray-500">{meal.calories} KCAL</p></div>
                                         </div>
                                     ))}
                                 </div>
-                            ) : ( <div className="bg-black/20 p-6 rounded-2xl border border-dashed border-gray-800 text-center"><p className="text-xs text-gray-600 font-bold uppercase">Pas de plan prévu</p><Button asChild variant="ghost" className="text-[#00f5d4] text-[10px] font-black uppercase mt-2 h-8 hover:bg-[#00f5d4]/10"><Link to="/meals">Définir un plan</Link></Button></div> )}
+                            ) : ( <p className="text-xs text-gray-600 font-bold uppercase italic text-center py-2">Aucun plan</p> )}
                         </section>
                     </div>
 
-                    <div className="p-8 pt-0 flex gap-3">
-                        <Button className="flex-1 bg-white/5 hover:bg-white/10 text-white font-black uppercase py-6 rounded-2xl border border-white/10" onClick={() => setSelectedDayDetail(null)}>Fermer</Button>
-                        {selectedDayDetail.workout && ( <Button asChild className="flex-1 bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black uppercase py-6 rounded-2xl shadow-[0_0_20px_rgba(0,245,212,0.3)]"><Link to="/session" state={{ workout: selectedDayDetail.workout }}><Zap className="mr-2 h-5 w-5 fill-black"/> Lancer Séance</Link></Button> )}
+                    <div className="p-6 pt-0 flex gap-2 shrink-0">
+                        <Button className="flex-1 bg-white/5 text-white font-black uppercase rounded-xl h-12 text-xs" onClick={() => setSelectedDayDetail(null)}>Fermer</Button>
+                        {selectedDayDetail.workout && ( <Button asChild className="flex-2 bg-[#00f5d4] text-black font-black uppercase rounded-xl h-12 text-xs shadow-lg shadow-[#00f5d4]/20"><Link to="/session" state={{ workout: selectedDayDetail.workout }}><Zap size={14} className="mr-2 fill-black"/> Lancer</Link></Button> )}
                     </div>
                 </div>
             )}
         </DialogContent>
       </Dialog>
 
-      {/* MODAL DE CONFIRMATION NUTRITIONNELLE IA */}
+      {/* MODAL DE CONFIRMATION NUTRITIONNELLE IA MOBILE */}
       <Dialog open={nutritionConfirmModal.open} onOpenChange={(open) => !nutritionConfirmModal.isLoading && setNutritionConfirmModal(prev => ({ ...prev, open }))}>
-        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white rounded-[2.5rem] max-w-sm p-0 overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border-2 border-white/5">
-            <div className="relative">
-                <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-[#00f5d4]/20 to-transparent" />
-                <div className="p-8 relative z-10">
-                    <div className="flex justify-center mb-6">
-                        <div className="w-20 h-20 bg-black/60 rounded-3xl border border-[#00f5d4]/30 flex items-center justify-center shadow-[0_0_30px_rgba(0,245,212,0.2)]">
-                            {nutritionConfirmModal.isLoading ? <Loader2 size={40} className="text-[#00f5d4] animate-spin" /> : <ChefHat size={40} className="text-[#00f5d4]" />}
-                        </div>
-                    </div>
-
-                    <div className="text-center space-y-2 mb-8">
-                        <h3 className="text-2xl font-black italic uppercase tracking-tighter">Confirmation</h3>
-                        <p className="text-gray-400 text-xs font-bold uppercase tracking-widest px-4">
-                            {nutritionConfirmModal.isLoading ? "Analyse IA en cours..." : `Ajouter "${nutritionConfirmModal.data?.name}" à ton SmartCalorie ?`}
-                        </p>
-                    </div>
-
-                    {nutritionConfirmModal.isLoading ? (
-                        <div className="py-12 flex flex-col items-center gap-4">
-                            <Sparkles size={24} className="text-[#00f5d4] animate-pulse" />
-                            <p className="text-[10px] font-black text-gray-600 uppercase animate-pulse">Calcul des macronutriments...</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-2 gap-3 mb-8">
-                            <MacroBadge label="Calories" value={nutritionConfirmModal.data?.calories} unit="kcal" color="#00f5d4" />
-                            <MacroBadge label="Protéines" value={nutritionConfirmModal.data?.protein} unit="g" color="#3b82f6" />
-                            <MacroBadge label="Glucides" value={nutritionConfirmModal.data?.carbs} unit="g" color="#f59e0b" />
-                            <MacroBadge label="Lipides" value={nutritionConfirmModal.data?.fats || nutritionConfirmModal.data?.fat} unit="g" color="#ef4444" />
-                            <MacroBadge label="Fibres" value={nutritionConfirmModal.data?.fiber} unit="g" color="#10b981" />
-                            <MacroBadge label="Sucre" value={nutritionConfirmModal.data?.sugar} unit="g" color="#ec4899" />
-                        </div>
-                    )}
-
-                    <div className="space-y-3">
-                        <Button disabled={nutritionConfirmModal.isLoading} onClick={confirmMealConsumption} className="w-full bg-[#00f5d4] hover:bg-[#00f5d4]/80 text-black font-black h-16 rounded-2xl shadow-[0_0_30px_rgba(0,245,212,0.2)] text-lg transition-all active:scale-95">
-                            CONFIRMER LE REPAS
-                        </Button>
-                        <Button disabled={nutritionConfirmModal.isLoading} variant="ghost" onClick={() => setNutritionConfirmModal({ open: false, planId: null, mealLogId: null, data: null, isLoading: false })} className="w-full text-gray-500 font-bold uppercase text-[10px] tracking-widest h-10">
-                            ANNULER
-                        </Button>
-                    </div>
+        <DialogContent className="bg-[#0a0a0f] border-gray-800 text-white rounded-[2rem] max-w-[90vw] mx-auto p-6 overflow-hidden border-2">
+            <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 bg-[#00f5d4]/10 rounded-2xl flex items-center justify-center border border-[#00f5d4]/30">
+                    {nutritionConfirmModal.isLoading ? <Loader2 size={32} className="text-[#00f5d4] animate-spin" /> : <ChefHat size={32} className="text-[#00f5d4]" />}
                 </div>
+                <h3 className="text-xl font-black italic uppercase">Confirmation</h3>
+
+                {nutritionConfirmModal.isLoading ? (
+                    <p className="text-xs text-gray-500 uppercase font-black animate-pulse">Analyse IA...</p>
+                ) : (
+                    <div className="w-full space-y-4">
+                        <p className="text-xs text-gray-400 font-bold">Ajouter "{nutritionConfirmModal.data?.name}" ?</p>
+                        <div className="grid grid-cols-3 gap-2">
+                            <MacroBadge label="Kcal" value={nutritionConfirmModal.data?.calories} color="#00f5d4" />
+                            <MacroBadge label="Prot" value={nutritionConfirmModal.data?.protein} color="#3b82f6" />
+                            <MacroBadge label="Carb" value={nutritionConfirmModal.data?.carbs} color="#f59e0b" />
+                        </div>
+                        <Button disabled={nutritionConfirmModal.isLoading} onClick={confirmMealConsumption} className="w-full bg-[#00f5d4] text-black font-black h-12 rounded-xl text-sm">CONFIRMER</Button>
+                        <Button disabled={nutritionConfirmModal.isLoading} variant="ghost" onClick={() => setNutritionConfirmModal({ open: false, planId: null, mealLogId: null, data: null, isLoading: false })} className="w-full text-gray-500 font-bold uppercase text-[10px]">ANNULER</Button>
+                    </div>
+                )}
             </div>
         </DialogContent>
       </Dialog>
@@ -762,11 +612,11 @@ export default function Dashboard() {
   );
 }
 
-function MacroBadge({ label, value, unit, color }) {
+function MacroBadge({ label, value, color }) {
     return (
-        <div className="bg-black/40 p-3 rounded-2xl border border-white/5 flex flex-col items-center justify-center">
-            <p className="text-[8px] font-black text-gray-500 uppercase mb-1 tracking-tighter">{label}</p>
-            <p className="text-sm font-black italic" style={{ color }}>{value || 0} <span className="text-[8px] opacity-50">{unit}</span></p>
+        <div className="bg-black/40 p-2 rounded-xl border border-white/5 flex flex-col items-center">
+            <p className="text-[7px] font-black text-gray-500 uppercase mb-0.5">{label}</p>
+            <p className="text-xs font-black italic" style={{ color }}>{value || 0}</p>
         </div>
     );
 }
@@ -774,11 +624,10 @@ function MacroBadge({ label, value, unit, color }) {
 function StatCard({ label, value, color }) {
     const colors = { red: 'bg-red-500', purple: 'bg-[#7b2cbf]', teal: 'bg-[#00f5d4]', orange: 'bg-orange-500' };
     return (
-        <motion.div whileHover={{ y: -5 }} className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-4 flex flex-col justify-between h-32 shadow-xl relative overflow-hidden">
-            <div className={`absolute top-0 left-0 w-1 h-full ${colors[color]}`}></div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{label}</p>
-            <h3 className="text-3xl font-black text-white italic">{safe(value)}</h3>
-            <div className={`h-1 w-12 ${colors[color]} rounded opacity-30`}></div>
-        </motion.div>
+        <div className="bg-[#1a1a20] rounded-2xl border border-gray-800 p-3 flex flex-col justify-between h-24 shadow-xl">
+            <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest">{label}</p>
+            <h3 className="text-lg font-black text-white italic truncate">{safe(value)}</h3>
+            <div className={`h-1 w-8 ${colors[color] || 'bg-white'} rounded opacity-30`}></div>
+        </div>
     );
 }

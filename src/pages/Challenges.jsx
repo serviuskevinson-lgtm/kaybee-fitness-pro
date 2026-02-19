@@ -15,17 +15,18 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { 
-  Trophy, Swords, Video, Plus, Gavel, ThumbsUp, ThumbsDown, Crown, Medal, Users, Globe, Trash2, Clock
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Trophy, Swords, Video, Plus, Gavel, ThumbsUp, ThumbsDown, Crown, Medal, Users, Globe, Trash2, Clock, X, Loader2
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { sendNotification } from '@/lib/notifications';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Challenges() {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const { t } = useTranslation();
   
-  // --- ÉTATS ---
   const [arenaMode, setArenaMode] = useState('friends');
   const [activeTab, setActiveTab] = useState('active');
   const [challenges, setChallenges] = useState([]);
@@ -44,27 +45,27 @@ export default function Challenges() {
   const [proofFile, setProofFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // --- 1. CHARGEMENT AMIS & LISTES ---
   useEffect(() => {
-    if (!currentUser) return;
+    if (authLoading || !currentUser?.uid) return;
 
     const fetchFriends = async () => {
-        const qSent = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "accepted"));
-        const qReceived = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "accepted"));
-        const [sentSnap, receivedSnap] = await Promise.all([getDocs(qSent), getDocs(qReceived)]);
-        
-        const ids = new Set();
-        sentSnap.forEach(doc => ids.add(doc.data().toId));
-        receivedSnap.forEach(doc => ids.add(doc.data().fromId));
-        ids.add(currentUser.uid);
-        setFriendIds(Array.from(ids));
+        try {
+            const qSent = query(collection(db, "friend_requests"), where("fromId", "==", currentUser.uid), where("status", "==", "accepted"));
+            const qReceived = query(collection(db, "friend_requests"), where("toId", "==", currentUser.uid), where("status", "==", "accepted"));
+            const [sentSnap, receivedSnap] = await Promise.all([getDocs(qSent), getDocs(qReceived)]);
+
+            const ids = new Set();
+            sentSnap.forEach(doc => ids.add(doc.data().toId));
+            receivedSnap.forEach(doc => ids.add(doc.data().fromId));
+            ids.add(currentUser.uid);
+            setFriendIds(Array.from(ids));
+        } catch (e) { console.error(e); }
     };
     fetchFriends();
 
     const qChallenges = query(collection(db, "challenges"), orderBy("createdAt", "desc"), limit(50));
     const unsubChallenges = onSnapshot(qChallenges, (snapshot) => {
-      const allChallenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setChallenges(allChallenges);
+      setChallenges(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     const qProofs = query(
@@ -77,104 +78,55 @@ export default function Challenges() {
     });
 
     return () => { unsubChallenges(); unsubProofs(); };
-  }, [currentUser]);
+  }, [currentUser?.uid, authLoading]);
 
-  // --- 2. TIMER TICK ---
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 60000); // Mise à jour toutes les minutes
-
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
 
-  // --- 3. AUTO-DELETE EXPIRED CHALLENGES & PROOFS ---
-  useEffect(() => {
-    const checkExpirations = async () => {
-      const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
-
-      // Nettoyage des Challenges expirés
-      const expiredChallenges = challenges.filter(c => {
-        if (!c.createdAt) return false;
-        const createdAt = new Date(c.createdAt.seconds * 1000);
-        return Date.now() > (createdAt.getTime() + oneWeekInMs);
-      });
-
-      for (const chall of expiredChallenges) {
-        try {
-          await deleteDoc(doc(db, "challenges", chall.id));
-          console.log(`Challenge ${chall.id} supprimé car expiré.`);
-        } catch (e) { console.error("Erreur suppression challenge expiré:", e); }
-      }
-
-      // Nettoyage des Preuves (Tribunal) expirées
-      const expiredProofs = pendingProofs.filter(p => {
-        if (!p.createdAt) return false;
-        const createdAt = new Date(p.createdAt.seconds * 1000);
-        return Date.now() > (createdAt.getTime() + oneWeekInMs);
-      });
-
-      for (const proof of expiredProofs) {
-        try {
-          await deleteDoc(doc(db, "challenge_proofs", proof.id));
-          console.log(`Preuve ${proof.id} supprimée du tribunal car expirée.`);
-        } catch (e) { console.error("Erreur suppression preuve expirée:", e); }
-      }
-    };
-
-    if (challenges.length > 0 || pendingProofs.length > 0) {
-      checkExpirations();
-    }
-  }, [challenges, pendingProofs, currentTime]);
-
-  // --- 4. CLASSEMENT ---
   useEffect(() => {
       if (friendIds.length === 0) {
           setLeaderboard([]);
           return;
       }
       const fetchLeaderboard = async () => {
-          const qUsers = query(collection(db, "users"), where("uid", "in", friendIds.slice(0, 10)));
-          const userSnap = await getDocs(qUsers);
-          let friendsData = userSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          friendsData.sort((a, b) => (b.points || 0) - (a.points || 0));
-          setLeaderboard(friendsData.map((u, i) => ({...u, rank: i + 1})));
+          try {
+              const qUsers = query(collection(db, "users"), where("uid", "in", friendIds.slice(0, 10)));
+              const userSnap = await getDocs(qUsers);
+              let friendsData = userSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              friendsData.sort((a, b) => (b.points || 0) - (a.points || 0));
+              setLeaderboard(friendsData.map((u, i) => ({...u, rank: i + 1})));
+          } catch (e) { console.error(e); }
       };
       fetchLeaderboard();
   }, [friendIds]);
 
-  // --- UTILITAIRES ---
   const getUserIdentity = async () => {
+      if (!currentUser?.uid) return "Athlète";
       try {
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
           if (userDoc.exists()) {
               const d = userDoc.data();
               if (d.username) return `@${d.username}`;
-              if (d.first_name) return d.first_name;
-              if (d.firstName) return d.firstName;
+              return d.first_name || d.firstName || "Athlète";
           }
-      } catch (e) { console.error(e); }
+      } catch (e) {}
       return "Athlète";
   };
 
   const getRemainingTime = (timestamp) => {
-      if (!timestamp) return "7j 0h";
+      if (!timestamp) return "7j";
       const createdAt = new Date(timestamp.seconds * 1000);
-      const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
-      const expiresAt = new Date(createdAt.getTime() + oneWeekInMs);
-      const now = new Date(currentTime);
-      const diff = expiresAt - now;
-
-      if (diff <= 0) return "Terminé";
-
+      const expiresAt = new Date(createdAt.getTime() + (7 * 24 * 60 * 60 * 1000));
+      const diff = expiresAt.getTime() - currentTime;
+      if (diff <= 0) return "Fini";
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-      if (days > 0) return `${days}j ${hours}h`;
-      if (hours > 0) return `${hours}h ${minutes}m`;
-      return `${minutes} min`;
+      return `${days}j`;
   };
+
+  if (authLoading) return <div className="h-screen bg-[#0a0a0f] flex items-center justify-center text-[#00f5d4] font-black uppercase animate-pulse">Chargement Arène...</div>;
+  if (!currentUser) return null;
 
   const filteredChallenges = challenges.filter(c => {
       if (arenaMode === 'public') return c.scope === 'public';
@@ -186,11 +138,9 @@ export default function Challenges() {
       return friendIds.includes(p.userId);
   });
 
-  // --- ACTIONS ---
   const handleCreateChallenge = async () => {
     if (!newTitle || !newTarget) return;
     const realName = await getUserIdentity();
-
     await addDoc(collection(db, "challenges"), {
       title: newTitle, target: newTarget, points: parseInt(newPoints),
       creatorId: currentUser.uid, creatorName: realName, 
@@ -204,7 +154,9 @@ export default function Challenges() {
     if (currentParticipants.includes(currentUser.uid)) return;
     await updateDoc(doc(db, "challenges", challengeId), { participants: arrayUnion(currentUser.uid) });
     const realName = await getUserIdentity();
-    await sendNotification(creatorId, currentUser.uid, realName, t('notif_new_challenger'), `${realName} ${t('notif_joined_challenge')}`, "friend_request");
+    try {
+        await sendNotification(creatorId, currentUser.uid, realName, "Nouveau défi !", `${realName} participe à ton défi.`, "challenge");
+    } catch(e) {}
   };
 
   const submitProof = async () => {
@@ -215,227 +167,166 @@ export default function Challenges() {
       await uploadBytes(storageRef, proofFile);
       const url = await getDownloadURL(storageRef);
       const realName = await getUserIdentity();
-
       await addDoc(collection(db, "challenge_proofs"), {
         challengeId: selectedChallenge.id, challengeTitle: selectedChallenge.title, challengePoints: selectedChallenge.points,
         userId: currentUser.uid, userName: realName, mediaUrl: url, type: proofFile.type.startsWith('video') ? 'video' : 'image',
         status: "pending_validation", votes_valid: 0, votes_invalid: 0, voters: [], createdAt: serverTimestamp()
       });
-
-      await sendNotification(selectedChallenge.creatorId, currentUser.uid, realName, t('notif_proof_received'), `${realName} a envoyé une preuve.`, "challenge");
-      alert(t('success')); setSelectedChallenge(null); setProofFile(null); setActiveTab('tribunal'); 
+      alert("Performance envoyée au tribunal !"); setSelectedChallenge(null); setProofFile(null);
     } catch (e) { console.error(e); }
     setIsUploading(false);
   };
 
-  const deleteProof = async (proofId) => {
-      if(!window.confirm("Supprimer cette preuve ?")) return;
-      try { await deleteDoc(doc(db, "challenge_proofs", proofId)); } catch (e) { console.error(e); }
-  };
-
   const handleVote = async (proof, verdict) => {
-    if (proof.userId === currentUser.uid) { alert("Pas de vote pour soi-même !"); return; }
-    if (proof.voters?.includes(currentUser.uid)) { alert("Déjà voté !"); return; }
-
+    if (proof.userId === currentUser.uid || proof.voters?.includes(currentUser.uid)) return;
     const proofRef = doc(db, "challenge_proofs", proof.id);
     await updateDoc(proofRef, {
       votes_valid: verdict === 'valid' ? increment(1) : increment(0),
       votes_invalid: verdict === 'invalid' ? increment(1) : increment(0),
       voters: arrayUnion(currentUser.uid)
     });
-    
-    if (verdict === 'valid') {
-        await updateDoc(doc(db, "users", proof.userId), { points: increment(5) });
-    }
-
-    await sendNotification(proof.userId, currentUser.uid, "Juge", t('notif_vote_received'), t('notif_vote_desc'), "vote");
-
     if (verdict === 'valid' && (proof.votes_valid + 1) >= 3) {
       await updateDoc(proofRef, { status: 'validated' });
       await updateDoc(doc(db, "users", proof.userId), { points: increment(proof.challengePoints) });
       await updateDoc(doc(db, "challenges", proof.challengeId), { completions: arrayUnion(proof.userId) });
-      
-      await sendNotification(proof.userId, "system", "Système", t('notif_challenge_validated'), `Victoire ! +${proof.challengePoints} XP.`, "achievement");
-    } else if (verdict === 'invalid' && (proof.votes_invalid + 1) >= 3) {
-      await updateDoc(proofRef, { status: 'rejected' });
-      await sendNotification(proof.userId, "system", "Système", t('notif_challenge_rejected'), "Preuve rejetée par le tribunal.", "info");
     }
   };
 
   return (
-    <div className="space-y-8 pb-20">
-      {/* HEADER AVEC TOGGLE ARÈNE */}
-      <div className="relative overflow-hidden bg-[#1a1a20] p-6 rounded-3xl border border-gray-800 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-[#7b2cbf]/20 to-transparent pointer-events-none"></div>
-        <div className="relative z-10 text-center md:text-left">
-          <h1 className="text-3xl font-black italic uppercase text-white flex items-center justify-center md:justify-start gap-3">
-            <Swords className="text-[#00f5d4] w-8 h-8"/> {t('challenges_arena')}
-          </h1>
-          <p className="text-gray-400 text-sm mt-1">{t('challenges_subtitle')}</p>
+    <div className="p-2 sm:p-4 bg-[#0a0a0f] min-h-screen text-white pb-32 overflow-x-hidden">
+      <div className="relative overflow-hidden bg-[#1a1a20] p-5 rounded-2xl border border-gray-800 flex flex-col gap-4 mb-6 shadow-xl">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <Swords className="text-[#00f5d4] size-6"/>
+            <h1 className="text-xl font-black italic uppercase tracking-tighter">ARÈNE</h1>
+          </div>
+          <Button size="sm" onClick={() => setIsCreateOpen(true)} className="bg-[#00f5d4] text-black font-black uppercase text-[10px] h-8 rounded-lg px-4 shadow-lg shadow-[#00f5d4]/20 active:scale-95 transition-all"><Plus size={14} className="mr-1"/> CRÉER</Button>
         </div>
-        <div className="relative z-10 bg-black/40 p-1.5 rounded-full border border-gray-700 flex">
-            <button onClick={() => setArenaMode('friends')} className={`flex items-center gap-2 px-6 py-2 rounded-full text-xs font-bold transition-all ${arenaMode === 'friends' ? 'bg-[#7b2cbf] text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}><Users size={14} /> Amis</button>
-            <button onClick={() => setArenaMode('public')} className={`flex items-center gap-2 px-6 py-2 rounded-full text-xs font-bold transition-all ${arenaMode === 'public' ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}><Globe size={14} /> Public</button>
-        </div>
-        <div className="relative z-10">
-           <Button onClick={() => setIsCreateOpen(true)} className="bg-[#00f5d4] text-black font-black hover:scale-105 transition-transform shadow-[0_0_15px_rgba(0,245,212,0.3)]"><Plus className="mr-2 h-5 w-5"/> {t('launch_challenge')}</Button>
+        <div className="flex bg-black/40 p-1 rounded-xl border border-gray-800">
+            <button onClick={() => setArenaMode('friends')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${arenaMode === 'friends' ? 'bg-[#7b2cbf] text-white shadow-lg' : 'text-gray-500'}`}><Users size={12} /> Amis</button>
+            <button onClick={() => setArenaMode('public')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${arenaMode === 'public' ? 'bg-[#00f5d4] text-black shadow-lg' : 'text-gray-500'}`}><Globe size={12} /> Public</button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-[#1a1a20] border-gray-800 p-1 w-full justify-start">
-              <TabsTrigger value="active" className="text-white data-[state=active]:bg-[#7b2cbf] flex-1">🔥 {t('active_challenges')}</TabsTrigger>
-              <TabsTrigger value="tribunal" className="text-white data-[state=active]:bg-red-600 relative flex-1">
-                ⚖️ {t('tribunal')}
-                {filteredProofs.length > 0 && <span className="absolute top-1 right-2 w-2 h-2 bg-[#00f5d4] rounded-full animate-ping"/>}
+            <TabsList className="bg-black/40 border border-gray-800 p-1 w-full flex rounded-xl">
+              <TabsTrigger value="active" className="flex-1 rounded-lg data-[state=active]:bg-[#7b2cbf] text-[10px] font-black uppercase">DÉFIS</TabsTrigger>
+              <TabsTrigger value="tribunal" className="flex-1 rounded-lg data-[state=active]:bg-red-600 text-[10px] font-black uppercase relative">
+                TRIBUNAL
+                {filteredProofs.length > 0 && <span className="absolute -top-1 -right-1 size-3 bg-[#00f5d4] rounded-full animate-pulse border-2 border-[#0a0a0f]"/>}
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="active" className="space-y-4 mt-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <TabsContent value="active" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                 {filteredChallenges.map((challenge) => {
                   const isParticipant = challenge.participants?.includes(currentUser.uid);
                   const isCompleted = challenge.completions?.includes(currentUser.uid);
-                  const creatorFirstName = challenge.creatorName || t('unknown');
                   return (
-                    <Card key={challenge.id} className={`kb-card border-l-4 ${isCompleted ? 'border-l-green-500 opacity-75' : 'border-l-[#00f5d4]'} bg-[#1a1a20]`}>
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
-                          <Badge className="bg-[#7b2cbf] text-white border-none">{challenge.points} XP</Badge>
-                          <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30 bg-yellow-500/10 flex items-center gap-1"><Clock size={10}/> {getRemainingTime(challenge.createdAt)}</Badge>
+                    <Card key={challenge.id} className={`bg-[#1a1a20] border-gray-800 rounded-2xl overflow-hidden flex flex-col relative transition-all ${isCompleted ? 'opacity-60 grayscale' : 'border-l-4 border-l-[#00f5d4]'}`}>
+                      <CardHeader className="p-4 pb-2">
+                        <div className="flex justify-between items-start mb-2">
+                          <Badge className="bg-[#7b2cbf] text-[8px] font-black px-1.5 py-0.5">{challenge.points} XP</Badge>
+                          <p className="text-[8px] text-yellow-500 font-bold uppercase flex items-center gap-1"><Clock size={8}/> {getRemainingTime(challenge.createdAt)}</p>
                         </div>
-                        <CardTitle className="text-lg font-black text-white uppercase italic leading-tight mt-2">{challenge.title}</CardTitle>
-                        <p className="text-xs text-gray-400">{t('target')} : <span className="text-white font-bold">{challenge.target}</span></p>
+                        <CardTitle className="text-sm font-black text-white uppercase italic truncate">{challenge.title}</CardTitle>
+                        <p className="text-[9px] text-gray-500 mt-1 uppercase font-bold tracking-widest">{challenge.target}</p>
                       </CardHeader>
-                      <CardContent>
-                        <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
-                          <Avatar className="w-5 h-5"><AvatarFallback>{creatorFirstName[0]}</AvatarFallback></Avatar>
-                          <span>{t('by')} {creatorFirstName} • {challenge.participants?.length || 0} {t('participants')}</span>
+                      <CardContent className="p-4 pt-0 mt-auto">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Avatar className="size-5 border border-gray-800"><AvatarFallback className="text-[7px] font-black uppercase">{(challenge.creatorName || "?")[0]}</AvatarFallback></Avatar>
+                          <span className="text-[8px] text-gray-600 font-bold uppercase truncate max-w-[150px]">{challenge.creatorName || "Athlete"} • {challenge.participants?.length || 0} PARTICIPANTS</span>
                         </div>
                         {!isParticipant ? (
-                          <Button size="sm" onClick={() => joinChallenge(challenge.id, challenge.creatorId, challenge.participants)} className="w-full bg-white/10 text-white hover:bg-[#00f5d4] hover:text-black font-bold">{t('accept')}</Button>
+                          <Button size="sm" onClick={() => joinChallenge(challenge.id, challenge.creatorId, challenge.participants)} className="w-full bg-white/5 text-white h-8 text-[9px] font-black uppercase border border-white/10 hover:bg-[#00f5d4] hover:text-black">REJOINDRE</Button>
                         ) : isCompleted ? (
-                          <Button size="sm" disabled className="w-full bg-green-500/20 text-green-500 border border-green-500 font-bold">{t('validated')} ✅</Button>
+                          <div className="w-full bg-green-500/10 text-green-500 border border-green-500/30 text-[9px] font-black py-2 rounded-lg text-center italic">VALIDÉ ✅</div>
                         ) : (
-                          <Button size="sm" onClick={() => setSelectedChallenge(challenge)} className="w-full bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf] text-black font-bold"><Video size={14} className="mr-2"/> {t('proof')}</Button>
+                          <Button size="sm" onClick={() => setSelectedChallenge(challenge)} className="w-full bg-gradient-to-r from-[#00f5d4] to-[#7b2cbf] text-black h-8 text-[9px] font-black uppercase italic shadow-lg shadow-[#00f5d4]/20"><Video size={12} className="mr-1.5"/> ENVOYER PREUVE</Button>
                         )}
                       </CardContent>
                     </Card>
                   );
                 })}
-                {filteredChallenges.length === 0 && (
-                    <div className="col-span-full py-12 text-center text-gray-500 bg-[#1a1a20] rounded-xl border border-dashed border-gray-800">
-                        <Swords size={40} className="mx-auto mb-2 opacity-20"/>
-                        <p>Aucun défi dans l'arène {arenaMode === 'public' ? 'Publique' : 'Amis'}.</p>
-                    </div>
-                )}
-              </div>
             </TabsContent>
 
-            <TabsContent value="tribunal" className="space-y-4 mt-4">
-               {filteredProofs.length > 0 ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <TabsContent value="tribunal" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                    {filteredProofs.map((proof) => {
-                     const proofUserName = proof.userName || t('unknown');
                      const isMyProof = proof.userId === currentUser.uid;
+                     const hasVoted = proof.voters?.includes(currentUser.uid);
                      return (
-                      <Card key={proof.id} className="kb-card bg-[#1a1a20] border-gray-800 relative group">
-                        {isMyProof && (
-                            <button onClick={() => deleteProof(proof.id)} className="absolute top-2 right-2 z-20 bg-red-600/80 p-1.5 rounded-full text-white hover:bg-red-500 transition opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
-                        )}
-                        <div className="aspect-video bg-black relative flex items-center justify-center">
-                          {proof.type === 'video' ? <video src={proof.mediaUrl} controls className="w-full h-full object-contain"/> : <img src={proof.mediaUrl} className="w-full h-full object-contain" style={{ objectFit: 'cover' }}/>}
+                      <Card key={proof.id} className="bg-[#1a1a20] border-gray-800 rounded-2xl overflow-hidden flex flex-col relative group">
+                        <div className="aspect-[4/3] bg-black relative flex items-center justify-center">
+                          {proof.type === 'video' ? <video src={proof.mediaUrl} controls className="w-full h-full object-cover"/> : <img src={proof.mediaUrl} className="w-full h-full object-cover" loading="lazy"/>}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60" />
+                          <div className="absolute bottom-2 left-2 right-2 flex justify-between items-end">
+                             <div className="min-w-0 flex-1"><p className="text-white font-black text-[10px] uppercase italic leading-tight truncate">{proof.userName || "Athlete"}</p><p className="text-[8px] text-gray-400 font-bold truncate">{proof.challengeTitle}</p></div>
+                             <Badge variant="outline" className="text-[8px] border-white/20 text-white bg-black/40 shrink-0">{proof.challengePoints} XP</Badge>
+                          </div>
                         </div>
                         <CardContent className="p-3">
-                          <div className="flex justify-between items-start mb-2">
-                            <div><h4 className="font-bold text-white text-sm">{proofUserName}</h4><p className="text-[10px] text-gray-400">{t('challenge')}: {proof.challengeTitle}</p></div>
-                            <Badge variant="outline" className="text-[10px]">{proof.challengePoints} XP</Badge>
-                          </div>
                           <div className="flex gap-2">
-                            <Button size="sm" onClick={() => handleVote(proof, 'invalid')} disabled={isMyProof} variant="outline" className="flex-1 border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white disabled:opacity-50"><ThumbsDown size={14}/></Button>
-                            <Button size="sm" onClick={() => handleVote(proof, 'valid')} disabled={isMyProof} className="flex-1 bg-[#00f5d4] text-black hover:bg-[#00f5d4]/80 disabled:opacity-50"><ThumbsUp size={14}/></Button>
+                            <Button size="sm" onClick={() => handleVote(proof, 'invalid')} disabled={isMyProof || hasVoted} variant="ghost" className="flex-1 h-9 rounded-lg bg-red-500/10 text-red-500 border border-red-500/20"><ThumbsDown size={14}/></Button>
+                            <Button size="sm" onClick={() => handleVote(proof, 'valid')} disabled={isMyProof || hasVoted} variant="ghost" className="flex-1 h-9 rounded-lg bg-[#00f5d4]/10 text-[#00f5d4] border border-[#00f5d4]/20"><ThumbsUp size={14}/></Button>
                           </div>
                         </CardContent>
                       </Card>
                      );
                    })}
-                 </div>
-               ) : (
-                 <div className="text-center py-10 text-gray-500 bg-[#1a1a20] rounded-xl border border-gray-800 border-dashed"><Gavel size={32} className="mx-auto mb-2 opacity-30"/><p>{t('no_proofs')}</p></div>
-               )}
             </TabsContent>
           </Tabs>
         </div>
 
-        <div className="lg:col-span-1">
-          <div className="sticky top-4">
-            <Card className="kb-card bg-[#1a1a20] border-gray-800 shadow-2xl overflow-hidden">
-              <CardHeader className="bg-gradient-to-b from-[#ffd700]/10 to-transparent pb-4"><CardTitle className="text-[#ffd700] uppercase italic flex items-center gap-2"><Crown size={20} className="fill-[#ffd700]"/> {t('top_elite')} ({arenaMode === 'public' ? 'Monde' : 'Amis'})</CardTitle></CardHeader>
+        <div className="space-y-6">
+            <Card className="bg-[#1a1a20] border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+              <CardHeader className="bg-gradient-to-br from-[#ffd700]/10 to-transparent p-4 border-b border-white/5">
+                <CardTitle className="text-sm font-black italic uppercase text-[#ffd700] flex items-center gap-2 tracking-widest"><Crown size={16} className="fill-[#ffd700]"/> TOP ATHLÈTES</CardTitle>
+              </CardHeader>
               <CardContent className="p-0">
-                {leaderboard.length > 0 ? (
-                    <div className="divide-y divide-gray-800">
-                      {leaderboard.map((user, index) => {
-                        const userFirstName = user.username ? `@${user.username}` : (user.first_name || user.firstName || "Inconnu");
-                        const initial = userFirstName[0]?.toUpperCase() || 'U';
-                        return (
-                        <div key={user.id} className={`flex items-center justify-between p-3 hover:bg-white/5 transition ${currentUser.uid === user.id ? 'bg-[#7b2cbf]/20' : ''}`}>
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${index === 0 ? 'bg-[#ffd700] text-black' : index === 1 ? 'bg-gray-300 text-black' : index === 2 ? 'bg-[#cd7f32] text-white' : 'text-gray-500 font-mono'}`}>{user.rank}</div>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="w-8 h-8 border border-gray-700"><AvatarImage src={user.avatar} style={{ objectFit: 'cover' }}/><AvatarFallback className="text-xs bg-gray-900 text-gray-400">{initial}</AvatarFallback></Avatar>
-                              <div className="overflow-hidden"><p className={`font-bold text-sm truncate w-24 ${index === 0 ? 'text-[#ffd700]' : 'text-white'}`}>{userFirstName}</p><p className="text-[10px] text-gray-500">Lvl {Math.floor((user.points || 0) / 1000) + 1}</p></div>
-                            </div>
-                          </div>
-                          <div className="text-right"><p className="font-black text-white text-sm">{user.points || 0}</p><p className="text-[8px] text-gray-500 uppercase">XP</p></div>
-                        </div>
-                        );
-                      })}
+                {leaderboard.map((user, index) => (
+                  <div key={user.id} className={`flex items-center justify-between p-3 border-b border-white/5 last:border-0 ${currentUser.uid === user.id ? 'bg-[#00f5d4]/5' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs font-black italic w-4 ${index === 0 ? 'text-[#ffd700]' : 'text-gray-600'}`}>{index + 1}</span>
+                      <Avatar className="size-8 border border-gray-800"><AvatarImage src={user.avatar} className="object-cover"/><AvatarFallback className="text-[10px] bg-black text-white font-black">{(user.full_name || user.username || "?")[0]}</AvatarFallback></Avatar>
+                      <div className="min-w-0"><p className={`text-[11px] font-black uppercase italic truncate max-w-[80px] ${index === 0 ? 'text-[#ffd700]' : 'text-white'}`}>{user.full_name || user.username || "Athlete"}</p><p className="text-[8px] text-gray-600 font-bold uppercase">Lvl {Math.floor((user.points || 0) / 1000) + 1}</p></div>
                     </div>
-                ) : (
-                    <div className="p-8 text-center text-gray-500"><Users className="mx-auto mb-2 opacity-30"/><p className="text-xs">{t('no_friends_leaderboard')}</p></div>
-                )}
+                    <div className="text-right shrink-0"><p className="text-xs font-black text-white">{user.points || 0}</p><p className="text-[7px] text-gray-600 uppercase font-black">PTS</p></div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
-            <div className="mt-6 p-4 rounded-xl bg-gradient-to-br from-[#7b2cbf] to-[#9d4edd] text-center">
-              <Medal className="mx-auto text-white mb-2 w-8 h-8"/>
-              <p className="text-white font-bold text-sm">{t('next_level')} : {Math.floor((currentUser.points || 0) / 1000) + 2}</p>
-              <div className="w-full bg-black/30 h-1.5 rounded-full mt-2 overflow-hidden"><div className="bg-white h-full" style={{ width: `${((currentUser.points || 0) % 1000) / 10}%` }}></div></div>
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* CREATE MODAL */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
-          <DialogHeader><DialogTitle className="uppercase text-[#00f5d4]">{t('launch_challenge')}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <Input placeholder={t('title')} className="bg-black border-gray-700" value={newTitle} onChange={e => setNewTitle(e.target.value)}/>
-            <Input placeholder={t('objective')} className="bg-black border-gray-700" value={newTarget} onChange={e => setNewTarget(e.target.value)}/>
-            <Input type="number" placeholder="XP" className="bg-black border-gray-700" value={newPoints} onChange={e => setNewPoints(e.target.value)}/>
-            <div className="bg-black/30 p-4 rounded-lg border border-gray-700">
-                <p className="text-xs font-bold text-gray-400 mb-2 uppercase">Visibilité du défi</p>
-                <RadioGroup defaultValue="friends" onValueChange={setNewScope} className="flex gap-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="friends" id="r1" className="border-[#00f5d4] text-[#00f5d4]"/><Label htmlFor="r1" className="text-white cursor-pointer">Amis Seulement</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="public" id="r2" className="border-[#00f5d4] text-[#00f5d4]"/><Label htmlFor="r2" className="text-white cursor-pointer">Monde Entier</Label></div>
-                </RadioGroup>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-2xl w-[95vw] sm:max-w-md p-6 shadow-3xl">
+          <DialogHeader><DialogTitle className="text-lg font-black italic uppercase text-[#00f5d4] tracking-tighter">NOUVEAU DÉFI</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1"><Label className="text-[10px] font-black text-gray-500 uppercase">Titre</Label><Input placeholder="Ex: 50 Pompes" className="bg-black border-gray-800 text-xs h-10" value={newTitle} onChange={e => setNewTitle(e.target.value)}/></div>
+            <div className="space-y-1"><Label className="text-[10px] font-black text-gray-500 uppercase">Objectif</Label><Input placeholder="Ex: En moins de 1min" className="bg-black border-gray-800 text-xs h-10" value={newTarget} onChange={e => setNewTarget(e.target.value)}/></div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1"><Label className="text-[10px] font-black text-gray-500 uppercase">Points XP</Label><Input type="number" className="bg-black border-gray-800 text-xs h-10" value={newPoints} onChange={e => setNewPoints(e.target.value)}/></div>
+                <div className="space-y-1"><Label className="text-[10px] font-black text-gray-500 uppercase">Portée</Label><Select value={newScope} onValueChange={setNewScope}><SelectTrigger className="bg-black border-gray-800 h-10 text-[10px]"><SelectValue /></SelectTrigger><SelectContent className="bg-[#1a1a20] border-gray-800 text-white"><SelectItem value="friends" className="text-xs">Amis</SelectItem><SelectItem value="public" className="text-xs">Public</SelectItem></SelectContent></Select></div>
             </div>
-            <Button onClick={handleCreateChallenge} className="w-full bg-[#7b2cbf] hover:bg-[#9d4edd] font-black mt-2">{t('publish')}</Button>
+            <Button onClick={handleCreateChallenge} className="w-full bg-[#7b2cbf] text-white font-black uppercase text-xs h-12 rounded-xl mt-4 italic">LANCER 🔥</Button>
           </div>
         </DialogContent>
       </Dialog>
 
+      {/* PROOF MODAL */}
       <Dialog open={!!selectedChallenge} onOpenChange={() => setSelectedChallenge(null)}>
-        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white">
-          <DialogHeader><DialogTitle className="uppercase text-[#00f5d4]">{t('video_proof')}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4 text-center">
-            <div className="border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center">
-               <Video size={32} className="text-gray-500 mb-2"/>
-               <p className="text-xs text-gray-400 mb-4">{t('for')} : <span className="text-white font-bold">{selectedChallenge?.title}</span></p>
-               <Input type="file" accept="video/*,image/*" className="hidden" id="proof-upload" onChange={(e) => setProofFile(e.target.files[0])}/>
-               <Button variant="outline" size="sm" onClick={() => document.getElementById('proof-upload').click()}>{proofFile ? proofFile.name : t('choose_file')}</Button>
+        <DialogContent className="bg-[#1a1a20] border-gray-800 text-white rounded-2xl w-[95vw] sm:max-w-sm p-6 shadow-3xl">
+          <DialogHeader><DialogTitle className="text-lg font-black italic uppercase text-center tracking-tighter">ENVOYER PREUVE</DialogTitle></DialogHeader>
+          <div className="space-y-6 py-2 text-center">
+            <div className="border-2 border-dashed border-gray-800 rounded-2xl p-8 flex flex-col items-center justify-center bg-black/20 relative cursor-pointer">
+               <Video size={40} className="text-gray-700 mb-2"/>
+               <p className="text-[10px] text-gray-500 font-bold uppercase mb-4 italic">Vidéo ou Photo</p>
+               <input type="file" accept="video/*,image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => setProofFile(e.target.files[0])}/>
+               <Button variant="outline" className={`h-10 text-[10px] uppercase font-black rounded-xl ${proofFile ? 'border-[#00f5d4] text-[#00f5d4]' : 'border-gray-700'}`}>{proofFile ? proofFile.name.slice(0, 15) + '...' : "CHOISIR"}</Button>
             </div>
-            <Button onClick={submitProof} disabled={!proofFile || isUploading} className="w-full bg-[#00f5d4] text-black font-black">{isUploading ? "..." : t('send')}</Button>
+            <Button onClick={submitProof} disabled={!proofFile || isUploading} className="w-full bg-[#00f5d4] text-black font-black uppercase italic h-12 rounded-xl text-xs">{isUploading ? <Loader2 className="animate-spin" size={18}/> : "VALIDER"}</Button>
           </div>
         </DialogContent>
       </Dialog>
