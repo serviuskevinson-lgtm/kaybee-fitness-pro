@@ -99,6 +99,9 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private var isResting by mutableStateOf(false)
     private var restTimer: CountDownTimer? = null
 
+    // Run Session
+    private var isRunningActive by mutableStateOf(false)
+
     private lateinit var sensorManager: SensorManager
     private lateinit var healthManager: HealthManager
 
@@ -133,6 +136,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 isCoach = isCoach,
                 activeSession = activeSession, sessionDuration = sessionDurationSeconds,
                 restTime = restTimeLeft, isResting = isResting,
+                isRunningActive = isRunningActive,
                 isPhoneConnected = isPhoneConnected, firebaseSocketConnected = firebaseSocketConnected,
                 firebaseDataFound = firebaseDataFound, lastSync = lastFirebaseSync, currentUid = currentUserId ?: "N/A",
                 accel = Triple(accelX, accelY, accelZ),
@@ -141,7 +145,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 onStopSession = { stopSessionLocally() },
                 onUpdateSet = { groupIdx, exoIdx, setIdx, weight, reps, done -> updateSetData(groupIdx, exoIdx, setIdx, weight, reps, done) },
                 onAdjustWeight = { groupIdx, exoIdx, setIdx, delta -> adjustWeight(groupIdx, exoIdx, setIdx, delta) },
-                onRetryPair = { requestAutoPairing() }
+                onRetryPair = { requestAutoPairing() },
+                onToggleRun = { isRunningActive = !isRunningActive }
             )
         }
         checkAndRequestPermissions()
@@ -409,12 +414,14 @@ fun WearApp(
     heartRate: Int, stepCount: Int, calories: Int, nutrition: NutritionData, water: Double,
     weeklySummary: List<ScheduleDay>, isCoach: Boolean,
     activeSession: SessionData?, sessionDuration: Long, restTime: Int, isResting: Boolean,
+    isRunningActive: Boolean,
     isPhoneConnected: Boolean, firebaseSocketConnected: Boolean, firebaseDataFound: Boolean,
     lastSync: String, currentUid: String, accel: Triple<Float, Float, Float>,
     onAddWater: (Double) -> Unit, onStartRest: (Int) -> Unit, onStopSession: () -> Unit,
     onUpdateSet: (Int, Int, Int, Float, Int, Boolean) -> Unit,
     onAdjustWeight: (Int, Int, Int, Float) -> Unit,
-    onRetryPair: () -> Unit
+    onRetryPair: () -> Unit,
+    onToggleRun: () -> Unit
 ) {
     val pagerState = rememberPagerState(pageCount = { 5 })
     var showDebug by remember { mutableStateOf(false) }
@@ -424,7 +431,7 @@ fun WearApp(
             HorizontalPager(state = pagerState) { page ->
                 when (page) {
                     0 -> DashboardPage(heartRate, stepCount, calories, water, onAddWater, onLongClick = { showDebug = true })
-                    1 -> RunScreen(heartRate, stepCount, calories)
+                    1 -> RunScreen(heartRate, stepCount, calories, isRunningActive, onToggleRun)
                     2 -> SessionPage(activeSession, sessionDuration, restTime, isResting, onUpdateSet, onAdjustWeight)
                     3 -> NutritionPage(nutrition)
                     4 -> AgendaScreen(weeklySummary)

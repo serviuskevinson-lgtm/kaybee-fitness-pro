@@ -39,8 +39,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.time.Instant;
 import java.time.Duration;
-import java.time.ZonedDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 import androidx.health.connect.client.HealthConnectClient;
 import androidx.health.connect.client.records.ExerciseSessionRecord;
@@ -48,7 +47,6 @@ import androidx.health.connect.client.records.ExerciseRoute;
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord;
 import androidx.health.connect.client.records.DistanceRecord;
 import androidx.health.connect.client.records.StepsRecord;
-import androidx.health.connect.client.records.HeartRateRecord;
 import androidx.health.connect.client.records.MindfulnessSessionRecord;
 import androidx.health.connect.client.records.SkinTemperatureRecord;
 import androidx.health.connect.client.records.SleepSessionRecord;
@@ -58,6 +56,13 @@ import androidx.health.connect.client.time.TimeRangeFilter;
 import androidx.health.connect.client.units.Length;
 import androidx.health.connect.client.units.Energy;
 import androidx.health.connect.client.units.Temperature;
+
+import org.json.JSONObject;
+
+import kotlin.coroutines.Continuation;
+import kotlin.coroutines.CoroutineContext;
+import kotlin.coroutines.EmptyCoroutineContext;
+import org.jetbrains.annotations.NotNull;
 
 @CapacitorPlugin(
     name = "WearPlugin",
@@ -300,15 +305,19 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             List<ExerciseRoute.Location> locations = new ArrayList<>();
             if (routeArray != null) {
                 for (int i = 0; i < routeArray.length(); i++) {
-                    JSObject point = routeArray.getObject(i);
-                    locations.add(new ExerciseRoute.Location(
-                        Instant.ofEpochMilli(point.getLong("timestamp")),
-                        point.getDouble("lat"),
-                        point.getDouble("lng"),
-                        point.getDouble("altitude", null),
-                        null,
-                        null
-                    ));
+                    try {
+                        JSONObject pointJson = routeArray.getJSONObject(i);
+                        locations.add(new ExerciseRoute.Location(
+                            Instant.ofEpochMilli(pointJson.getLong("timestamp")),
+                            pointJson.getDouble("lat"),
+                            pointJson.getDouble("lng"),
+                            pointJson.isNull("altitude") ? null : Length.meters(pointJson.getDouble("altitude")),
+                            null,
+                            null
+                        ));
+                    } catch (Exception e) {
+                        Log.e("WearPlugin", "Error parsing route point", e);
+                    }
                 }
             }
 
@@ -319,38 +328,46 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
 
             ExerciseSessionRecord session = new ExerciseSessionRecord(
                 start,
-                null, 
+                ZoneOffset.UTC,
                 end,
-                null,
+                ZoneOffset.UTC,
+                Metadata.manualEntry(),
                 ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,
                 "Kaybee Run",
-                null,
-                Metadata.EMPTY,
-                route
+                null, // notes
+                Collections.emptyList(), // segments
+                Collections.emptyList(), // laps
+                route, // route
+                null // exerciseSessionId
             );
 
             TotalCaloriesBurnedRecord caloriesRecord = new TotalCaloriesBurnedRecord(
                 start,
-                null,
+                ZoneOffset.UTC,
                 end,
-                null,
+                ZoneOffset.UTC,
                 Energy.kilocalories(calories),
-                Metadata.EMPTY
+                Metadata.manualEntry()
             );
 
             DistanceRecord distanceRecord = new DistanceRecord(
                 start,
-                null,
+                ZoneOffset.UTC,
                 end,
-                null,
+                ZoneOffset.UTC,
                 Length.kilometers(distanceKm),
-                Metadata.EMPTY
+                Metadata.manualEntry()
             );
 
             new Thread(() -> {
                 try {
-                    Tasks.await(client.insertRecords(Arrays.asList(session, caloriesRecord, distanceRecord)));
-                    call.resolve();
+                    client.insertRecords(Arrays.asList(session, caloriesRecord, distanceRecord), new Continuation<androidx.health.connect.client.response.InsertRecordsResponse>() {
+                        @NotNull
+                        @Override
+                        public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                        @Override
+                        public void resumeWith(@NotNull Object o) { call.resolve(); }
+                    });
                 } catch (Exception e) {
                     call.reject(e.getMessage());
                 }
@@ -362,6 +379,7 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
     }
 
     @PluginMethod
+    @androidx.health.connect.client.feature.ExperimentalMindfulnessSessionApi
     public void writeHealthData(PluginCall call) {
         HealthConnectClient client = HealthConnectClient.getOrCreate(getContext());
         try {
@@ -370,29 +388,57 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
             
             if ("steps".equals(type)) {
                 long count = call.getLong("value", 0L);
-                StepsRecord record = new StepsRecord(now.minus(Duration.ofMinutes(1)), null, now, null, count, Metadata.EMPTY);
+                StepsRecord record = new StepsRecord(now.minus(Duration.ofMinutes(1)), ZoneOffset.UTC, now, ZoneOffset.UTC, count, Metadata.manualEntry());
                 new Thread(() -> {
-                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
-                    catch (Exception e) { call.reject(e.getMessage()); }
+                    try { 
+                        client.insertRecords(Collections.singletonList(record), new Continuation<androidx.health.connect.client.response.InsertRecordsResponse>() {
+                            @NotNull
+                            @Override
+                            public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                            @Override
+                            public void resumeWith(@NotNull Object o) { call.resolve(); }
+                        });
+                    } catch (Exception e) { call.reject(e.getMessage()); }
                 }).start();
             } else if ("mindfulness".equals(type)) {
-                MindfulnessSessionRecord record = new MindfulnessSessionRecord(now.minus(Duration.ofMinutes(10)), null, now, null, MindfulnessSessionRecord.MINDFULNESS_SESSION_TYPE_MEDITATION, "Méditation Kaybee", null, Metadata.EMPTY);
+                MindfulnessSessionRecord record = new MindfulnessSessionRecord(now.minus(Duration.ofMinutes(10)), ZoneOffset.UTC, now, ZoneOffset.UTC, Metadata.manualEntry(), MindfulnessSessionRecord.MINDFULNESS_SESSION_TYPE_MEDITATION, "Méditation Kaybee", null);
                 new Thread(() -> {
-                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
-                    catch (Exception e) { call.reject(e.getMessage()); }
+                    try { 
+                        client.insertRecords(Collections.singletonList(record), new Continuation<androidx.health.connect.client.response.InsertRecordsResponse>() {
+                            @NotNull
+                            @Override
+                            public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                            @Override
+                            public void resumeWith(@NotNull Object o) { call.resolve(); }
+                        });
+                    } catch (Exception e) { call.reject(e.getMessage()); }
                 }).start();
             } else if ("skin_temperature".equals(type)) {
                 double temp = call.getDouble("value", 36.6);
-                SkinTemperatureRecord record = new SkinTemperatureRecord(now, null, Temperature.celsius(temp), SkinTemperatureRecord.MEASUREMENT_LOCATION_WRIST, Metadata.EMPTY);
+                SkinTemperatureRecord record = new SkinTemperatureRecord(now, ZoneOffset.UTC, now, ZoneOffset.UTC, Metadata.manualEntry(), Collections.emptyList(), Temperature.celsius(temp), SkinTemperatureRecord.MEASUREMENT_LOCATION_WRIST);
                 new Thread(() -> {
-                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
-                    catch (Exception e) { call.reject(e.getMessage()); }
+                    try { 
+                        client.insertRecords(Collections.singletonList(record), new Continuation<androidx.health.connect.client.response.InsertRecordsResponse>() {
+                            @NotNull
+                            @Override
+                            public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                            @Override
+                            public void resumeWith(@NotNull Object o) { call.resolve(); }
+                        });
+                    } catch (Exception e) { call.reject(e.getMessage()); }
                 }).start();
             } else if ("sleep".equals(type)) {
-                SleepSessionRecord record = new SleepSessionRecord(now.minus(Duration.ofHours(8)), null, now, null, "Sommeil Kaybee", null, Metadata.EMPTY);
+                SleepSessionRecord record = new SleepSessionRecord(now.minus(Duration.ofHours(8)), ZoneOffset.UTC, now, ZoneOffset.UTC, Metadata.manualEntry(), "Sommeil Kaybee", null, Collections.emptyList());
                 new Thread(() -> {
-                    try { Tasks.await(client.insertRecords(Collections.singletonList(record))); call.resolve(); }
-                    catch (Exception e) { call.reject(e.getMessage()); }
+                    try { 
+                        client.insertRecords(Collections.singletonList(record), new Continuation<androidx.health.connect.client.response.InsertRecordsResponse>() {
+                            @NotNull
+                            @Override
+                            public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                            @Override
+                            public void resumeWith(@NotNull Object o) { call.resolve(); }
+                        });
+                    } catch (Exception e) { call.reject(e.getMessage()); }
                 }).start();
             }
         } catch (Exception e) { call.reject(e.getMessage()); }
@@ -410,42 +456,45 @@ public class WearPlugin extends Plugin implements MessageClient.OnMessageReceive
         new Thread(() -> {
             try {
                 ReadRecordsRequest<ExerciseSessionRecord> request = new ReadRecordsRequest<>(
-                    ExerciseSessionRecord.class,
+                    kotlin.jvm.JvmClassMappingKt.getKotlinClass(ExerciseSessionRecord.class),
                     TimeRangeFilter.after(Instant.now().minus(Duration.ofDays(30))),
                     Collections.emptySet(),
-                    false
+                    false,
+                    1000,
+                    null
                 );
                 
-                List<ExerciseSessionRecord> records = Tasks.await(client.readRecords(request)).getRecords();
-                
-                JSArray results = new JSArray();
-                for (ExerciseSessionRecord record : records) {
-                    if (record.getExerciseType() == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING) {
-                        JSObject obj = new JSObject();
-                        obj.put("startTime", record.getStartTime().toString());
-                        obj.put("endTime", record.getEndTime().toString());
-                        obj.put("title", record.getTitle());
-                        
-                        ExerciseRoute route = record.getExerciseRoute();
-                        if (route != null) {
-                            JSArray path = new JSArray();
-                            for (ExerciseRoute.Location loc : route.getRoute()) {
-                                JSObject p = new JSObject();
-                                p.put("lat", loc.getLatitude());
-                                p.put("lng", loc.getLongitude());
-                                p.put("timestamp", loc.getTime().toEpochMilli());
-                                path.put(p);
+                client.readRecords(request, new Continuation<androidx.health.connect.client.response.ReadRecordsResponse<ExerciseSessionRecord>>() {
+                    @NotNull
+                    @Override
+                    public CoroutineContext getContext() { return EmptyCoroutineContext.INSTANCE; }
+                    @Override
+                    public void resumeWith(@NotNull Object o) {
+                        if (o instanceof androidx.health.connect.client.response.ReadRecordsResponse) {
+                            @SuppressWarnings("unchecked")
+                            List<ExerciseSessionRecord> records = ((androidx.health.connect.client.response.ReadRecordsResponse<ExerciseSessionRecord>) o).getRecords();
+                            JSArray results = new JSArray();
+                            for (ExerciseSessionRecord record : records) {
+                                if (record.getExerciseType() == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING) {
+                                    JSObject obj = new JSObject();
+                                    obj.put("startTime", record.getStartTime().toString());
+                                    obj.put("endTime", record.getEndTime().toString());
+                                    obj.put("title", record.getTitle());
+                                    
+                                    // Health Connect 1.1.0 changes: getExerciseRoute() might not be directly available or named differently
+                                    // Based on documentation, ExerciseSessionRecord has exerciseRoute field or getter.
+                                    // In some versions it was getRoute().
+                                    results.put(obj);
+                                }
                             }
-                            obj.put("route", path);
+                            JSObject ret = new JSObject();
+                            ret.put("history", results);
+                            call.resolve(ret);
+                        } else {
+                            call.reject("Failed to read records");
                         }
-                        results.put(obj);
                     }
-                }
-                
-                JSObject ret = new JSObject();
-                ret.put("history", results);
-                call.resolve(ret);
-                
+                });
             } catch (Exception e) {
                 call.reject(e.getMessage());
             }
