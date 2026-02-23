@@ -2,13 +2,17 @@ plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 rootProject.name = 'android'
+
 include ':app'
 include ':kaybeewear'
 include ':shared'
 
 apply from: 'capacitor.settings.gradle'
 
-// Force all project directories to absolute paths to fix "'other' has different root" on Windows
+// Force all project directories to be absolute and normalized.
+// This fixes the "'other' has different root" error on Windows by ensuring
+// Gradle doesn't fail when relativizing paths across different directory structures
+// (like node_modules being outside the android/ folder).
 rootProject.children.each { project ->
-    project.projectDir = file(project.projectDir.absolutePath)
+    project.projectDir = file(project.projectDir).getCanonicalFile()
 }

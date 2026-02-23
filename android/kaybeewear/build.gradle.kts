@@ -13,8 +13,8 @@ android {
         applicationId = "com.kaybeefitness.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 7
-        versionName = "6.0"
+        versionCode = 9
+        versionName = "7.1"
     }
 
     buildTypes {
